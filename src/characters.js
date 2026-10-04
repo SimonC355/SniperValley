@@ -412,6 +412,11 @@ export class GhillieCharacter {
     this.scene.remove(this.group);
     this.bodyMat.dispose();
     this.stripMat.dispose();
+    // per-character rifle and armband (the skinned suit geometry is shared and cached)
+    for (const o of [this.rifle, this.armband]) {
+      if (!o) continue;
+      o.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); m.material.dispose(); } });
+    }
   }
 }
 const _v = new THREE.Vector3();

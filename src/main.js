@@ -373,7 +373,8 @@ class Game {
       this.hud.showEnd(false);
       this.newRound();
       this.state = 'playing';
-      if (!input.locked && !input.fallback) input.requestLock();
+      // pointer lock needs a click (a user gesture); the canvas click handler re-captures the mouse
+      if (!input.locked && !input.fallback) this.hud.centerMessage('CLICK TO CAPTURE THE MOUSE', '', 3);
     }
     const running = this.state === 'playing' && !this.paused;
     this.simulate(running ? dtReal : 0, running ? input : this.idleInput());

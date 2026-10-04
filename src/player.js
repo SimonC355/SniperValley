@@ -45,7 +45,16 @@ export class Player extends Combatant {
     this.recoil = 0;
     this.fatigue = 0;
     this.breath = CONFIG.weapon.holdBreathTime;
+    this.breathCooldown = 0;
+    this.holdingBreath = false;
     this.boltReadyTime = 0;
+    this.lastShotTime = -100;
+    this.shotsFired = 0;
+    this.hits = 0;
+    this.kills = 0;
+    this.longestHit = 0;
+    this.killedBy = null;
+    this.speed = 0;
   }
 
   get sensitivityScale() { return this.fov / CONFIG.player.fovHip; }
