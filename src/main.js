@@ -23,6 +23,7 @@ import { Hitbox } from './hitbox.js';
 import { TargetDummy } from './dummies.js';
 import { AICombatant, SpotMap, glintToward } from './ai.js';
 import { Birds } from './birds.js';
+import { Zone } from './zone.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
@@ -119,6 +120,14 @@ class Game {
     this.bus.on((ev) => { for (const a of this.ais) a.ai.onEvent(ev); });
     // birds: flushed by shots, nearby impacts, and proximity (see Birds.checkProximity)
     this.birds = new Birds(scene, this.forest, terrain, this.audio, CONFIG.seed);
+    this.zone = new Zone(scene, terrain);
+    this.zone.onPhase = (phase) => {
+      if (this.state !== 'playing') return;
+      if (phase === 'warn') {
+        this.hud.centerMessage('ZONE SHRINKING', `MOVE INSIDE THE MARKED LINE · ${CONFIG.zone.warning} s`, 2.5);
+        for (let i = 0; i < 3; i++) setTimeout(() => this.audio.beep(880, 0.08, 0.1), i * 180);
+      } else if (phase === 'shrink') this.audio.beep(660, 0.25, 0.12);
+    };
     this.birds.onFlush = (f, time, team, id, cause) => {
       this.bus.emit({ type: 'birds', position: f.center.clone().add(new THREE.Vector3(0, 1, 0)), time, sourceTeam: team, sourceId: id, cause, flockId: f.id });
     };
@@ -232,6 +241,9 @@ class Game {
     this.roundOver = false;
     this.deathT = 0;
     this.birds.reset(0);
+    this.zone.reset();
+    this.spectating = null;
+    this.damageFlash = 0;
     // teams: ALPHA = player + AI mates on the north (+Z) slope, BRAVO = AI on the south slope
     for (const a of this.ais) a.dispose();
     this.ais = [];
@@ -336,6 +348,10 @@ class Game {
     const input = this.input;
     if (input.wasPressed('F1')) this.debug = !this.debug;
     if (input.wasPressed('F2') && CONFIG.debug.allowReveal) this.reveal = !this.reveal;
+    if (input.wasPressed('KeyT') && this.state === 'playing') {
+      this.zone.skip(this.time);
+      this.hud.centerMessage('ZONE STEP SKIPPED', this.zone.debugText(), 1.5);
+    }
     if (input.wasPressed('KeyR') && (this.state === 'playing' || this.state === 'ended')) {
       this.hud.showEnd(false);
       this.newRound();
@@ -363,11 +379,31 @@ class Game {
       for (const a of this.ais) a.update(dt, this.time);
       this.combat.update(dt, this.time);
       this.birds.update(dt, this.time, this.combatants, this.camera);
+      this.zone.update(dt, this.time);
+      this.applyZoneDamage(dt);
       this.updateCharacterTints(dt);
       this.checkRoundEnd();
     }
     for (const d of this.dummies) d.update(dt);
     if (!p.alive) this.deathT += dt;
+  }
+
+  applyZoneDamage(dt) {
+    const dps = this.zone.damagePerSecond();
+    for (const c of this.combatants) {
+      if (!c.alive || c.isDummy) continue;
+      if (this.zone.contains(c.pos.x, c.pos.z, 0, false)) continue;
+      c.health -= dps * dt;
+      if (c.isPlayer) this.damageFlash = Math.min(1, this.damageFlash + dt * 2);
+      if (c.health <= 0) {
+        c.health = 0;
+        c.alive = false;
+        c.deathTime = this.time;
+        c.killedBy = null;
+        this.hud.killFeed(`ZONE ✕ <span class="${c.team === 0 ? 'f' : 'e'}">${c.name}</span>`);
+        if (c.isPlayer) this.hud.centerMessage('ELIMINATED BY THE ZONE', '', 3);
+      }
+    }
   }
 
   showRoundEnd() {
@@ -458,8 +494,13 @@ class Game {
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
       inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped && this.player.alive, aimedAt: this.aimedAt,
-      outside: false, holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.player.yaw,
+      outside: p.alive && !this.zone.contains(p.pos.x, p.pos.z), outsideDps: this.zone.damagePerSecond(),
+      holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.camera.rotation.y,
     });
+    this.hud.setZone(this.zone.hudState());
+    this.damageFlash = Math.max(0, this.damageFlash - dtReal * 1.5);
+    this.post.uniforms.uDamage.value = this.damageFlash * 0.6;
+    this.post.uniforms.uOutside.value = p.alive && !this.zone.contains(p.pos.x, p.pos.z) ? 1 : 0;
     if (this.debug) this.hud.setDebug(this.debugText(), true); else this.hud.setDebug('', false);
   }
 
@@ -471,7 +512,29 @@ class Game {
   updateRenderSystems(dt) {
     const cam = this.camera;
     const p = this.player;
-    if (!p.alive) {
+    const mates = this.ais.filter((a) => a.team === p.team && a.alive);
+    if (!p.alive && this.deathT > 2.5 && mates.length && this.state === 'playing') {
+      // spectate a living teammate (third person, behind the shoulder); click to switch
+      if (!this.spectating || !this.spectating.alive) this.spectating = mates[0];
+      if (this.input.wasClicked && this.input.wasClicked(0)) {
+        const i = mates.indexOf(this.spectating);
+        this.spectating = mates[(i + 1) % mates.length];
+      }
+      const m = this.spectating;
+      const d = m.aimDir(new THREE.Vector3());
+      const back = new THREE.Vector3(d.x, 0, d.z).normalize();
+      const e = m.eyePos(new THREE.Vector3());
+      const right = new THREE.Vector3(-back.z, 0, back.x);
+      cam.position.copy(e).addScaledVector(back, -2.6).addScaledVector(right, 0.6).add(new THREE.Vector3(0, 0.7, 0));
+      const gy = this.terrain.heightAt(cam.position.x, cam.position.z) + 0.4;
+      if (cam.position.y < gy) cam.position.y = gy;
+      cam.rotation.set(m.pitch * 0.8 - 0.08, m.yaw, 0, 'YXZ');
+      if (cam.fov !== CONFIG.player.fovHip) { cam.fov = CONFIG.player.fovHip; cam.updateProjectionMatrix(); }
+      this.post.uniforms.uFade.value = 0;
+      this.hud.el.center.innerHTML = `SPECTATING ${m.name}<small>CLICK TO SWITCH · R TO RESTART</small>`;
+      this.hud.el.center.classList.add('on');
+      this.hud.centerTimer = 0.1;
+    } else if (!p.alive) {
       // death cam: sink to the ground and tilt
       const k = Math.min(1, this.deathT / 1.4);
       const e = k * k * (3 - 2 * k);
@@ -526,6 +589,22 @@ class Game {
     if (opts.scope !== undefined) p.scopeT = opts.scope;
     p.frozenScope = opts.scope !== undefined;
     if (opts.eye !== undefined) p.eye = opts.eye;
+  }
+
+  // Test helper: near (x,z), find a spot whose view along yaw/pitch is clear for the longest distance.
+  findOpenView(x, z, yaw, pitch = 0, radius = 25) {
+    let best = null, bestD = -1;
+    const dir = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+    for (let k = 0; k < 120; k++) {
+      const px = x + (Math.random() - 0.5) * radius * 2, pz = z + (Math.random() - 0.5) * radius * 2;
+      if (this.terrain.waterDepthAt(px, pz) > 0 || !this.terrain.inPlayArea(px, pz, 2)) continue;
+      const e = new THREE.Vector3(px, this.terrain.heightAt(px, pz) + 1.62, pz);
+      const hit = this.world.raycast(e, dir, 400, { bushes: true });
+      const d = hit ? hit.t : 400;
+      if (d > bestD) { bestD = d; best = { x: px, z: pz }; }
+    }
+    if (best) this.setView(best.x, best.z, yaw, pitch);
+    return bestD;
   }
 
   debugText() {

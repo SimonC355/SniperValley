@@ -71,7 +71,7 @@ html, body {
 #outside { left: 50%; top: 120px; transform: translateX(-50%); color: var(--danger); font-weight: 700; font-size: 16px; letter-spacing: 0.16em; display: none; }
 @keyframes pulse { from { opacity: 1; } to { opacity: 0.45; } }
 
-#center-msg { left: 50%; top: 32%; transform: translate(-50%, -50%); font-size: 42px; font-weight: 700; letter-spacing: 0.2em; text-align: center; opacity: 0; transition: opacity 0.3s; }
+#center-msg { left: 50%; top: 38%; transform: translate(-50%, -50%); font-size: 42px; font-weight: 700; letter-spacing: 0.2em; text-align: center; opacity: 0; transition: opacity 0.3s; }
 #center-msg small { display: block; font-size: 16px; letter-spacing: 0.14em; color: var(--dim); margin-top: 6px; }
 #center-msg.on { opacity: 1; }
 
