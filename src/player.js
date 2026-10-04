@@ -64,9 +64,10 @@ export class Player extends Combatant {
     if (!this.alive) return;
 
     // ---------------------------------------------------------------- look
-    const sens = P.mouseSensitivity * this.sensitivityScale;
+    const C = CONFIG.controls;
+    const sens = P.mouseSensitivity * C.sensitivity * this.sensitivityScale * lerp(1, C.scopeSensitivity, this.scopeT);
     this.lookYaw -= input.mouseDX * sens;
-    this.lookPitch -= input.mouseDY * sens;
+    this.lookPitch -= input.mouseDY * sens * (C.invertY ? -1 : 1);
     const arrow = P.arrowLookSpeed * this.sensitivityScale * dt;
     if (input.down('ArrowLeft')) this.lookYaw += arrow;
     if (input.down('ArrowRight')) this.lookYaw -= arrow;
@@ -75,12 +76,12 @@ export class Player extends Combatant {
     this.lookPitch = clamp(this.lookPitch, -1.45, 1.45);
 
     // ---------------------------------------------------------------- stance
-    if (input.wasPressed('KeyC') || input.wasPressed('ControlLeft')) this.stance = this.stance === 'crouch' ? 'stand' : 'crouch';
-    if (input.wasPressed('KeyZ')) this.stance = this.stance === 'prone' ? 'crouch' : 'prone';
+    if (input.actPressed('crouch')) this.stance = this.stance === 'crouch' ? 'stand' : 'crouch';
+    if (input.actPressed('prone')) this.stance = this.stance === 'prone' ? 'crouch' : 'prone';
     if (this.inWater > 0.25 && this.stance === 'prone') this.stance = 'crouch';
 
     // ---------------------------------------------------------------- scope
-    const wantScope = input.mouse(2);
+    const wantScope = input.act('scope');
     if (!this.frozenScope) this.scopeT = clamp(this.scopeT + (wantScope ? 1 : -1) * dt / P.zoomTime, 0, 1);
     this.scoped = this.scopeT > 0.55;
     const z = this.scopeT * this.scopeT * (3 - 2 * this.scopeT);
@@ -89,13 +90,13 @@ export class Player extends Combatant {
     // ---------------------------------------------------------------- movement
     let fwd = 0, side = 0;
     if (!this.frozen) {
-      if (input.down('KeyW')) fwd += 1;
-      if (input.down('KeyS')) fwd -= 1;
-      if (input.down('KeyD')) side += 1;
-      if (input.down('KeyA')) side -= 1;
+      if (input.act('forward')) fwd += 1;
+      if (input.act('back')) fwd -= 1;
+      if (input.act('right')) side += 1;
+      if (input.act('left')) side -= 1;
     }
     const moving = fwd !== 0 || side !== 0;
-    const sprintKey = input.down('ShiftLeft') || input.down('ShiftRight');
+    const sprintKey = input.act('sprint');
     const sprinting = sprintKey && moving && fwd > 0 && !this.scoped && this.stance === 'stand' && this.onGround;
     if (sprinting && this.stance !== 'stand') this.stance = 'stand';
     let speed = P.walkSpeed;
@@ -114,10 +115,11 @@ export class Player extends Combatant {
     this.vel.x = lerp(this.vel.x, moving ? wx : 0, k * (moving ? 1 : 1.6));
     this.vel.z = lerp(this.vel.z, moving ? wz : 0, k * (moving ? 1 : 1.6));
 
-    if (this.onGround && input.wasPressed('Space') && this.stance === 'stand' && !this.frozen && this.inWater < 0.4) {
+    const jump = input.actPressed('jump');
+    if (this.onGround && jump && this.stance === 'stand' && !this.frozen && this.inWater < 0.4) {
       this.vel.y = P.jumpVelocity;
       this.onGround = false;
-    } else if (this.onGround && input.wasPressed('Space') && this.stance !== 'stand') {
+    } else if (this.onGround && jump && this.stance !== 'stand') {
       this.stance = 'stand';
     }
     this.vel.y -= P.gravity * dt;

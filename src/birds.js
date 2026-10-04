@@ -79,6 +79,7 @@ export class Birds {
     this.mesh.castShadow = false;
     scene.add(this.mesh);
     this.onFlush = null;
+    this.authority = true;   // false on joined LAN clients (the host decides flushes)
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();
     this._p = new THREE.Vector3();
@@ -153,7 +154,23 @@ export class Birds {
   }
 
   // ---------------------------------------------------------------- triggers
-  flush(f, time, sourceTeam, sourceId, cause) {
+  // Network sync: the host's birds are authoritative; joined clients replay their state.
+  getState() { return this.flocks.map((f) => [f.state, Math.round(f.t0 * 100) / 100, Math.round(f.resettleAt * 100) / 100]); }
+
+  applyState(list, time) {
+    list.forEach(([state, t0, resettleAt], i) => {
+      const f = this.flocks[i];
+      if (!f) return;
+      if (state === STATE.FLYING && f.state !== STATE.FLYING) {
+        this.flush(f, t0, -1, -1, 'remote', true);
+      }
+      f.state = state;
+      f.t0 = t0;
+      f.resettleAt = resettleAt;
+    });
+  }
+
+  flush(f, time, sourceTeam, sourceId, cause, silentEvent = false) {
     if (f.state !== STATE.PERCHED) return;
     f.state = STATE.FLYING;
     f.t0 = time;
@@ -163,10 +180,11 @@ export class Birds {
     const n = Math.min(16, f.birds.length + 4);
     for (let i = 0; i < n; i++) f.caws.push({ at: time + (i < 4 ? this.rng.float(0, 1.2) : this.rng.float(1, CONFIG.birds.circleTime + 3)), bird: i % f.birds.length, pitch: this.rng.float(0.88, 1.12) });
     if (this.audio) this.audio.flutter(f.birds[0].perch);
-    if (this.onFlush) this.onFlush(f, time, sourceTeam, sourceId, cause);
+    if (this.onFlush && !silentEvent) this.onFlush(f, time, sourceTeam, sourceId, cause);
   }
 
   onShot(pos, time, team, id) {
+    if (!this.authority) return;
     for (const f of this.flocks) {
       _v.set(f.center.x, (f.center.y + f.top) / 2, f.center.z);
       if (_v.distanceTo(pos) < CONFIG.birds.shotFlushRadius) this.flush(f, time, team, id, 'shot');
@@ -174,6 +192,7 @@ export class Birds {
   }
 
   onImpact(pos, time, team, id) {
+    if (!this.authority) return;
     for (const f of this.flocks) {
       for (const b of f.birds) {
         if (b.perch.distanceTo(pos) < CONFIG.birds.impactFlushRadius || Math.hypot(f.center.x - pos.x, f.center.z - pos.z) < CONFIG.birds.impactFlushRadius) {
@@ -235,7 +254,7 @@ export class Birds {
 
   update(dt, time, combatants, camera) {
     this.checkT -= dt;
-    if (this.checkT <= 0) { this.checkT = 0.1; this.checkProximity(time, combatants); }
+    if (this.checkT <= 0) { this.checkT = 0.1; if (this.authority) this.checkProximity(time, combatants); }
     let i = 0;
     const F = this.flap.array;
     for (const f of this.flocks) {

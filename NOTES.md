@@ -252,6 +252,107 @@ photoscans from Poly Haven into `public/assets/` there.
     MSAA, grass density.
   - `?quality=low` applies a low preset in one go.
 
+## Match format, killcam and settings
+
+- **Match**: best of 3 by default (`match.roundsToWin`, set in the MATCH tab or with
+  `?rounds=`).
+  - Teams swap slopes every round (`match.swapSides`) because the low sun makes the sides
+    unequal: one slope looks into the sun and light shafts.
+  - There are 6 s between rounds. A round where both teams die at once is a draw and gives no
+    point.
+  - The end screen shows match totals (rounds survived, shots, hits, eliminations, longest hit).
+- **Killcam** (5 s, `round.killcamTime`): it looks from your eye toward the shooter. If the eye
+  has no line of sight, it looks from where the bullet hit. It zooms until the shooter fills
+  about 8 m of view.
+  - For AI shooters it states the cue that led them to you. The AI records this when it
+    acquires a target:
+    - the investigated event (flash, shot, birds, splash, footsteps, glint), and whether you
+      caused it or someone near you did;
+    - or "spotted while scanning" / "you moved in their view".
+  - It also lists your own recent giveaways from the event log: your shot, birds you flushed,
+    splashing, sprinting, and a scope glint aimed at the shooter. The glint comes from aim
+    samples taken 4 times per second over the last 15 s.
+  - After the killcam you spectate a teammate (human or AI).
+- **Settings** are saved per browser:
+  - controls: sensitivity, scope sensitivity, FOV, invert Y, key bindings;
+  - audio: master, effects and ambience volume, and the echo.
+  - Every action can be rebound. A key bound to a new action is removed from its old one, which
+    shows "-" until you bind it again.
+- **Spawns**: the spawn bias toward high-scoring sniper spots now has more randomness. Before,
+  rounds kept reusing the same spots.
+
+## Sound
+
+- Footsteps depend on the surface (`surfaceAt`):
+  - grass is a low thud plus a swish;
+  - forest floor is a thud plus a burst of needle and twig clicks, with an occasional twig
+    snap;
+  - rock and gravel is a higher, grainier crunch;
+  - mud by the river is a wet squelch.
+- Shots gained a low rumble tail (the report rolling through the valley) and a very short
+  muzzle slap for your own shot.
+- Volumes are separate buses: effects, ambience (wind, river) and the echo send, all into the
+  compressor and the master volume.
+- Recorded samples can replace any sound through `public/assets/sounds/sounds.json` (see the
+  README). Nothing is bundled: the CC0 sound sources were not reachable from this environment,
+  and I can't listen here, so **the new synthesis is untested by ear**.
+
+## Performance tools
+
+- `?bench` runs five fixed scenes (vista, scoped, toward the sun, walking in the forest, river)
+  for 6 s each with the simulation paused. It reports average FPS, 1% lows, frame time, the GPU
+  name (`WEBGL_debug_renderer_info`), resolution and settings.
+- **Auto resolution**:
+  - It drops the render scale by 10% (down to 60%) when the smoothed frame time goes above
+    19.5 ms.
+  - With vsync, the frame time can't show spare headroom, so after 8–12 s it tries a 5% step
+    back up and drops again if that was too much.
+- Real-GPU numbers are still unmeasured. Running the benchmark on the target PC is the next
+  step.
+
+## LAN multiplayer
+
+- **Topology**: `npm run host` serves the built game and a WebSocket relay
+  (`server/relay.mjs`) on one port. The relay only keeps the lobby (names, chosen teams, who
+  hosts) and forwards messages. All game logic runs in the **hosting browser**.
+- **The host decides**:
+  - the round roster (players plus AI fill, spawn points);
+  - the AI, the zone timeline, the birds;
+  - kills, round and match results.
+  - It sends a 20 Hz snapshot of every combatant (position, yaw/pitch, stance, scope, speed,
+    alive, health, the AI's aim target). Zone state is sent every second, bird state whenever
+    it changes.
+- **Each player decides**:
+  - their own movement (sent at 20 Hz);
+  - their own hits: the shooter's browser traces the shot against what it sees and *claims*
+    the hit, and the host confirms it to everyone. This is "favour the shooter", fine on a
+    LAN.
+  - their own zone damage (reported when it kills them).
+  - **There is no cheat protection: this is for friends.**
+- **Shots** are replayed visually everywhere (muzzle flash, distance-delayed sound, tracer,
+  impacts, near-miss crack). On the host, a replayed shot also emits the shot and flash reveal
+  events, so the AI reacts to human players exactly as it does in single player.
+  - The host turns remote players' movement into footstep and splash events for the AI.
+  - Glints are drawn from each player's synced aim and scope.
+- **Time**: clients follow the host's game clock (snapped when it is more than 0.5 s off,
+  otherwise eased), so the freeze time, zone timer and bird flights line up.
+- **Teams**: chosen in the lobby, or auto-balanced, and fixed for the match. With AI fill on,
+  each team has `max(team size, humans on the bigger team)` slots.
+- **Not handled**:
+  - no host migration (if the host leaves, everyone returns to the menu);
+  - no reconnect;
+  - no lag compensation (LAN latency is a few ms);
+  - no voice chat.
+  - Pausing doesn't stop a LAN match.
+- **Tested** with the real `npm run host` server and two headless browsers:
+  - lobby, start and identical rosters, movement sync;
+  - a player killing the host, with the killcam and kill feed on both;
+  - the host's AI killing the remote player, with the AI reason in the killcam;
+  - zone death of a remote player;
+  - round end, side swap and next round;
+  - match restart, and glints and the aimed-at warning between players.
+  - **Not tested** with real people on separate PCs.
+
 ## Known limitations and ideas
 
 - LOD transitions are hard switches; dithered cross-fades would hide popping.
@@ -264,3 +365,5 @@ photoscans from Poly Haven into `public/assets/` there.
 - Light shafts are screen-space, so they need the sun on screen or near it.
 - The light shafts don't affect the AI. Looking into the sun is harder only for the player.
 - No points or ranking (out of scope).
+- LAN only. Online play would need a public relay or WebRTC with NAT traversal, plus server-side
+  hit validation.

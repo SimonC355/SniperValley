@@ -35,6 +35,7 @@ export const CONFIG = {
     msaa: 4,               // 0 or 4
     reflections: true,
     sunShafts: true,       // screen-space light shafts when looking toward the sun
+    autoResolution: true,  // lower the resolution (down to 60%) when frames take longer than ~17 ms
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
     grain: 0.035,
@@ -200,8 +201,21 @@ export const CONFIG = {
     names: ['ALPHA', 'BRAVO'],
     colors: [0x5fb3ff, 0xff7a4d],
   },
+  // LAN multiplayer (npm run host).
+  lan: {
+    fillWithAI: true,      // fill empty team slots (up to teams.size) with AI snipers
+  },
+
+  // A match is a series of rounds; teams swap slopes (and sun side) between rounds.
+  match: {
+    roundsToWin: 2,        // 1 = single round, 2 = best of 3, 3 = best of 5
+    swapSides: true,
+    nextRoundDelay: 6,     // seconds between rounds
+  },
+
   round: {
     freezeTime: 3,
+    killcamTime: 5,        // seconds the killcam shows your killer before spectating
   },
 
   // ---------------------------------------------------------------- characters
@@ -243,7 +257,17 @@ export const CONFIG = {
 
   audio: {
     master: 0.8,
+    effects: 1.0,          // gunshots, impacts, footsteps, birds
+    ambience: 1.0,         // wind and river
     echo: true,
+  },
+
+  // Player controls (saved per browser from the settings menu).
+  controls: {
+    sensitivity: 1.0,      // multiplier on player.mouseSensitivity
+    scopeSensitivity: 1.0, // extra multiplier while scoped (on top of the FOV scaling)
+    invertY: false,
+    binds: null,           // filled from DEFAULT_BINDS below
   },
 
   debug: {
@@ -252,14 +276,40 @@ export const CONFIG = {
   },
 };
 
+// Rebindable actions -> key codes (KeyboardEvent.code, or Mouse0/Mouse1/Mouse2).
+export const DEFAULT_BINDS = {
+  forward: ['KeyW'], back: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
+  sprint: ['ShiftLeft', 'ShiftRight'], jump: ['Space'], crouch: ['KeyC', 'ControlLeft'], prone: ['KeyZ'],
+  scope: ['Mouse2'], fire: ['Mouse0'], scores: ['Tab'], restart: ['KeyR'],
+};
+CONFIG.controls.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
+
 // Persisted per-browser render settings override the defaults (see settings menu).
 try {
   const saved = JSON.parse(localStorage.getItem('sniperyard.render') || 'null');
   if (saved && typeof saved === 'object') Object.assign(CONFIG.render, saved);
 } catch (e) { /* storage unavailable */ }
 
+// Persisted controls, field of view and volumes.
+try {
+  const saved = JSON.parse(localStorage.getItem('sniperyard.controls') || 'null');
+  if (saved && typeof saved === 'object') {
+    for (const k of ['sensitivity', 'scopeSensitivity', 'invertY']) if (k in saved) CONFIG.controls[k] = saved[k];
+    if (saved.binds) for (const a in DEFAULT_BINDS) if (Array.isArray(saved.binds[a]) && saved.binds[a].length) CONFIG.controls.binds[a] = saved.binds[a];
+    if (saved.fov) CONFIG.player.fovHip = saved.fov;
+    for (const k of ['master', 'effects', 'ambience']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
+  }
+} catch (e) { /* storage unavailable */ }
+
 export function saveRenderSettings() {
   try { localStorage.setItem('sniperyard.render', JSON.stringify(CONFIG.render)); } catch (e) { /* ignore */ }
+  try {
+    const C = CONFIG.controls;
+    localStorage.setItem('sniperyard.controls', JSON.stringify({
+      sensitivity: C.sensitivity, scopeSensitivity: C.scopeSensitivity, invertY: C.invertY, binds: C.binds,
+      fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience },
+    }));
+  } catch (e) { /* ignore */ }
 }
 
 // URL overrides for quick testing, e.g. ?mode=radial&team=3&ballistics=1
@@ -272,5 +322,7 @@ try {
   if (q.get('camo')) CONFIG.camouflageStrength = parseFloat(q.get('camo'));
   if (q.get('photo')) CONFIG.assets.photo = q.get('photo') !== '0';
   if (q.get('shafts')) CONFIG.render.sunShafts = q.get('shafts') !== '0';
+  if (q.get('autores')) CONFIG.render.autoResolution = q.get('autores') !== '0';
+  if (q.get('rounds')) CONFIG.match.roundsToWin = Math.max(1, parseInt(q.get('rounds'), 10) || 2);
   if (q.get('quality') === 'low') Object.assign(CONFIG.render, { renderScale: 0.7, shadowQuality: 'low', ao: false, msaa: 0, reflections: false, grassDensity: 0.5 });
 } catch (e) { /* ignore */ }

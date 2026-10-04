@@ -144,6 +144,20 @@ export class Zone {
   }
 
   // Debug (T): finish the current step now and start the next warning.
+  // Network sync (the host's zone is authoritative).
+  getState() {
+    return [this.stepIndex, this.phase, Math.round(this.phaseStart * 1000) / 1000, this.phaseLen === Infinity ? -1 : this.phaseLen,
+      this.current, this.target, this.shrinkFrom];
+  }
+
+  setState(s) {
+    const phaseChanged = s[1] !== this.phase;
+    [this.stepIndex, this.phase, this.phaseStart] = s;
+    this.phaseLen = s[3] < 0 ? Infinity : s[3];
+    this.current = s[4]; this.target = s[5]; this.shrinkFrom = s[6];
+    if (phaseChanged && this.onPhase) this.onPhase(this.phase);
+  }
+
   skip(time) {
     if (this.phase === 'final') return;
     this.current = this.target;

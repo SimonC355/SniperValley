@@ -15,9 +15,12 @@ export class Combat {
     this.bus = bus;
     this.combatants = [];
     this.projectiles = [];
-    this.onKill = null;       // (shooter, victim, distance, part)
+    this.onKill = null;       // (shooter, victim, distance, part, hitPoint)
     this.onShot = null;       // (shooter)
     this.listener = null;     // the player combatant (for near-miss cracks)
+    this.onFired = null;      // (shooter, origin, dir, time) for shots simulated here (LAN sync)
+    this.onClaim = null;      // (shooter, victim, part, point, dist) when claimHits is on
+    this.claimHits = false;   // joined LAN client: hits are claims the host confirms
   }
 
   setCombatants(list) { this.combatants = list; }
@@ -25,14 +28,17 @@ export class Combat {
   canFire(shooter, time) { return shooter.alive && time >= shooter.boltReadyTime; }
 
   // dir must be normalised. Returns true if a shot was fired.
-  fire(shooter, dir, time) {
-    if (!this.canFire(shooter, time)) return false;
+  // opts.visual: replay of a shot simulated elsewhere (LAN): effects, sound and reveal events,
+  // but no hits; opts.origin: the shooter's exact eye position.
+  fire(shooter, dir, time, opts = {}) {
+    const visual = !!opts.visual;
+    if (!visual && !this.canFire(shooter, time)) return false;
     const W = CONFIG.weapon;
     shooter.boltReadyTime = time + W.boltTime;
     shooter.lastShotTime = time;
-    shooter.shotsFired++;
-    const origin = shooter.eyePos(new THREE.Vector3());
-    const muzzle = shooter.muzzlePos(new THREE.Vector3());
+    if (!visual) shooter.shotsFired++;
+    const origin = opts.origin ? opts.origin.clone() : shooter.eyePos(new THREE.Vector3());
+    const muzzle = opts.origin ? origin.clone().addScaledVector(dir, 1.05).add(_v.set(0, -0.06, 0)) : shooter.muzzlePos(new THREE.Vector3());
     // reveal: muzzle flash (visual) + shot (sound)
     if (!shooter.isPlayer) this.effects.muzzleFlash(muzzle);
     else { this.effects.light.position.copy(muzzle); this.effects.light.intensity = 250; this.effects.lightT = 0.06; }
@@ -41,13 +47,14 @@ export class Combat {
     this.bus.emit({ type: 'flash', ...base });
     this.bus.emit({ type: 'shot', ...base, loudness: 1 });
     if (this.onShot) this.onShot(shooter);
+    if (!visual && this.onFired) this.onFired(shooter, origin, dir, time);
     if (W.ballistics.enabled) {
       this.projectiles.push({
         shooter, pos: origin.clone(), vel: dir.clone().multiplyScalar(W.ballistics.muzzleVelocity),
-        start: muzzle.clone(), origin: origin.clone(), age: 0, travelled: 0, nearMissDone: false,
+        start: muzzle.clone(), origin: origin.clone(), age: 0, travelled: 0, nearMissDone: false, visual,
       });
     } else {
-      this._trace(shooter, origin, dir, W.range, muzzle, time, 0, {});
+      this._trace(shooter, origin, dir, W.range, muzzle, time, 0, { visual });
     }
     return true;
   }
@@ -89,7 +96,11 @@ export class Combat {
     }
     if (tracerFrom) this.effects.tracer(tracerFrom, end);
     if (best) {
-      this._hit(shooter, best.c, best.part, end, travelledBefore + best.t, time);
+      // a replayed shot stops at the body; the host's kill message does the rest
+      if (ctx.visual) return true;
+      // joined LAN client: report the hit, the host confirms the kill
+      if (this.claimHits && this.onClaim) this.onClaim(shooter, best.c, best.part, end, travelledBefore + best.t);
+      else this._hit(shooter, best.c, best.part, end, travelledBefore + best.t, time);
       return true;
     }
     if (kind) {
@@ -113,7 +124,7 @@ export class Combat {
     if (!victim.isPlayer) this.effects.impact(point, 'body');
     this.audio.impact(point, 'ground');
     this.bus.emit({ type: 'impact', position: point.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id, kind: 'body' });
-    if (this.onKill) this.onKill(shooter, victim, dist, part);
+    if (this.onKill) this.onKill(shooter, victim, dist, part, point);
   }
 
   update(dt, time) {

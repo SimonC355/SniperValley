@@ -24,6 +24,22 @@ import { Viewmodel } from './viewmodel.js';
 import { Hitbox } from './hitbox.js';
 import { TargetDummy } from './dummies.js';
 import { AICombatant, SpotMap, glintToward } from './ai.js';
+import { yawPitchTo } from './entity.js';
+import { Benchmark } from './bench.js';
+import { RemoteCombatant } from './remote.js';
+import { NetSession, LanGame } from './net.js';
+
+// Killcam wording for how an AI found its victim (cue from AIBrain.reasons).
+const REVEAL_TEXT = {
+  flash: ['YOUR MUZZLE FLASH', 'A MUZZLE FLASH NEAR YOU'],
+  shot: ['THE SOUND OF YOUR SHOT', 'A SHOT FIRED NEAR YOU'],
+  birds: ['BIRDS YOU FLUSHED', 'BIRDS FLUSHED NEAR YOU'],
+  splash: ['YOUR SPLASHING', 'SPLASHING NEAR YOU'],
+  footstep: ['YOUR FOOTSTEPS', 'FOOTSTEPS NEAR YOU'],
+  glint: ['YOUR SCOPE GLINT', 'A SCOPE GLINT NEAR YOU'],
+  movement: ['YOU MOVED IN THEIR VIEW', 'YOU MOVED IN THEIR VIEW'],
+  visual: ['THEY SPOTTED YOU WHILE SCANNING', 'THEY SPOTTED YOU WHILE SCANNING'],
+};
 import { Birds } from './birds.js';
 import { Zone } from './zone.js';
 
@@ -111,19 +127,29 @@ class Game {
     this.audio = new AudioSystem();
     this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
     this.combat.listener = this.player;
-    this.combat.onKill = (shooter, victim, dist, part) => this.onKill(shooter, victim, dist, part);
+    this.combat.onKill = (shooter, victim, dist, part, point) => {
+      this.onKill(shooter, victim, dist, part, point);
+      if (this.net && this.net.isHost) this.net.broadcastKill(shooter, victim, dist, part, point);
+    };
+    // LAN: shots simulated here are replayed by the others; joined clients claim their hits
+    this.combat.onFired = (shooter, origin, dir, time) => {
+      if (this.net && (shooter === this.player || this.net.isHost)) this.net.sendFire(shooter, origin, dir, time);
+    };
+    this.combat.onClaim = (shooter, victim, part, point, dist) => { if (this.net) this.net.sendClaim(shooter, victim, part, point, dist); };
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
     this.player.onFootstep = (pos, loud) => {
-      this.audio.footstep(pos, loud, this.terrain.canopyAt(pos.x, pos.z) > 0.5 ? 'forest' : 'grass', true);
-      this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: 0, sourceId: this.player.id, loudness: loud });
+      this.audio.footstep(pos, loud, this.surfaceAt(pos.x, pos.z), true);
+      this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: this.player.team, sourceId: this.player.id, loudness: loud });
     };
     this.player.onSplash = (pos, loud) => {
       this.audio.splash(pos, loud, true);
       this.effects.impact(pos.clone().add(new THREE.Vector3(0, 0.05, 0)), 'water');
-      this.bus.emit({ type: 'splash', position: pos.clone(), time: this.time, sourceTeam: 0, sourceId: this.player.id, loudness: loud });
+      this.bus.emit({ type: 'splash', position: pos.clone(), time: this.time, sourceTeam: this.player.team, sourceId: this.player.id, loudness: loud });
     };
     this.dummies = [];
     this.ais = [];
+    this.remotes = [];
+    this.net = null;
     this.combatants = [this.player];
     this.bus.on((ev) => { for (const a of this.ais) a.ai.onEvent(ev); });
     // birds: flushed by shots, nearby impacts, and proximity (see Birds.checkProximity)
@@ -144,19 +170,25 @@ class Game {
       else if (ev.type === 'impact') this.birds.onImpact(ev.position, ev.time, ev.sourceTeam, ev.sourceId);
     });
     this.params = new URLSearchParams(location.search);
+    this.noRender = this.params.has('norender');   // test hook: run the game loop without drawing
 
-    this.hud.bindSettings((kind) => this.onSettingsChanged(kind));
+    this.hud.bindSettings((kind) => this.onSettingsChanged(kind), this.input);
     this.bindUI();
+    this.setupLan();
     window.addEventListener('resize', () => this.resize());
     this.resize();
 
-    this.newRound();
+    this.newMatch();
     this.state = 'menu';
     this.hud.setLoading('WARMING UP SHADERS');
     await nextFrame();
     renderer.compile(scene, camera);
     this.hud.setLoading(null);
-    if (new URLSearchParams(location.search).has('autostart')) {
+    if (this.params.has('bench')) {
+      this.state = 'playing';
+      this.hud.showStart(false);
+      this.bench = new Benchmark(this);
+    } else if (this.params.has('autostart')) {
       this.state = 'playing';
       this.input.fallback = true;
     } else {
@@ -171,8 +203,38 @@ class Game {
     console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
   }
 
+  // Ground type under a point, for footstep sounds.
+  surfaceAt(x, z) {
+    const T = this.terrain;
+    if (T.heightAt(x, z) < 1.2) return 'mud';
+    if (1 - T.normalAt(x, z).y > 0.26) return 'rock';
+    return T.canopyAt(x, z) > 0.5 ? 'forest' : 'grass';
+  }
+
   pixelRatio() {
-    return Math.min(window.devicePixelRatio || 1, CONFIG.render.maxPixelRatio) * CONFIG.render.renderScale;
+    return Math.min(window.devicePixelRatio || 1, CONFIG.render.maxPixelRatio) * CONFIG.render.renderScale * (this.dynScale || 1);
+  }
+
+  // Auto resolution: drop the render scale when frames are slow, probe upward when they are
+  // fast again (with vsync the frame time can't show headroom, so it tries a step up now and then).
+  updateAutoResolution(rawDt) {
+    if (!CONFIG.render.autoResolution || this.state !== 'playing' || this.paused || this.bench) { this.arT = 0; return; }
+    this.arEma = this.arEma ? this.arEma * 0.94 + rawDt * 0.06 : rawDt;
+    this.arT = (this.arT || 0) + rawDt;
+    if (this.arT < 1.5) return;
+    const ms = this.arEma * 1000;
+    let sc = this.dynScale || 1;
+    if (ms > 19.5) { sc = Math.max(0.6, sc - 0.1); this.arProbe = 12; }
+    else if (ms < 17.8 && sc < 1) {
+      this.arProbe = (this.arProbe ?? 8) - this.arT;
+      if (this.arProbe <= 0) { sc = Math.min(1, sc + 0.05); this.arProbe = 8; }
+    }
+    this.arT = 0;
+    if (Math.abs(sc - (this.dynScale || 1)) > 1e-3) {
+      this.dynScale = sc;
+      this.resize();
+    }
+    this.hud.fpsExtra = sc < 1 ? ` · ${Math.round(sc * 100)}% RES` : '';
   }
 
   resize() {
@@ -192,12 +254,14 @@ class Game {
     if (['scale', 'refl'].includes(kind)) this.resize();
     if (kind === 'shadow') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
     if (['msaa', 'grass'].includes(kind)) this.hud.centerMessage('RELOAD TO APPLY', '', 2);
+    if (['vmaster', 'vfx', 'vamb', 'echo'].includes(kind)) this.audio.setVolumes();
+    if (kind === 'autores' && !CONFIG.render.autoResolution) { this.dynScale = 1; this.resize(); }
   }
 
   bindUI() {
     const start = (fresh) => {
       this.audio.init();
-      if (fresh) { this.newRound(); this.state = 'playing'; }
+      if (fresh) { this.newMatch(); this.state = 'playing'; }
       this.hud.showStart(false);
       this.hud.showPause(false);
       this.hud.showEnd(false);
@@ -226,73 +290,269 @@ class Game {
     });
   }
 
-  findSpawn(team, index) {
-    const T = this.terrain;
-    const side = team === 0 ? 1 : -1;
-    const baseX = -60 + index * 32 + (team === 0 ? 0 : 20);
-    for (let k = 0; k < 200; k++) {
-      const x = baseX + (Math.random() - 0.5) * 30;
-      const z = T.riverCenter(x) + side * (95 + Math.random() * 50);
-      if (T.waterDepthAt(x, z) > 0) continue;
-      const near = this.world.query(x, z, 2.5, ['tree', 'rock', 'log', 'stump']);
-      if (near.length) continue;
-      return { x, z };
-    }
-    return { x: baseX, z: side * 120 };
+  // ---------------------------------------------------------------- match flow
+  // Sides: 0 = north slope (+Z), 1 = south slope (-Z). Teams swap every other round.
+  sideOf(team) { return (team + (CONFIG.match.swapSides && this.match && this.match.round % 2 === 1 ? 1 : 0)) % 2; }
+  sideSign(team) { return this.sideOf(team) === 0 ? 1 : -1; }
+
+  newMatch() {
+    this.match = { round: 0, score: [0, 0], over: false, stats: { shots: 0, hits: 0, kills: 0, longest: 0, survived: 0 } };
+    this.newRound();
   }
 
+  // Start a round. Single player and the LAN host build the roster here; joined LAN
+  // clients get the host's roster through applyRound().
   newRound() {
+    if (this.net && !this.net.isHost) return;
+    if (this.net) {
+      this.applyRound(this.net.hostRound(), 0);
+      return;
+    }
+    const n = CONFIG.teams.size;
+    const me = this.player.team;
+    const roster = [];
+    let id = 1;
+    for (const t of [me, 1 - me]) {
+      const spawns = this.teamSpawns(t, n);
+      const yaw = this.sideOf(t) === 0 ? 0 : Math.PI;
+      for (let i = 0; i < n; i++) {
+        const local = t === me && i === 0;
+        roster.push({ id: id++, kind: local ? 'h' : 'a', peer: local ? 'local' : undefined, name: local ? 'YOU' : `${CONFIG.teams.names[t]}-${i + 1}`, team: t, x: spawns[i].x, z: spawns[i].z, yaw });
+      }
+    }
+    this.applyRound({ round: this.match.round, score: this.match.score.slice(), roster }, 0);
+  }
+
+  // Create everyone for a round from a roster: our player, AI (single player / host) and
+  // remote combatants (other LAN players, and the host's AI on joined clients).
+  applyRound(msg, roundId) {
+    const net = this.net;
+    const authority = !net || net.isHost;
+    if (msg.settings && !authority) {
+      const st = msg.settings;
+      CONFIG.zone.mode = st.zone; CONFIG.camouflageStrength = st.camo; CONFIG.weapon.ballistics.enabled = st.ball;
+      CONFIG.weapon.tracers = st.tracers; CONFIG.match.roundsToWin = st.rounds; CONFIG.match.swapSides = st.swap; CONFIG.teams.size = st.size;
+    }
+    this.roundId = roundId;
+    this.diedReported = false;
+    if (msg.round === 0) this.match = { round: 0, score: [0, 0], over: false, stats: { shots: 0, hits: 0, kills: 0, longest: 0, survived: 0 } };
+    this.match.round = msg.round;
+    this.match.score = msg.score.slice();
     this.time = 0;
     this.bus.clear();
     this.combat.projectiles.length = 0;
     this.hud.clearKillFeed();
     this.hud.showEnd(false);
     this.roundOver = false;
+    this.roundFinished = false;
+    this.nextRoundAt = null;
     this.deathT = 0;
+    this.killcam = null;
+    this.aimHistory = [];
     this.birds.reset(0);
     this.zone.reset();
     this.spectating = null;
     this.damageFlash = 0;
-    // teams: ALPHA = player + AI mates on the north (+Z) slope, BRAVO = AI on the south slope
     for (const a of this.ais) a.dispose();
+    for (const r of this.remotes || []) r.dispose();
     this.ais = [];
-    const n = CONFIG.teams.size;
-    const spawnsA = this.teamSpawns(0, n), spawnsB = this.teamSpawns(1, n);
-    this.player.spawn(spawnsA[0].x, spawnsA[0].z, 0);
-    this.player.pos.y = this.terrain.heightAt(spawnsA[0].x, spawnsA[0].z);
+    this.remotes = [];
+    const myPeer = net ? net.myPeer : 'local';
+    const mine = msg.roster.find((e) => e.kind === 'h' && e.peer === myPeer) || msg.roster[0];
+    const p = this.player;
+    p.id = mine.id; p.team = mine.team; p.name = mine.name; p.peer = myPeer;
+    p.spawn(mine.x, mine.z, mine.yaw);
+    p.pos.y = this.terrain.heightAt(mine.x, mine.z);
     let idx = 0;
-    for (let i = 1; i < n; i++) {
-      const a = new AICombatant(this, { name: `${CONFIG.teams.names[0]}-${i + 1}`, team: 0, index: idx++, armband: true });
-      a.spawn(spawnsA[i].x, spawnsA[i].z, 0);
-      this.ais.push(a);
-    }
-    for (let i = 0; i < n; i++) {
-      const a = new AICombatant(this, { name: `${CONFIG.teams.names[1]}-${i + 1}`, team: 1, index: idx++, armband: false });
-      a.spawn(spawnsB[i].x, spawnsB[i].z, Math.PI);
-      this.ais.push(a);
+    for (const e of msg.roster) {
+      if (e === mine) continue;
+      let c;
+      if (e.kind === 'a' && authority) {
+        c = new AICombatant(this, { name: e.name, team: e.team, index: idx++, armband: e.team === p.team });
+        this.ais.push(c);
+      } else {
+        c = new RemoteCombatant(this, { id: e.id, name: e.name, team: e.team, human: e.kind === 'h', index: idx++, armband: e.team === p.team });
+        this.remotes.push(c);
+      }
+      c.id = e.id;
+      c.peer = e.peer;
+      c.spawn(e.x, e.z, e.yaw);
     }
     this.spawnDummies();
-    this.combatants = [this.player, ...this.ais, ...this.dummies];
+    this.humans = [p, ...this.remotes.filter((r) => r.human)];
+    this.combatants = [p, ...this.ais, ...this.remotes, ...this.dummies];
     this.combat.setCombatants(this.combatants);
     this.envTintT = 0;
-    if (CONFIG.round.freezeTime > 0) this.hud.centerMessage('ROUND START', `${this.combatants.filter((c) => c.team === 0).length}v${n} · ${CONFIG.zone.mode.toUpperCase()} ZONE`, CONFIG.round.freezeTime);
+    if (net && !net.isHost && this.state !== 'playing') this.enterNetGame();
+    this.announceRound();
+  }
+
+  announceRound() {
+    const M = this.match, me = this.player.team;
+    const names = CONFIG.teams.names;
+    const slope = this.sideOf(me) === 0 ? 'NORTH' : 'SOUTH';
+    const score = CONFIG.match.roundsToWin > 1 ? ` · ${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]}` : '';
+    const n = CONFIG.teams.size;
+    this.hud.centerMessage(CONFIG.match.roundsToWin > 1 ? `ROUND ${M.round + 1}` : 'ROUND START',
+      `${n}v${n} · YOU HOLD THE ${slope} SLOPE${score}`, Math.max(2.5, CONFIG.round.freezeTime));
+  }
+
+  // Called once when a round's result is final (a short delay after the last elimination).
+  finishRound() {
+    if (this.roundFinished) return;
+    this.roundFinished = true;
+    const M = this.match, me = this.player.team, names = CONFIG.teams.names;
+    const a = this.aliveCount(0), b = this.aliveCount(1);
+    const winner = a > 0 && b === 0 ? 0 : b > 0 && a === 0 ? 1 : -1;
+    if (winner >= 0) M.score[winner]++;
+    const p = this.player;
+    M.stats.shots += p.shotsFired; M.stats.hits += p.hits; M.stats.kills += p.kills;
+    M.stats.longest = Math.max(M.stats.longest, p.longestHit);
+    if (p.alive) M.stats.survived++;
+    this.lastWinner = winner;
+    if (winner >= 0 && M.score[winner] >= CONFIG.match.roundsToWin) {
+      M.over = true;
+      if (this.net && this.net.isHost) this.net.broadcastRoundEnd(winner);
+      this.showMatchEnd(winner);
+      return;
+    }
+    this.nextRoundAt = this.time + CONFIG.match.nextRoundDelay;
+    this.intermissionTitle = winner < 0 ? 'ROUND DRAW' : winner === me ? 'ROUND WON' : 'ROUND LOST';
+    if (this.net && this.net.isHost) this.net.broadcastRoundEnd(winner);
+  }
+
+  // Joined client: the host ended the round (or the match).
+  applyRoundEnd(m) {
+    const M = this.match, me = this.player.team, p = this.player;
+    if (this.roundFinished) return;
+    this.roundFinished = true;
+    this.roundOver = true;
+    M.score = m.score.slice();
+    M.stats.shots += p.shotsFired; M.stats.hits += p.hits; M.stats.kills += p.kills;
+    M.stats.longest = Math.max(M.stats.longest, p.longestHit);
+    if (p.alive) M.stats.survived++;
+    if (m.over) {
+      M.over = true;
+      this.showMatchEnd(m.winner);
+      return;
+    }
+    this.nextRoundAt = m.next;
+    this.intermissionTitle = m.winner < 0 ? 'ROUND DRAW' : m.winner === me ? 'ROUND WON' : 'ROUND LOST';
+  }
+
+  updateIntermission() {
+    if (this.nextRoundAt === null || this.nextRoundAt === undefined) return;
+    const M = this.match, me = this.player.team, names = CONFIG.teams.names;
+    const left = Math.max(0, Math.ceil(this.nextRoundAt - this.time));
+    const swap = CONFIG.match.swapSides ? ' · SIDES SWAP' : '';
+    this.hud.centerMessage(this.intermissionTitle, `${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]} · NEXT ROUND IN ${left}${swap}`, 0.3);
+    if (this.time >= this.nextRoundAt && (!this.net || this.net.isHost)) {
+      M.round++;
+      this.newRound();
+    }
+  }
+
+  // ---------------------------------------------------------------- LAN
+  setupLan() {
+    const $ = (id) => document.getElementById(id);
+    const S = new NetSession();
+    this.lanSession = S;
+    try { $('lan-name').value = localStorage.getItem('sniperyard.name') || ''; } catch { /* ignore */ }
+    try {
+      const note = sessionStorage.getItem('sniperyard.note');
+      if (note) { this.lanNote = note; sessionStorage.removeItem('sniperyard.note'); }
+    } catch { /* ignore */ }
+    S.onAvailable = (ok) => { $('lanbox').style.display = ok ? 'block' : 'none'; this.renderLobby(); };
+    S.onLobby = () => this.renderLobby();
+    S.onError = (msg) => { this.lanNote = msg; this.renderLobby(); };
+    S.onHostGone = () => { if (this.net) this.leaveNet('THE HOST LEFT THE GAME'); };
+    S.connect();
+    const join = (host) => {
+      this.audio.init();
+      const name = ($('lan-name').value || '').trim().toUpperCase() || 'PLAYER';
+      try { localStorage.setItem('sniperyard.name', name); } catch { /* ignore */ }
+      this.lanNote = '';
+      S.hello(name, $('lan-team').value, host);
+      this.net = new LanGame(this, S);
+      this.renderLobby();
+    };
+    $('btn-host').addEventListener('click', () => join(true));
+    $('btn-join').addEventListener('click', () => join(false));
+    $('lan-team').addEventListener('change', () => { if (S.joined) S.setTeam($('lan-team').value); });
+    $('lan-ai').addEventListener('change', () => { CONFIG.lan.fillWithAI = $('lan-ai').value === '1'; });
+    $('btn-mpstart').addEventListener('click', () => {
+      if (!this.net || !this.net.isHost) return;
+      this.audio.init();
+      this.net.teamOf.clear();
+      this.newMatch();
+      this.enterNetGame();
+    });
+    $('btn-leave').addEventListener('click', () => this.leaveNet());
+    $('btn-leavegame').addEventListener('click', () => this.leaveNet());
+  }
+
+  renderLobby() {
+    const $ = (id) => document.getElementById(id);
+    const S = this.lanSession;
+    const joined = S.joined;
+    const names = CONFIG.teams.names;
+    $('lan-list').innerHTML = S.players.map((p) => {
+      const team = p.team === '0' ? `<span class="t0">${names[0]}</span>` : p.team === '1' ? `<span class="t1">${names[1]}</span>` : '<span class="dim">AUTO</span>';
+      return `<span>${p.name}${p.id === S.myId ? ' (you)' : ''}</span>${team}<span class="dim">${p.id === S.hostId ? 'HOST' : ''}</span>`;
+    }).join('');
+    $('btn-host').style.display = joined ? 'none' : '';
+    $('btn-join').style.display = joined ? 'none' : '';
+    $('btn-leave').style.display = joined ? '' : 'none';
+    $('btn-mpstart').style.display = joined && S.isHost ? '' : 'none';
+    $('btn-join').disabled = !S.hostId;
+    $('btn-host').disabled = !!S.hostId;
+    $('btn-play').disabled = joined;
+    $('lan-note').textContent = this.lanNote || (!S.available ? '' : !joined ? (S.hostId ? 'A GAME IS HOSTED ON THIS NETWORK · CHOOSE A NAME AND JOIN' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
+      : S.isHost ? `YOU HOST · ${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'} · THE MATCH TAB SETS TEAM SIZE, ROUNDS AND ZONE`
+        : S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH');
+    this.updateMenuButtons();
+  }
+
+  updateMenuButtons() {
+    const authority = !this.net || this.net.isHost;
+    document.getElementById('btn-restart').style.display = authority ? '' : 'none';
+    document.getElementById('btn-leavegame').style.display = this.net ? '' : 'none';
+  }
+
+  enterNetGame() {
+    const host = this.net.isHost;
+    this.combat.claimHits = !host;
+    this.birds.authority = host;
+    this.state = 'playing';
+    this.paused = false;
+    this.hud.showStart(false);
+    this.hud.showPause(false);
+    this.hud.showEnd(false);
+    this.updateMenuButtons();
+    // the host clicked START (a user gesture); joined players click once to capture the mouse
+    if (host) this.input.requestLock();
+  }
+
+  leaveNet(note) {
+    try { if (note) sessionStorage.setItem('sniperyard.note', note); } catch { /* ignore */ }
+    location.href = location.pathname + location.search;
   }
 
   // Spread a team along its slope (upper half, near the ridge).
   teamSpawns(team, n) {
     const T = this.terrain;
-    const side = team === 0 ? 1 : -1;
+    const side = this.sideSign(team);
     const out = [];
     const span = Math.min(170, 60 * n);
-    const off = (Math.random() - 0.5) * 60;
+    const off = (Math.random() - 0.5) * 120;
     const used = [];
     for (let i = 0; i < n; i++) {
       const bx = off + (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1));
       // prefer a scored sniper spot (open view across the valley) near this slot
       let best = null, bestS = -1;
-      for (const sp of this.spots.spots[team]) {
+      for (const sp of this.spots.spots[this.sideOf(team)]) {
         if (Math.abs(sp.x - bx) > 35 || used.includes(sp)) continue;
-        const sc = sp.view + sp.height * 0.3 + Math.random() * 0.2;
+        const sc = sp.view + sp.height * 0.3 + Math.random() * 0.7;   // varied, so spawns aren't predictable
         if (sc > bestS) { bestS = sc; best = sp; }
       }
       if (best) { used.push(best); out.push({ x: best.x, z: best.z }); continue; }
@@ -324,7 +584,7 @@ class Game {
     });
   }
 
-  onKill(shooter, victim, dist, part) {
+  onKill(shooter, victim, dist, part, point) {
     const d = Math.round(dist);
     if (shooter.isPlayer) {
       this.hud.hitMarker(true);
@@ -332,10 +592,78 @@ class Game {
       this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, victim.name, 1.8);
     }
     if (victim.isPlayer) {
-      this.hud.centerMessage('YOU WERE HIT', `${shooter.name} · ${d} m`, 3);
       this.player.killedBy = shooter;
+      this.startKillcam(shooter, dist, part, point);
     }
-    this.hud.killFeed(`<span class="${shooter.team === 0 ? 'f' : 'e'}">${shooter.name}</span> ✕ <span class="${victim.team === 0 ? 'f' : 'e'}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}`);
+    const cls = (c) => (c.team === this.player.team ? 'f' : 'e');
+    this.hud.killFeed(`<span class="${cls(shooter)}">${shooter.name}</span> ✕ <span class="${cls(victim)}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}`);
+  }
+
+  // ---------------------------------------------------------------- killcam
+  startKillcam(shooter, dist, part, point) {
+    const p = this.player;
+    const target = shooter.scopePos(new THREE.Vector3());
+    let eye = p.eyePos(new THREE.Vector3());
+    // look from where the bullet hit if the eye has no line of sight to the shooter
+    if (point && !this.world.lineOfSight(eye, target, { endMargin: 1 })) {
+      const alt = point.clone().addScaledVector(new THREE.Vector3().subVectors(target, point).normalize(), 0.4);
+      if (this.world.lineOfSight(alt, target, { endMargin: 1 })) eye = alt;
+    }
+    const lines = [];
+    const reason = (shooter.ai && shooter.ai.reasons.get(p.id)) || this.killReason;
+    if (reason && REVEAL_TEXT[reason.cue]) lines.push(['SPOTTED YOU BY', REVEAL_TEXT[reason.cue][reason.own ? 0 : 1]]);
+    const give = this.recentGiveaways(p, shooter);
+    if (give.length) lines.push(['YOUR GIVEAWAYS', give.join(' · ')]);
+    if (!lines.length) lines.push(['YOUR GIVEAWAYS', 'NONE IN THE LAST 40 S']);
+    this.hud.clearCenter();
+    this.killcam = {
+      shooter, eye, yaw0: p.yaw, pitch0: p.pitch, start: this.realTime, end: this.realTime + CONFIG.round.killcamTime,
+      title: `KILLED BY ${shooter.name} · ${Math.round(dist)} m${part === 'head' ? ' · HEADSHOT' : ''}`, lines,
+    };
+  }
+
+  // What the player did recently that could have given them away (newest first).
+  recentGiveaways(p, shooter) {
+    const now = this.time, out = [];
+    const ago = (t) => `${Math.max(1, Math.round(now - t))} S AGO`;
+    const seen = new Set();
+    const label = { shot: 'YOUR SHOT', birds: 'BIRDS YOU FLUSHED', splash: 'SPLASHING' };
+    const evs = this.bus.recent(now, 40);
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const ev = evs[i];
+      if (ev.sourceId !== p.id) continue;
+      let k = ev.type;
+      if (k === 'footstep' && (ev.loudness || 0) >= 1) k = 'sprint';
+      const text = k === 'sprint' ? 'SPRINTING' : label[k];
+      if (!text || seen.has(k)) continue;
+      seen.add(k);
+      out.push(`${text} ${ago(ev.time)}`);
+    }
+    // was our scope pointed at them (glint toward the killer)?
+    const se = shooter.eyePos(new THREE.Vector3());
+    const to = new THREE.Vector3();
+    for (let i = this.aimHistory.length - 1; i >= 0; i--) {
+      const h = this.aimHistory[i];
+      if (now - h.t > 15) break;
+      if (!h.scoped) continue;
+      to.subVectors(se, h.eye).normalize();
+      if (THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(to.dot(h.dir), -1, 1))) < CONFIG.reveal.glintAngle) {
+        out.unshift(`SCOPE GLINT TOWARD THEM ${ago(h.t)}`);
+        break;
+      }
+    }
+    return out.slice(0, 3);
+  }
+
+  // Sample the player's aim a few times per second (for the killcam's glint check).
+  recordAim(dt) {
+    this.aimSampleT = (this.aimSampleT || 0) - dt;
+    if (this.aimSampleT > 0) return;
+    this.aimSampleT = 0.25;
+    const p = this.player;
+    if (!p.alive) return;
+    this.aimHistory.push({ t: this.time, scoped: p.scoped, eye: p.eyePos(new THREE.Vector3()), dir: p.aimDir(new THREE.Vector3()) });
+    if (this.aimHistory.length > 80) this.aimHistory.shift();
   }
 
   playerFire() {
@@ -359,7 +687,8 @@ class Game {
 
   frame() {
     const now = performance.now();
-    const dtReal = Math.min(0.05, Math.max(0, (now - this.lastNow) / 1000));
+    const rawDt = Math.max(0, (now - this.lastNow) / 1000);
+    const dtReal = Math.min(0.05, rawDt);
     this.lastNow = now;
     this.frameCount++;
     this.realTime += dtReal;
@@ -370,22 +699,32 @@ class Game {
       this.paused = !this.paused;
       this.hud.showPause(this.paused);
     }
-    if (input.wasPressed('KeyT') && this.state === 'playing') {
+    const authority = !this.net || this.net.isHost;
+    if (input.wasPressed('KeyT') && this.state === 'playing' && authority) {
       this.zone.skip(this.time);
       this.hud.centerMessage('ZONE STEP SKIPPED', this.zone.debugText(), 1.5);
     }
-    if (input.wasPressed('KeyR') && (this.state === 'playing' || this.state === 'ended')) {
+    if (input.actPressed('restart') && (this.state === 'playing' || this.state === 'ended') && authority && !this.paused) {
       this.hud.showEnd(false);
-      this.newRound();
+      this.newMatch();
       this.state = 'playing';
       // pointer lock needs a click (a user gesture); the canvas click handler re-captures the mouse
       if (!input.locked && !input.fallback) this.hud.centerMessage('CLICK TO CAPTURE THE MOUSE', '', 3);
     }
-    const running = this.state === 'playing' && !this.paused;
-    this.simulate(running ? dtReal : 0, running ? input : this.idleInput());
-    if (this.state === 'playing' && this.roundOver && this.time >= this.endAt) this.showRoundEnd();
+    if (this.bench && this.bench.update(rawDt)) {
+      this.simulate(0, this.idleInput());
+      this.effects.update(dtReal, this.camera);
+      this.render(dtReal);
+      input.endFrame();
+      return;
+    }
+    this.updateAutoResolution(rawDt);
+    // LAN games keep running while the menu is open (others are still playing)
+    const running = this.state === 'playing' && (!this.paused || this.net);
+    this.simulate(running ? dtReal : 0, running && !this.paused ? input : this.idleInput());
+    if (this.net) this.net.tick(dtReal);
     this.effects.update(dtReal, this.camera);
-    this.render(dtReal);
+    if (!this.noRender) this.render(dtReal);
     input.endFrame();
   }
 
@@ -400,15 +739,22 @@ class Game {
     p.update(dt, input, this.world, this.terrain, this.time);
     p.bodyYaw = p.yaw;
     p.hitbox.update(p);
-    if (dt > 0 && p.alive && !freeze && input.wasClicked && input.wasClicked(0)) this.playerFire();
+    if (dt > 0 && p.alive && !freeze && input.actPressed && input.actPressed('fire')) this.playerFire();
     if (dt > 0) {
+      const authority = !this.net || this.net.isHost;
       for (const a of this.ais) { a.frozenByRound = freeze; a.update(dt, this.time); }
+      for (const r of this.remotes) r.update(dt, this.time);
       this.combat.update(dt, this.time);
       this.birds.update(dt, this.time, this.combatants, this.camera);
       this.zone.update(dt, this.time);
       this.applyZoneDamage(dt);
       this.updateCharacterTints(dt);
-      this.checkRoundEnd();
+      this.recordAim(dt);
+      if (authority) {
+        this.checkRoundEnd();
+        if (this.roundOver && !this.roundFinished && this.time >= this.endAt && this.state === 'playing') this.finishRound();
+      }
+      if (this.state === 'playing') this.updateIntermission();
     }
     for (const d of this.dummies) d.update(dt);
     if (!p.alive) this.deathT += dt;
@@ -417,35 +763,82 @@ class Game {
   applyZoneDamage(dt) {
     const dps = this.zone.damagePerSecond();
     for (const c of this.combatants) {
-      if (!c.alive || c.isDummy) continue;
+      if (!c.alive || c.isDummy || c.isRemote) continue;
       if (this.zone.contains(c.pos.x, c.pos.z, 0, false)) continue;
       c.health -= dps * dt;
       if (c.isPlayer) this.damageFlash = Math.min(1, this.damageFlash + dt * 2);
       if (c.health <= 0) {
-        c.health = 0;
-        c.alive = false;
-        c.deathTime = this.time;
-        c.killedBy = null;
-        this.hud.killFeed(`ZONE ✕ <span class="${c.team === 0 ? 'f' : 'e'}">${c.name}</span>`);
-        if (c.isPlayer) this.hud.centerMessage('ELIMINATED BY THE ZONE', '', 3);
+        if (this.net && !this.net.isHost) {
+          // joined client: report our own zone death, the host confirms it to everyone
+          c.health = 0;
+          if (!this.diedReported) { this.diedReported = true; this.net.sendDied(c); }
+          continue;
+        }
+        this.applyZoneDeath(c);
       }
     }
   }
 
-  showRoundEnd() {
+  applyZoneDeath(c) {
+    c.health = 0;
+    c.alive = false;
+    c.deathTime = this.time;
+    c.killedBy = null;
+    this.hud.killFeed(`ZONE ✕ <span class="${c.team === this.player.team ? 'f' : 'e'}">${c.name}</span>`);
+    if (c.isPlayer) this.hud.centerMessage('ELIMINATED BY THE ZONE', '', 3);
+    if (this.net && this.net.isHost) this.net.broadcastKill(null, c, 0, null, null, 'zone');
+  }
+
+  // Joined client: the host confirmed a death.
+  applyKillMessage(m) {
+    const victim = this.combatants.find((c) => c.id === m.v);
+    if (!victim || !victim.alive) return;
+    const shooter = m.s ? this.combatants.find((c) => c.id === m.s) : null;
+    const point = m.p ? new THREE.Vector3(m.p[0], m.p[1], m.p[2]) : null;
+    if (!shooter) {
+      if (m.cause === 'left') {
+        victim.alive = false; victim.health = 0;
+        this.hud.killFeed(`<span class="${victim.team === this.player.team ? 'f' : 'e'}">${victim.name}</span> LEFT THE GAME`);
+      } else this.applyZoneDeath(victim);
+      return;
+    }
+    victim.alive = false;
+    victim.health = 0;
+    victim.killedBy = shooter;
+    victim.deathTime = this.time;
+    shooter.kills = (shooter.kills || 0) + 1;
+    if (shooter === this.player) {
+      shooter.hits++;
+      shooter.longestHit = Math.max(shooter.longestHit, m.d);
+    }
+    if (victim !== this.player && point) this.effects.impact(point, 'body');
+    this.killReason = m.r || null;
+    this.onKill(shooter, victim, m.d, m.part, point);
+    this.killReason = null;
+  }
+
+  showMatchEnd(winner) {
     this.state = 'ended';
-    const p = this.player;
-    const acc = p.shotsFired ? Math.round((p.hits / p.shotsFired) * 100) : 0;
+    const M = this.match, st = M.stats, me = this.player.team, names = CONFIG.teams.names;
+    const won = winner === me;
+    const acc = st.shots ? Math.round((st.hits / st.shots) * 100) : 0;
+    const multi = CONFIG.match.roundsToWin > 1;
+    const sub = multi ? `${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]} · ${won ? 'MATCH WON' : 'MATCH LOST'}`
+      : won ? (this.player.alive ? 'YOUR TEAM WINS' : 'YOUR TEAM WINS · YOU DID NOT SURVIVE') : 'YOUR TEAM WAS ELIMINATED';
     const t = Math.floor(this.time);
-    const sub = this.victory ? (p.alive ? 'YOUR TEAM WINS' : 'YOUR TEAM WINS · YOU DID NOT SURVIVE') : 'YOUR TEAM WAS ELIMINATED';
-    this.hud.showEnd(true, this.victory, sub, [
-      ['Round time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
-      ['Shots fired', p.shotsFired],
-      ['Hits', `${p.hits} (${acc}%)`],
-      ['Eliminations', p.kills],
-      ['Longest hit', p.longestHit ? `${Math.round(p.longestHit)} m` : '-'],
-      ['Killed by', p.alive ? '-' : (p.killedBy ? p.killedBy.name : 'the zone')],
-    ]);
+    const rows = [
+      [multi ? 'Rounds played' : 'Round time', multi ? M.round + 1 : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
+      ['Rounds survived', `${st.survived} / ${M.round + 1}`],
+      ['Shots fired', st.shots],
+      ['Hits', `${st.hits} (${acc}%)`],
+      ['Eliminations', st.kills],
+      ['Longest hit', st.longest ? `${Math.round(st.longest)} m` : '-'],
+    ];
+    if (!multi) rows.splice(1, 1);
+    this.hud.showEnd(true, won, sub, rows);
+    const again = document.getElementById('btn-again');
+    again.disabled = !!(this.net && !this.net.isHost);
+    again.textContent = this.net && !this.net.isHost ? 'WAITING FOR THE HOST' : 'NEW MATCH (R)';
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
@@ -455,7 +848,7 @@ class Game {
     if (this.envTintT > 0) return;
     this.envTintT = 1;
     const c = new THREE.Color();
-    for (const a of this.ais) {
+    for (const a of [...this.ais, ...this.remotes]) {
       const canopy = this.terrain.canopyAt(a.pos.x, a.pos.z);
       const grass = this.terrain.grassDensityAt(a.pos.x, a.pos.z);
       c.setRGB(0.92, 0.88, 0.78).lerp(new THREE.Color(0.85, 1.05, 0.75), grass).lerp(new THREE.Color(0.8, 0.78, 0.68), canopy * 0.7);
@@ -470,8 +863,7 @@ class Game {
     const a = this.aliveCount(0), b = this.aliveCount(1);
     if (a > 0 && b > 0) return;
     this.roundOver = true;
-    this.endAt = this.time + 2.5;
-    this.victory = b === 0 && a > 0;
+    this.endAt = this.time + Math.max(2.5, this.killcam ? this.killcam.end - this.realTime + 0.5 : 0);
   }
 
   // Is any enemy currently lining up a shot on the player (glint toward us + line of sight)?
@@ -479,11 +871,13 @@ class Game {
     const p = this.player;
     if (!p.alive) return false;
     const eye = p.eyePos(new THREE.Vector3());
-    for (const a of this.ais) {
-      if (a.team === p.team || !a.alive || !a.ai) continue;
-      if ((a.ai.state === 'aim' || a.ai.state === 'fire') && a.ai.target === p && glintToward(a, eye) > 0.1) {
-        if (this.world.lineOfSight(a.scopePos(new THREE.Vector3()), eye)) return true;
-      }
+    for (const a of this.combatants) {
+      if (a === p || a.isDummy || a.team === p.team || !a.alive) continue;
+      // AI lining up on us (local brain, or the host's AI via aimTargetId); a remote player
+      // with their glint on us (within ~2.5° of their aim)
+      const aiming = a.ai ? (a.ai.state === 'aim' || a.ai.state === 'fire') && a.ai.target === p
+        : a.isRemote && (a.aimTargetId === p.id || (a.human && a.scoped && glintToward(a, eye) > 0.6));
+      if (aiming && glintToward(a, eye) > 0.1 && this.world.lineOfSight(a.scopePos(new THREE.Vector3()), eye)) return true;
     }
     return false;
   }
@@ -507,16 +901,25 @@ class Game {
     const p = this.player;
     const boltT = THREE.MathUtils.clamp(1 - (p.boltReadyTime - this.time) / CONFIG.weapon.boltTime, 0, 1);
     // scope glints of AI snipers, as seen from the player's camera (depth-tested sprites)
-    for (const a of this.ais) {
+    for (const a of this.combatants) {
+      if (!a.glint) continue;
       const gi = glintToward(a, this.camera.position);
       if (gi > 0.001) a.glint.set(a.scopePos(new THREE.Vector3()), gi, this.camera, this.realTime); else a.glint.hide();
     }
     this.aimedAtT = (this.aimedAtT || 0) - dtReal;
     if (this.aimedAtT <= 0) { this.aimedAtT = 0.15; this.aimedAt = this.playerAimedAt(); }
     const w = window.innerWidth, h = window.innerHeight;
-    this.hud.updateMarkers(this.camera, this.ais.filter((a) => a.team === p.team), w, h);
-    this.hud.updateDebugMarks(this.camera, this.ais, w, h, this.reveal);
-    this.hud.setTeams(this.combatants.filter((c) => c.team === 0 && !c.isDummy), this.combatants.filter((c) => c.team === 1 && !c.isDummy));
+    this.hud.localTeam = p.team;
+    const others = this.combatants.filter((c) => c !== p && !c.isDummy);
+    this.hud.updateMarkers(this.camera, others.filter((c) => c.team === p.team), w, h);
+    this.hud.updateDebugMarks(this.camera, others, w, h, this.reveal);
+    const me = p.team;
+    this.hud.setTeams(this.combatants.filter((c) => c.team === me && !c.isDummy), this.combatants.filter((c) => c.team !== me && !c.isDummy));
+    this.hud.setScore(this.match.score[me], this.match.score[1 - me], this.match.round, CONFIG.match.roundsToWin);
+    const board = this.state === 'playing' && !this.paused && this.input.act('scores');
+    this.hud.setScoreboard(board, board ? this.combatants.filter((c) => !c.isDummy).map((c) => ({
+      name: c.name, team: c.team, alive: c.alive, kills: c.kills || 0, human: c === p || !!c.human, me: c === p,
+    })) : null, me, this.match.score);
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
       inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped && this.player.alive, aimedAt: this.aimedAt,
@@ -531,18 +934,40 @@ class Game {
   }
 
   idleInput() {
-    if (!this._idle) this._idle = { mouseDX: 0, mouseDY: 0, down: () => false, wasPressed: () => false, mouse: () => false };
+    if (!this._idle) this._idle = { mouseDX: 0, mouseDY: 0, wheel: 0, down: () => false, wasPressed: () => false, mouse: () => false, act: () => false, actPressed: () => false };
     return this._idle;
   }
 
   updateRenderSystems(dt) {
     const cam = this.camera;
     const p = this.player;
-    const mates = this.ais.filter((a) => a.team === p.team && a.alive);
-    if (!p.alive && this.deathT > 2.5 && mates.length && this.state === 'playing') {
+    const mates = this.combatants.filter((a) => a !== p && !a.isDummy && a.team === p.team && a.alive);
+    const kc = this.killcam && this.realTime < this.killcam.end ? this.killcam : null;
+    this.hud.setKillcam(null);
+    if (!p.alive && kc) {
+      // killcam: turn from our last view toward the shooter and zoom in on them
+      const t = this.realTime - kc.start;
+      const target = kc.shooter.scopePos(new THREE.Vector3());
+      const look = yawPitchTo(kc.eye, target);
+      const k = THREE.MathUtils.smoothstep(t, 0.5, 1.6);
+      let dy = look.yaw - kc.yaw0;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      cam.position.copy(kc.eye);
+      cam.rotation.set(THREE.MathUtils.lerp(kc.pitch0, look.pitch, k), kc.yaw0 + dy * k, 0, 'YXZ');
+      const dist = kc.eye.distanceTo(target);
+      const fovT = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(4 / dist)), 2.5, 40);
+      const z = THREE.MathUtils.smoothstep(t, 1.2, 2.4);
+      const fov = CONFIG.player.fovHip * Math.pow(fovT / CONFIG.player.fovHip, z);
+      if (Math.abs(cam.fov - fov) > 1e-3) { cam.fov = fov; cam.updateProjectionMatrix(); }
+      p.scopeT = 0;
+      this.post.uniforms.uFade.value = Math.max(0, 0.35 - t * 0.3);
+      cam.updateMatrixWorld();
+      const sp = target.clone().project(cam);
+      this.hud.setKillcam(t > 1.4 ? kc : null, sp.z < 1 ? { x: (sp.x * 0.5 + 0.5) * window.innerWidth, y: (-sp.y * 0.5 + 0.5) * window.innerHeight, name: kc.shooter.name } : null);
+    } else if (!p.alive && mates.length && this.state === 'playing' && (this.killcam || this.deathT > 2.5)) {
       // spectate a living teammate (third person, behind the shoulder); click to switch
       if (!this.spectating || !this.spectating.alive) this.spectating = mates[0];
-      if (this.input.wasClicked && this.input.wasClicked(0)) {
+      if (this.input.actPressed('fire')) {
         const i = mates.indexOf(this.spectating);
         this.spectating = mates[(i + 1) % mates.length];
       }
@@ -557,7 +982,7 @@ class Game {
       cam.rotation.set(m.pitch * 0.8 - 0.08, m.yaw, 0, 'YXZ');
       if (cam.fov !== CONFIG.player.fovHip) { cam.fov = CONFIG.player.fovHip; cam.updateProjectionMatrix(); }
       this.post.uniforms.uFade.value = 0;
-      this.hud.el.center.innerHTML = `SPECTATING ${m.name}<small>CLICK TO SWITCH · R TO RESTART</small>`;
+      this.hud.el.center.innerHTML = `SPECTATING ${m.name}<small>CLICK TO SWITCH</small>`;
       this.hud.el.center.classList.add('on');
       this.hud.centerTimer = 0.1;
     } else if (!p.alive) {
@@ -573,7 +998,10 @@ class Game {
     cam.updateMatrixWorld();
     // shadow / grass focus: aim point when scoped, slightly ahead of the player otherwise
     let focus, extent;
-    if (p.scopeT > 0.5) {
+    if (!p.alive && kc) {
+      focus = kc.shooter.pos.clone();
+      extent = 45;
+    } else if (p.scopeT > 0.5) {
       const dir = p.aimDir(new THREE.Vector3());
       const hit = this.world.raycast(cam.position, dir, 600, { crowns: false });
       const dist = hit ? hit.t : 300;
@@ -587,7 +1015,7 @@ class Game {
     this.sky.updateShadow(focus, extent);
     this.forest.update(cam, focus, CONFIG.trees.shadowDistance * (extent / 120) + 20);
     this.undergrowth.update(cam);
-    this.grass.update(p.scopeT > 0.5 ? focus : cam.position);
+    this.grass.update(p.scopeT > 0.5 || (!p.alive && kc) ? focus : cam.position);
     this.water.update(this.realTime);
     SHARED.uSunDirView.value.copy(this.sky.sunDir).transformDirection(cam.matrixWorldInverse);
     // is the player standing in shade? (dims the first-person rifle)

@@ -25,6 +25,7 @@ _No photoscanned textures downloaded. Run `npm run assets` to fetch CC0 textures
 - [three.js](https://threejs.org) (MIT), including its `examples/jsm` addons (EffectComposer,
   RenderPass, ShaderPass, UnrealBloomPass, Reflector, Sky).
 - [Vite](https://vitejs.dev) (MIT): dev server and build.
+- [ws](https://github.com/websockets/ws) (MIT): WebSocket server for the LAN relay.
 
 ## Fonts
 

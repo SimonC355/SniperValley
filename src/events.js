@@ -13,7 +13,7 @@ export class EventBus {
 
   emit(ev) {
     this.log.push(ev);
-    if (this.log.length > 200) this.log.splice(0, this.log.length - 200);
+    if (this.log.length > 600) this.log.splice(0, this.log.length - 600);
     for (const fn of this.listeners) fn(ev);
   }
 

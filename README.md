@@ -1,9 +1,12 @@
 # SniperYard — browser prototype
 
-A single-player Three.js + Vite prototype of **SniperYard**, a team sniper game in a forested
-V-shaped valley. You play 2v2 (up to 5v5) against AI ghillie snipers. Everyone has one bolt-action
-rifle, one hit kills, there are no respawns, and the map shrinks every minute. Detection comes from
-scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
+A Three.js + Vite prototype of **SniperYard**, a team sniper game in a forested V-shaped valley.
+Play 2v2 (up to 5v5) against AI ghillie snipers, or with friends on your local network.
+
+- Everyone has one bolt-action rifle, one hit kills, and nobody respawns.
+- The map shrinks every minute.
+- A match is best of three rounds, and teams swap slopes (and sun side) between rounds.
+- Detection comes from scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 
 ## Run it
 
@@ -11,6 +14,7 @@ scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 npm install
 npm run assets     # optional: download CC0 photoscanned textures from Poly Haven (~70 MB)
 npm run dev        # http://localhost:5173
+npm run host       # LAN game: builds, then serves the game + relay on port 8080
 npm run build      # static build in dist/
 ```
 
@@ -33,7 +37,33 @@ missing.
 Open the game with `?photo=0` to compare with the procedural textures. The downloads are
 git-ignored because they are large, so every machine runs the command once.
 
+### LAN multiplayer (you host, friends join)
+
+1. **On the hosting PC**, run `npm install` once, then `npm run host`. The console prints two
+   addresses: `http://localhost:8080` for you and `http://<your-ip>:8080` for your friends.
+2. **Host:** open `http://localhost:8080`, type a name and click **HOST GAME**.
+3. **Friends** on the same network: open the address with your IP, type a name and click
+   **JOIN GAME**. They don't need to install anything; the browser is enough.
+4. **Pick teams** in the lobby, or leave them on auto-balance. In the **MATCH** tab, the host
+   sets team size, rounds and zone mode. With *Fill empty slots with AI* on, AI snipers fill
+   the teams up to the team size.
+5. **Host:** click **START MATCH**. Friends click once in the game window to capture the
+   mouse.
+
+Notes:
+
+- Players who join mid-match come in at the next round. If the host leaves, the game ends for
+  everyone.
+- If friends can't connect, allow Node.js through the Windows firewall for **private
+  networks**, and check that everyone is on the same Wi-Fi or LAN.
+- Use another port with `PORT=9000 npm run host`. On Windows PowerShell, run
+  `$env:PORT=9000; npm run host`.
+- `npm run dev -- --host` also works for LAN testing. The relay runs inside the dev server.
+
 ## Controls
+
+All keys can be rebound under Esc → **CONTROLS**. That tab also has mouse and scope
+sensitivity, field of view and invert Y.
 
 | Key | Action |
 |---|---|
@@ -44,19 +74,57 @@ git-ignored because they are large, so every machine runs the command once.
 | C or Ctrl | crouch |
 | Z | prone |
 | Right mouse (hold) | scope (FOV 70 → 7, slower sensitivity) |
-| Left mouse | fire (1.5 s bolt cycle) |
-| R | restart round |
-| T | debug: skip to the next zone step |
+| Left mouse | fire (1.5 s bolt cycle) · while dead: switch spectated teammate |
+| Tab (hold) | scoreboard |
+| R | new match (single player / LAN host) |
+| T | debug: skip to the next zone step (single player / LAN host) |
 | F1 | debug overlay (AI states, awareness, live reveal-event log) |
 | F2 | debug: reveal all characters |
-| Esc | pause / settings |
+| Esc | pause / settings (in LAN games the match keeps running) |
+
+When you are shot, the **killcam** turns toward the shooter and zooms in on them. It shows:
+
+- the shooter's name and distance;
+- for AI shooters, what gave you away (muzzle flash, shot sound, birds, splashing, footsteps,
+  scope glint or movement);
+- your own recent giveaways, such as your last shot, flushed birds, sprinting, or a scope glint
+  aimed at the shooter.
+
+### Benchmark
+
+Open `?bench` (or use the link in Esc → GRAPHICS). The game flies through five fixed views for
+6 s each, then shows average FPS, 1% lows and your GPU, with a **COPY RESULTS** button. Auto
+resolution is off during the run, so results from different PCs compare.
+
+In normal play, *Auto resolution* (on by default) lowers the render scale to as low as 60% when
+frames take longer than about 17 ms, and steps back up when there is headroom. The FPS counter
+shows the current scale.
+
+### Recorded sounds (optional)
+
+Everything is synthesised by default. To use recordings, put audio files in
+`public/assets/sounds/` and list them in `public/assets/sounds/sounds.json`. Each entry is one
+file or a list of variations:
+
+```json
+{ "shot": ["shot1.ogg", "shot2.ogg"], "shot_far": "shot_far.ogg", "crack": "crack.ogg",
+  "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
+  "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
+  "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"] }
+```
+
+Any sound you leave out stays synthesised. Use CC0 recordings, for example
+[freesound.org](https://freesound.org) filtered to *Creative Commons 0*, and list them in
+CREDITS.md.
 
 ## URL options
 
 `?mode=radial` · `?team=3` (1–5) · `?ballistics=1` · `?tracers=off|faint|bright` ·
 `?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
-are downloaded) · `?shafts=0` (no light shafts).
+are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
+(benchmark) · `?autores=0` (no auto resolution).
 
 Every other tunable is in [`src/config.js`](src/config.js).
 
@@ -64,7 +132,7 @@ Every other tunable is in [`src/config.js`](src/config.js).
 
 ```
 src/
-  main.js        game loop, state machine, round flow, spawning, glints/HUD wiring
+  main.js        game loop, match/round flow, rosters, killcam, LAN wiring, glints/HUD wiring
   config.js      all tunables
   terrain.js     analytic valley heightfield, 1 m height grid, splat material, zone line
   water.js       river: planar reflection, fresnel, depth transparency
@@ -92,7 +160,14 @@ src/
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
 scripts/
   fetch-assets.mjs   `npm run assets`: CC0 texture downloader (Poly Haven API)
-  hud.js         HUD and menus
+server/
+  lan.mjs        `npm run host`: serves dist/ and the relay, prints LAN addresses
+  relay.mjs      WebSocket lobby + message relay (also used by the dev server)
+  hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
+  input.js       keyboard/mouse, pointer lock, rebindable actions
+  net.js         LAN multiplayer: lobby session, host snapshots, shot/kill sync
+  remote.js      network-driven combatants (other players, the host's AI on clients)
+  bench.js       ?bench benchmark
 ```
 
 Design interpretations, numbers and open questions are in [NOTES.md](NOTES.md). Asset credits
@@ -159,3 +234,18 @@ are in [CREDITS.md](CREDITS.md).
 - Walk through the forest. Look for fallen logs with moss on top, stumps and dead branches.
   Lie prone behind a log: it stops bullets and blocks the AI's line of sight. You cannot walk
   through logs, but you can jump over them.
+
+**Beta step 1 (settings, match format, killcam, sound, performance, LAN)**
+- **Settings.** Esc → CONTROLS: rebind a key (click it, press the new one), change sensitivity
+  and FOV. AUDIO has master, effects and ambience volume. Reload: the settings stay.
+- **Match format.** Win round 1. The message says the sides swap, and in round 2 you start on
+  the other slope. The match ends at 2 round wins.
+- **Killcam.** Get shot (stand in the open and fire a few shots). The camera turns to the
+  shooter and the panel explains what gave you away.
+- **Sound.** Walk on grass, under the trees, on rock and on the mud bank. The footsteps should
+  sound different, and twigs sometimes snap in the forest.
+- **Benchmark.** Run `?bench` and send me the copied results.
+- **LAN.** Follow "LAN multiplayer" above with a friend:
+  - Shoot each other. The victim gets the killcam, and the kill feed matches on both screens.
+  - Birds, glints, muzzle flashes and the zone look the same for both players.
+  - Hold Tab for the scoreboard.

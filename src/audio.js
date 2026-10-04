@@ -1,6 +1,7 @@
-// Synthesised WebAudio: distance-delayed gunshots with valley echo (convolver), bolt cycling,
-// supersonic near-miss cracks, impacts, footsteps, water splashes, crow caws, wind and river.
-// No audio files are used.
+// WebAudio: distance-delayed gunshots with valley echo (convolver), bolt cycling, supersonic
+// near-miss cracks, impacts, surface-dependent footsteps, water splashes, crow caws, wind and
+// river. Everything is synthesised; optional recorded samples listed in
+// public/assets/sounds/sounds.json replace individual sounds (see README).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 
@@ -20,21 +21,76 @@ export class AudioSystem {
     if (!AC) return;
     const ctx = new AC();
     this.ctx = ctx;
-    this.master = ctx.createGain();
-    this.master.gain.value = CONFIG.audio.master;
+    this.bus = ctx.createGain();     // everything -> compressor -> master volume
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 6; comp.attack.value = 0.002; comp.release.value = 0.25;
-    this.master.connect(comp).connect(ctx.destination);
+    this.out = ctx.createGain();
+    this.bus.connect(comp).connect(this.out).connect(ctx.destination);
+    // effect and ambience sub-buses; one-shots connect to `master` (= the effects bus)
+    this.master = ctx.createGain();
+    this.master.connect(this.bus);
+    this.amb = ctx.createGain();
+    this.amb.connect(this.bus);
     // valley echo
     this.echo = ctx.createConvolver();
     this.echo.buffer = this._valleyIR();
     this.echoGain = ctx.createGain();
-    this.echoGain.gain.value = CONFIG.audio.echo ? 0.55 : 0;
     this.echo.connect(this.echoGain).connect(this.master);
     this.noise = this._noiseBuffer(2);
     this.brown = this._brownBuffer(4);
+    this.samples = {};
+    this._loadSamples();
     this._startAmbience();
+    this.setVolumes();
     this.ready = true;
+  }
+
+  setVolumes() {
+    if (!this.ctx) return;
+    const A = CONFIG.audio, t = this.ctx.currentTime;
+    this.out.gain.setTargetAtTime(A.master, t, 0.03);
+    this.master.gain.setTargetAtTime(A.effects, t, 0.03);
+    this.amb.gain.setTargetAtTime(A.ambience, t, 0.03);
+    this.echoGain.gain.setTargetAtTime(A.echo ? 0.55 : 0, t, 0.03);
+  }
+
+  // Optional recorded samples: public/assets/sounds/sounds.json maps a sound name to one file
+  // or a list of variations, e.g. { "shot": ["shot1.ogg", "shot2.ogg"], "footstep_forest": [...] }.
+  async _loadSamples() {
+    const base = `${(import.meta.env && import.meta.env.BASE_URL) || '/'}assets/sounds/`;
+    let list;
+    try {
+      const r = await fetch(`${base}sounds.json`, { cache: 'no-cache' });
+      if (!r.ok) return;
+      list = await r.json();
+    } catch { return; }
+    const names = [];
+    for (const [name, files] of Object.entries(list || {})) {
+      const arr = Array.isArray(files) ? files : [files];
+      const bufs = [];
+      for (const f of arr) {
+        try {
+          const data = await (await fetch(base + f)).arrayBuffer();
+          bufs.push(await this.ctx.decodeAudioData(data));
+        } catch (e) { console.warn(`[audio] could not load ${f}`); }
+      }
+      if (bufs.length) { this.samples[name] = bufs; names.push(name); }
+    }
+    if (names.length) console.info(`[audio] samples: ${names.join(', ')}`);
+  }
+
+  // Play a sample variation into `dest` at time t. Returns false if there is no such sample.
+  _sample(name, dest, t, gain = 1, rate = 1) {
+    const list = this.samples && this.samples[name];
+    if (!list) return false;
+    const src = this.ctx.createBufferSource();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = rate * (0.96 + Math.random() * 0.08);
+    const g = this.ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(dest);
+    src.start(t);
+    return true;
   }
 
   _noiseBuffer(sec) {
@@ -141,6 +197,22 @@ export class AudioSystem {
     air.type = 'lowpass';
     air.frequency.value = own ? 14000 : Math.max(900, 12000 / (1 + d / 120));
     air.connect(out);
+    if (this._sample(own || d < 60 ? 'shot' : 'shot_far', air, t, 1) || this._sample('shot', air, t, 1)) return;
+    // rumble: the report rolling through the valley
+    const rum = ctx.createBufferSource(); rum.buffer = this.brown; rum.start(t, Math.random() * 2); rum.stop(t + 2.2);
+    const rlp = ctx.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 260;
+    const rg = ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t);
+    rg.gain.exponentialRampToValueAtTime(own ? 0.9 : 0.7 + Math.min(0.5, d / 600), t + 0.03);
+    rg.gain.exponentialRampToValueAtTime(0.0001, t + 1.6 + Math.min(0.6, d / 500));
+    rum.connect(rlp).connect(rg).connect(air);
+    if (own) {
+      // muzzle blast right at the ear: a very short broadband slap
+      const sl = this._noiseSrc(t, 0.02);
+      const sg = ctx.createGain();
+      this._env(sg, t, 1.6, 0.0005, 0.012);
+      sl.connect(sg).connect(air);
+    }
     // crack
     const crack = this._noiseSrc(t, 0.06);
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
@@ -166,6 +238,7 @@ export class AudioSystem {
   crack(pos) {
     if (!this.ready) return;
     const ctx = this.ctx, t = ctx.currentTime;
+    if (this._sample('crack', this._panner(pos).connect(this.master), t, 1)) return;
     const s = this._noiseSrc(t, 0.03);
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2500;
     const g = ctx.createGain();
@@ -183,6 +256,7 @@ export class AudioSystem {
     if (!this.ready) return;
     const ctx = this.ctx;
     const t0 = ctx.currentTime + startDelay;
+    if (this._sample('bolt', this.master, t0, 0.8)) return;
     const clicks = [[0.0, 3200, 0.5], [0.22, 2200, 0.6], [0.55, 2600, 0.55], [0.74, 3600, 0.45]];
     for (const [dt, f, a] of clicks) {
       const t = t0 + dt;
@@ -205,6 +279,7 @@ export class AudioSystem {
     if (d > 350) return;
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const vol = Math.min(0.9, 9 / (d + 4));
+    if (this._sample(`impact_${kind === 'forest' ? 'ground' : kind}`, this._panner(pos).connect(this.master), t, vol)) return;
     const s = this._noiseSrc(t, 0.3);
     const f = ctx.createBiquadFilter();
     const g = ctx.createGain();
@@ -224,20 +299,54 @@ export class AudioSystem {
     s.connect(f).connect(g).connect(this._panner(pos)).connect(this.master);
   }
 
+  // surface: 'grass' | 'forest' (needles, twigs) | 'rock' | 'mud'
   footstep(pos, loud, surface, own) {
     if (!this.ready) return;
     const ctx = this.ctx;
     const d = own ? 0 : this.listenerPos.distanceTo(pos);
-    if (d > CONFIG.reveal.footstepHearingRange) return;
-    const t = ctx.currentTime;
-    const vol = (own ? 0.12 : 0.35 / (1 + d / 4)) * loud;
-    const s = this._noiseSrc(t, 0.12);
-    const f = ctx.createBiquadFilter();
-    f.type = 'bandpass'; f.frequency.value = surface === 'forest' ? 1400 : 700 + Math.random() * 300; f.Q.value = 0.8;
-    const g = ctx.createGain();
-    this._env(g, t, vol, 0.01, 0.09);
-    s.connect(f).connect(g);
-    if (own) g.connect(this.master); else g.connect(this._panner(pos)).connect(this.master);
+    if (d > CONFIG.reveal.footstepHearingRange * 1.5) return;
+    const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
+    const vol = (own ? 0.14 : 0.4 / (1 + d / 4)) * loud;
+    const out = ctx.createGain();
+    out.gain.value = vol;
+    if (own) out.connect(this.master); else out.connect(this._panner(pos)).connect(this.master);
+    if (this._sample(`footstep_${surface}`, out, t, 1)) return;
+    // heel: a soft low thud
+    const th = this._noiseSrc(t, 0.1);
+    const tl = ctx.createBiquadFilter(); tl.type = 'lowpass'; tl.frequency.value = surface === 'rock' ? 600 : 320;
+    const tg = ctx.createGain();
+    this._env(tg, t, 0.9, 0.006, 0.07);
+    th.connect(tl).connect(tg).connect(out);
+    if (surface === 'grass') {
+      // swish of blades
+      const sw = this._noiseSrc(t, 0.22);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.9;
+      bp.frequency.setValueAtTime(2600, t); bp.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
+      const g = ctx.createGain();
+      this._env(g, t + 0.01, 0.35, 0.04, 0.15);
+      sw.connect(bp).connect(g).connect(out);
+    } else {
+      // crunch: a burst of tiny clicks (needles and twigs, gravel, wet sucking for mud)
+      const n = surface === 'mud' ? 2 : 4 + Math.floor(Math.random() * 4);
+      const f0 = surface === 'rock' ? 3800 : surface === 'mud' ? 700 : 2400;
+      for (let i = 0; i < n; i++) {
+        const tt = t + 0.01 + Math.random() * (surface === 'mud' ? 0.12 : 0.08);
+        const c = this._noiseSrc(tt, 0.03);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.5; bp.frequency.value = f0 * (0.7 + Math.random() * 0.7);
+        const g = ctx.createGain();
+        this._env(g, tt, (surface === 'mud' ? 0.5 : 0.28) * (0.5 + Math.random()), 0.001, surface === 'mud' ? 0.08 : 0.018);
+        c.connect(bp).connect(g).connect(out);
+      }
+      // now and then a twig snaps in the forest
+      if (surface === 'forest' && Math.random() < 0.12 * (0.5 + loud)) {
+        const tt = t + 0.03;
+        const c = this._noiseSrc(tt, 0.02);
+        const hp = ctx.createBiquadFilter(); hp.type = 'bandpass'; hp.Q.value = 4; hp.frequency.value = 3200 + Math.random() * 1200;
+        const g = ctx.createGain();
+        this._env(g, tt, 1.4, 0.0005, 0.025);
+        c.connect(hp).connect(g).connect(out);
+      }
+    }
   }
 
   splash(pos, loud, own) {
@@ -247,6 +356,7 @@ export class AudioSystem {
     if (d > CONFIG.reveal.splashHearingRange) return;
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const vol = (own ? 0.35 : 0.8 / (1 + d / 8)) * (0.5 + loud);
+    if (this._sample('splash', own ? this.master : this._panner(pos).connect(this.master), t, vol)) return;
     for (let i = 0; i < 2; i++) {
       const tt = t + i * 0.07;
       const s = this._noiseSrc(tt, 0.3);
@@ -270,6 +380,7 @@ export class AudioSystem {
     const out = ctx.createGain(); out.gain.value = vol;
     const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(1200, 9000 / (1 + d / 150));
     out.connect(air).connect(this._panner(pos)).connect(this.master);
+    if (this._sample('caw', out, t, 1, pitch)) return;
     const reps = 1 + Math.floor(Math.random() * 3);
     for (let r = 0; r < reps; r++) {
       const tt = t + r * (0.32 + Math.random() * 0.1);
@@ -331,7 +442,7 @@ export class AudioSystem {
     const w = ctx.createBufferSource(); w.buffer = this.brown; w.loop = true;
     const wf = ctx.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 500;
     this.windGain = ctx.createGain(); this.windGain.gain.value = 0.08;
-    w.connect(wf).connect(this.windGain).connect(this.master);
+    w.connect(wf).connect(this.windGain).connect(this.amb);
     w.start();
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
     const lg = ctx.createGain(); lg.gain.value = 0.05;
@@ -342,7 +453,7 @@ export class AudioSystem {
     const rf2 = ctx.createBiquadFilter(); rf2.type = 'lowpass'; rf2.frequency.value = 2500;
     this.riverGain = ctx.createGain(); this.riverGain.gain.value = 0;
     this.riverPanner = this._panner(new THREE.Vector3());
-    r.connect(rf).connect(rf2).connect(this.riverGain).connect(this.riverPanner).connect(this.master);
+    r.connect(rf).connect(rf2).connect(this.riverGain).connect(this.riverPanner).connect(this.amb);
     r.start();
   }
 

@@ -40,7 +40,7 @@ export class SpotMap {
     this.world = world;
     this.terrain = terrain;
     const rng = new RNG(seed + 401);
-    this.spots = [[], []];
+    this.spots = [[], []];   // per side: 0 = north slope (+Z), 1 = south slope (-Z)
     const T = terrain;
     for (let team = 0; team < 2; team++) {
       const side = team === 0 ? 1 : -1;
@@ -83,7 +83,7 @@ export class SpotMap {
     }
   }
 
-  // Pick a spot for a team near `from`. zoneFn(x,z) -> true if acceptable.
+  // Pick a spot on a side (0 north, 1 south) near `from`. zoneFn(x,z) -> true if acceptable.
   choose(team, from, { minDist = 0, maxDist = 80, avoid = [], spacing = CONFIG.ai.spotSpacing, zoneFn = null, rng = Math.random } = {}) {
     let best = null, bestS = -1e9;
     for (const s of this.spots[team]) {
@@ -162,6 +162,8 @@ class AIBrain {
     this.stateT = 0;
     this.thinkT = this.rng.float(0, CONFIG.ai.thinkInterval);
     this.awareness = new Map();
+    this.reasons = new Map();
+    this.invCue = null;
     this.glintTime = new Map();
     this.glintEmitT = new Map();
     this.queue = [];
@@ -227,7 +229,7 @@ class AIBrain {
         const dir = _c.subVectors(ev.position, eye).normalize();
         if (angleBetween(fwd, dir) > 100 * DEG) return;
         if (!this.game.world.lineOfSight(eye, ev.position)) return;
-        this.queue.push({ at: ev.time + react, kind: 'flash', pos: ev.position.clone(), strength: 1, sourceId: ev.sourceId });
+        this.queue.push({ at: ev.time + react, kind: 'flash', pos: ev.position.clone(), strength: 1, cue: 'flash', sourceId: ev.sourceId });
         break;
       }
       case 'shot': {
@@ -240,24 +242,24 @@ class AIBrain {
         const hd = Math.hypot(dx, dz) * de;
         const est = new THREE.Vector3(eye.x + Math.cos(ang) * hd, 0, eye.z + Math.sin(ang) * hd);
         est.y = this.game.terrain.heightAt(est.x, est.z) + 1;
-        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.55 });
+        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.55, cue: 'shot', sourceId: ev.sourceId });
         break;
       }
       case 'birds': {
         if (d > 380) return;
-        this.queue.push({ at: ev.time + Math.min(delay, 0.4) + react, kind: 'birds', pos: ev.position.clone(), strength: 0.4 });
+        this.queue.push({ at: ev.time + Math.min(delay, 0.4) + react, kind: 'birds', pos: ev.position.clone(), strength: 0.4, cue: 'birds', sourceId: ev.sourceId });
         break;
       }
       case 'splash': {
         if (d > R.splashHearingRange) return;
         const est = ev.position.clone().add(new THREE.Vector3(this.rng.float(-6, 6), 0, this.rng.float(-6, 6)));
-        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.5 });
+        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.5, cue: 'splash', sourceId: ev.sourceId });
         break;
       }
       case 'footstep': {
         if (d > R.footstepHearingRange * (ev.loudness || 0.5)) return;
         const est = ev.position.clone().add(new THREE.Vector3(this.rng.float(-3, 3), 0, this.rng.float(-3, 3)));
-        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.6 });
+        this.queue.push({ at: ev.time + delay + react, kind: 'sound', pos: est, strength: 0.6, cue: 'footstep', sourceId: ev.sourceId });
         break;
       }
       case 'impact': {
@@ -268,13 +270,15 @@ class AIBrain {
     }
   }
 
-  investigate(pos, strength, time) {
+  // info: { cue, sourceId } — what drew attention here (kept for the victim's killcam)
+  investigate(pos, strength, time, info = null) {
     // keep engaging a visible target rather than chasing weaker cues
     if ((this.state === 'aim' || this.state === 'fire' || this.state === 'cool') && this.target && this.target.alive && time - this.lastSeenTime < 1.0 && strength < 0.9) return;
     if (this.state === 'move' && strength < 0.5 && this.moveUrgent) return;
     if (this.invPos && time < this.invUntil && strength < this.invStrength - 0.2) return;
     const [a, b] = CONFIG.ai.investigateTime;
     this.invPos = pos.clone();
+    this.invCue = info;
     this.invStrength = strength;
     this.invUntil = time + this.rng.float(a, b) * (0.7 + strength * 0.6);
     if (this.state === 'move') { this.moveTarget = null; this.cb.stance = 'crouch'; }
@@ -330,12 +334,13 @@ class AIBrain {
       const q = this.queue[i];
       if (q.at > time) continue;
       this.queue.splice(i, 1);
+      const info = { cue: q.cue || q.kind, sourceId: q.sourceId };
       if (q.kind === 'flash') {
-        this.investigate(q.pos, 1.0, time);
+        this.investigate(q.pos, 1.0, time, info);
         const src = g.combatants.find((c) => c.id === q.sourceId);
         if (src && src.alive) this.awareness.set(src.id, Math.max(this.awareness.get(src.id) || 0, 0.6));
       } else {
-        this.investigate(q.pos, q.strength, time);
+        this.investigate(q.pos, q.strength, time, info);
       }
     }
     // visual spotting and glints
@@ -378,7 +383,7 @@ class AIBrain {
         aw += gi * 0.9 * dtThink;
         seen = true;
         if (gt > CONFIG.reveal.glintSustain && (!this.invPos || this.invPos.distanceTo(e.pos) > 4 || time > this.invUntil)) {
-          this.investigate(e.scopePos(new THREE.Vector3()), 0.95, time);
+          this.investigate(e.scopePos(new THREE.Vector3()), 0.95, time, { cue: 'glint', sourceId: e.id });
         }
       } else this.glintTime.set(e.id, 0);
       if (!seen) aw -= AI.awarenessDecay * dtThink;
@@ -397,6 +402,11 @@ class AIBrain {
 
   acquire(target, time) {
     const cb = this.cb;
+    // remember how this target was found (shown in the victim's killcam)
+    const nearCue = this.invPos && this.invCue && time < this.invUntil + 2 && target.pos.distanceTo(this.invPos) < CONFIG.ai.investigateRadius * 1.5;
+    if ((this.glintTime.get(target.id) || 0) > 0) this.reasons.set(target.id, { cue: 'glint', own: true });
+    else if (nearCue) this.reasons.set(target.id, { cue: this.invCue.cue, own: this.invCue.sourceId === target.id });
+    else this.reasons.set(target.id, { cue: target.speed > 0.4 ? 'movement' : 'visual', own: true });
     this.target = target;
     this.lastSeenPos = target.centerPos(new THREE.Vector3());
     this.lastSeenTime = time;
@@ -444,7 +454,7 @@ class AIBrain {
     const T = g.terrain;
     const cb = this.cb;
     const eye = cb.eyePos(new THREE.Vector3());
-    const enemySpots = g.spots.spots[1 - cb.team];
+    const enemySpots = g.spots.spots[1 - g.sideOf(cb.team)];
     if (this.rng.chance(0.6) && enemySpots.length) {
       for (let k = 0; k < 6; k++) {
         const s = enemySpots[this.rng.int(0, enemySpots.length - 1)];
@@ -455,7 +465,7 @@ class AIBrain {
         if (g.world.lineOfSight(eye, p)) return p;
       }
     }
-    const side = cb.team === 0 ? -1 : 1;
+    const side = g.sideOf(cb.team) === 0 ? -1 : 1;
     let x = cb.pos.x + this.rng.float(-120, 120);
     const zn = this.zone;
     if (zn && zn.mode === 'ends') x = clamp(x, -zn.halfLen * zn.current + 5, zn.halfLen * zn.current - 5);
@@ -501,7 +511,7 @@ class AIBrain {
       }
     }
     // duel: the player is scoped and looking straight at me -> hurry
-    if (!this.duel && t.isPlayer && t.scoped) {
+    if (!this.duel && !t.ai && t.scoped) {
       const look = t.aimDir(_c);
       const toMe = _b.subVectors(eye, t.eyePos(new THREE.Vector3())).normalize();
       if (angleBetween(look, toMe) < 5 * DEG) {
@@ -582,8 +592,8 @@ class AIBrain {
     const cb = this.cb;
     if (!g.spots) return;
     const mates = g.combatants.filter((c) => c !== cb && c.team === cb.team && c.alive && c.ai).map((c) => c.ai.spot || c.pos);
-    if (cb.team === 0 && g.player && g.player.alive) mates.push(g.player.pos);
-    const spot = g.spots.choose(cb.team, cb.pos, {
+    for (const h of g.humans || []) if (h.team === cb.team && h.alive) mates.push(h.pos);
+    const spot = g.spots.choose(g.sideOf(cb.team), cb.pos, {
       minDist: afterShot ? 14 : urgent ? 0 : 10,
       maxDist: urgent ? 400 : 70,
       avoid: mates,
@@ -657,7 +667,7 @@ class AIBrain {
       this.stepDist = 0;
       const wet = g.terrain.waterDepthAt(cb.pos.x, cb.pos.z) > 0.05;
       g.bus.emit({ type: wet ? 'splash' : 'footstep', position: cb.pos.clone(), time, sourceTeam: cb.team, sourceId: cb.id, loudness: this.moveSpeed > 3.5 ? 1 : 0.55 });
-      if (wet) g.audio.splash(cb.pos, 0.6, false); else g.audio.footstep(cb.pos, 0.6, 'grass', false);
+      if (wet) g.audio.splash(cb.pos, 0.6, false); else g.audio.footstep(cb.pos, 0.6, g.surfaceAt(cb.pos.x, cb.pos.z), false);
     }
     // stuck detection
     this.stuckT += dt;
