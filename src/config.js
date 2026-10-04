@@ -103,6 +103,7 @@ export const CONFIG = {
   // ---------------------------------------------------------------- weapon
   weapon: {
     boltTime: 1.5,             // bolt cycle = fire cooldown
+    hipSpread: 2.5,            // degrees of random spread when firing unscoped
     range: 1500,
     recoilPitch: 3.2,          // degrees of kick
     recoilRecover: 0.55,       // fraction of the kick that recovers automatically
@@ -129,7 +130,7 @@ export const CONFIG = {
     flashRange: 400,
     flashDuration: 0.2,
     flashIntensity: 60,
-    flashSize: 0.012,
+    flashSize: 0.02,
     soundSpeed: 340,
     shotHearingRange: 900,
     footstepHearingRange: 28,

@@ -14,6 +14,13 @@ import { Input } from './input.js';
 import { Player } from './player.js';
 import { PostFX } from './post.js';
 import { HUD } from './hud.js';
+import { EventBus } from './events.js';
+import { Effects } from './effects.js';
+import { AudioSystem } from './audio.js';
+import { Combat } from './combat.js';
+import { Viewmodel } from './viewmodel.js';
+import { Hitbox } from './hitbox.js';
+import { TargetDummy } from './dummies.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
@@ -83,6 +90,19 @@ class Game {
 
     this.input = new Input(renderer.domElement);
     this.player = new Player(camera);
+    this.player.hitbox = new Hitbox();
+
+    this.bus = new EventBus();
+    this.effects = new Effects(scene, this.vmScene);
+    this.audio = new AudioSystem();
+    this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
+    this.combat.listener = this.player;
+    this.combat.onKill = (shooter, victim, dist, part) => this.onKill(shooter, victim, dist, part);
+    this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
+    this.player.onFootstep = (pos, loud) => this.audio.footstep(pos, loud, this.terrain.canopyAt(pos.x, pos.z) > 0.5 ? 'forest' : 'grass', true);
+    this.player.onSplash = (pos, loud) => this.audio.splash(pos, loud, true);
+    this.dummies = [];
+    this.params = new URLSearchParams(location.search);
 
     this.hud.bindSettings((kind) => this.onSettingsChanged(kind));
     this.bindUI();
@@ -105,6 +125,7 @@ class Game {
     this.frameCount = 0;
     renderer.setAnimationLoop(() => this.frame());
     window.__game = this;
+    this.config = CONFIG;
     console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}`);
   }
 
@@ -133,6 +154,7 @@ class Game {
 
   bindUI() {
     const start = () => {
+      this.audio.init();
       this.hud.showStart(false);
       this.hud.showPause(false);
       this.state = this.state === 'menu' ? 'playing' : this.state;
@@ -178,12 +200,58 @@ class Game {
 
   newRound() {
     const sp = this.findSpawn(0, 0);
-    const yaw = Math.atan2(0, 1); // face south (+Z is south of the north slope? we look toward -side)
+    // ALPHA starts on the north (+Z) slope and looks south across the valley (yaw 0 = -Z)
     this.player.spawn(sp.x, sp.z, 0);
-    // face across the valley (toward -Z from the north slope)
-    this.player.lookYaw = 0;
     this.player.pos.y = this.terrain.heightAt(sp.x, sp.z);
     this.time = 0;
+    this.bus.clear();
+    this.combat.projectiles.length = 0;
+    this.hud.clearKillFeed();
+    this.spawnDummies();
+    this.combat.setCombatants([this.player, ...this.dummies]);
+  }
+
+  // Shooting-range targets on the opposite slope (milestone 2 test aid).
+  spawnDummies() {
+    for (const d of this.dummies) d.dispose(this.scene);
+    this.dummies = [];
+    const px = this.player.pos.x;
+    const T = this.terrain;
+    const spots = [[-25, 45, 'stand'], [15, 90, 'crouch'], [55, 140, 'prone'], [-60, 70, 'stand'], [35, 30, 'crouch']];
+    spots.forEach(([dx, dz, stance], i) => {
+      let x = px + dx, z = T.riverCenter(px + dx) - 20 - dz;
+      const q = { x, z };
+      for (let k = 0; k < 3; k++) this.world.collideCircle(q, 1.2);
+      this.dummies.push(new TargetDummy(this.scene, `TARGET ${i + 1}`, q.x, q.z, T, stance, Math.PI));
+    });
+  }
+
+  onKill(shooter, victim, dist, part) {
+    const d = Math.round(dist);
+    if (shooter.isPlayer) {
+      this.hud.hitMarker(true);
+      this.hud.centerMessage(`${part === 'head' ? 'HEADSHOT' : 'HIT'} · ${d} m`, victim.name, 1.6);
+    }
+    this.hud.killFeed(`<span class="${shooter.team === 0 ? 'f' : 'e'}">${shooter.name}</span> ✕ <span class="${victim.team === 0 ? 'f' : 'e'}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}`);
+  }
+
+  playerFire() {
+    const p = this.player;
+    if (!this.combat.canFire(p, this.time)) return;
+    const dir = p.aimDir(new THREE.Vector3());
+    // unscoped shots are inaccurate
+    const spread = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(CONFIG.weapon.hipSpread, 0, THREE.MathUtils.smoothstep(p.scopeT, 0.5, 0.95)));
+    if (spread > 0) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spread;
+      const right = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
+      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      dir.applyAxisAngle(up, Math.cos(a) * r).applyAxisAngle(right, Math.sin(a) * r).normalize();
+    }
+    if (this.combat.fire(p, dir, this.time)) {
+      p.applyRecoil();
+      this.viewmodel.onFire(this.time);
+      this.audio.bolt(0.25);
+    }
   }
 
   frame() {
@@ -203,6 +271,7 @@ class Game {
     }
     const running = this.state === 'playing' && !this.paused;
     this.simulate(running ? dtReal : 0, running ? input : this.idleInput());
+    this.effects.update(dtReal, this.camera);
     this.render(dtReal);
     input.endFrame();
   }
@@ -211,7 +280,13 @@ class Game {
   simulate(dt, input) {
     if (dt > 0) this.time += dt;
     SHARED.uTime.value = this.realTime;
-    this.player.update(dt, input, this.world, this.terrain, this.time);
+    const p = this.player;
+    p.update(dt, input, this.world, this.terrain, this.time);
+    p.bodyYaw = p.yaw;
+    p.hitbox.update(p);
+    if (dt > 0 && p.alive && input.wasClicked && input.wasClicked(0)) this.playerFire();
+    this.combat.update(dt, this.time);
+    for (const d of this.dummies) d.update(dt);
   }
 
   // Test hook: run the simulation without rendering (fixed steps).
@@ -230,9 +305,11 @@ class Game {
     this.updateRenderSystems(dtReal);
     this.post.uniforms.uScope.value = THREE.MathUtils.smoothstep(this.player.scopeT, 0.55, 1.0);
     this.post.render(dtReal, this.realTime);
+    const p = this.player;
+    const boltT = THREE.MathUtils.clamp(1 - (p.boltReadyTime - this.time) / CONFIG.weapon.boltTime, 0, 1);
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
-      inWater: this.player.inWater > 0.05, boltT: 1, glint: this.player.scoped, aimedAt: false,
+      inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped, aimedAt: false,
       outside: false, holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.player.yaw,
     });
     if (this.debug) this.hud.setDebug(this.debugText(), true); else this.hud.setDebug('', false);
@@ -266,6 +343,18 @@ class Game {
     this.grass.update(p.scopeT > 0.5 ? focus : cam.position);
     this.water.update(this.realTime);
     SHARED.uSunDirView.value.copy(this.sky.sunDir).transformDirection(cam.matrixWorldInverse);
+    // is the player standing in shade? (dims the first-person rifle)
+    this.shadeTimer = (this.shadeTimer || 0) - dt;
+    if (this.shadeTimer <= 0) {
+      this.shadeTimer = 0.25;
+      this.inShade = !!this.world.raycast(p.eyePos(new THREE.Vector3()), this.sky.sunDir, 200, { terrain: true });
+    }
+    this.viewmodel.update(dt, this.time, p, SHARED.uSunDirView.value, this.inShade);
+    this.audio.updateListener(cam);
+    // river ambience from the nearest point on the river centre line
+    const rz = this.terrain.riverCenter(cam.position.x);
+    const rp = new THREE.Vector3(cam.position.x, 0, rz);
+    this.audio.setRiverSource(rp, Math.abs(cam.position.z - rz) + Math.max(0, cam.position.y) * 0.5);
   }
 
   // Debug/test hook: place the player and camera.
