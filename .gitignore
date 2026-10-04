@@ -3,3 +3,7 @@ dist
 .DS_Store
 *.log
 .scratch
+
+# photoscanned textures downloaded by `npm run assets` (CC0, large; fetch per machine)
+public/assets/textures/
+public/assets/assets.json

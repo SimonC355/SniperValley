@@ -53,7 +53,7 @@ export class SpotMap {
         if (T.waterDepthAt(x, z) > 0) continue;
         const n = T.normalAt(x, z);
         if (n.y < 0.84) continue;
-        if (world.query(x, z, 1.1, ['tree', 'rock']).length) continue;
+        if (world.query(x, z, 1.1, ['tree', 'rock', 'log', 'stump']).length) continue;
         const h = T.heightAt(x, z);
         const eye = new THREE.Vector3(x, h + 0.55, z);
         let vis = 0;
@@ -64,7 +64,7 @@ export class SpotMap {
           if (world.lineOfSight(eye, tp)) vis++;
         }
         if (vis === 0) continue;
-        const cover = Math.min(1, world.query(x, z, 3, ['tree', 'rock', 'bush']).length * 0.3);
+        const cover = Math.min(1, world.query(x, z, 3, ['tree', 'rock', 'bush', 'log', 'stump']).length * 0.3);
         const height = dz / 172;
         const canopy = T.canopyAt(x, z);
         cands.push({
@@ -617,13 +617,20 @@ class AIBrain {
     let mx = dx / dist, mz = dz / dist;
     if (this.detour && time < this.detour.until) { mx = this.detour.x; mz = this.detour.z; }
     // avoid trunks/rocks ahead
-    const ahead = g.world.query(cb.pos.x + mx * 1.6, cb.pos.z + mz * 1.6, 1.6, ['tree', 'rock']);
+    const ahead = g.world.query(cb.pos.x + mx * 1.6, cb.pos.z + mz * 1.6, 1.6, ['tree', 'rock', 'stump', 'log']);
     for (const o of ahead) {
+      if (o.kind === 'log') {
+        // walk around a fallen log: follow it toward the end nearer the target
+        const lx = o.b.x - o.a.x, lz = o.b.z - o.a.z, ll = Math.hypot(lx, lz) || 1;
+        const s = (lx * dx + lz * dz) >= 0 ? 1 : -1;
+        mx = (lx / ll) * s; mz = (lz / ll) * s;
+        break;
+      }
       const ox = o.x - cb.pos.x, oz = o.z - cb.pos.z;
       const along = ox * mx + oz * mz;
       if (along < 0) continue;
       const lat = ox * -mz + oz * mx;
-      const r = (o.kind === 'tree' ? o.r : o.r * 0.9) + 0.6;
+      const r = (o.kind === 'rock' ? o.r * 0.9 : o.r) + 0.6;
       if (Math.abs(lat) < r) {
         const s = lat > 0 ? -1 : 1;
         const nx = mx * Math.cos(0.9 * s) - mz * Math.sin(0.9 * s);

@@ -5,19 +5,47 @@ in `src/config.js`. This file explains how the spec was interpreted and where I 
 
 ## Assets (important)
 
-The build environment's network policy **blocked Poly Haven, Quaternius and jsDelivr**, so
-no CC0 assets could be downloaded. As the brief allowed, everything is generated
-procedurally at load time:
+The build environment's network policy **blocked Poly Haven, Quaternius, ambientCG and
+jsDelivr**, so no CC0 assets could be downloaded here. As the brief allowed, everything is
+generated procedurally at load time by default:
 
 - Terrain, rock, bark, mud and water textures are baked on the GPU into tileable render targets
   (albedo + height, then normal + roughness). The code is in `src/textures.js`.
 - Needle sprays, pine tufts, ferns, leaves and ghillie strips are drawn with Canvas2D.
-- Trees (spruce, fir, pine, dead snag), undergrowth, rocks, ghillie characters, the rifle and
-  crows are generated meshes.
+- Trees (spruce, fir, pine, dead snag), undergrowth, rocks, logs, stumps, ghillie characters,
+  the rifle and crows are generated meshes.
 - All audio is synthesised with WebAudio (no sample files).
 
-`public/assets/` is empty. To try real CC0 assets later, replace the texture or mesh builders.
-The rest of the game only depends on their outputs.
+### Photoscanned textures: `npm run assets`
+
+Because the downloads work on a normal machine, `scripts/fetch-assets.mjs` fetches CC0
+photoscans from Poly Haven into `public/assets/` there.
+
+- **Slots**: grass, forest floor, rock, mud, spruce bark and pine bark. Each slot has a list of
+  preferred Poly Haven ids. If none of them exists, it falls back to the best tag match in the
+  catalogue (with words such as *wall*, *paving* or *planks* penalised), so a renamed asset
+  does not break the script.
+- **Files**: diffuse, OpenGL normal, roughness (or the G channel of `arm`) and displacement, at
+  2k by default. The script writes `public/assets/assets.json` (ids, authors, real-world size)
+  and the CC0 table in CREDITS.md.
+- **Loading** (`src/assets.js`): at startup each slot is packed on the GPU into exactly the
+  layout of the procedural bakes (albedo + height in alpha, normal + roughness in alpha), so
+  terrain, boulders, bark, grass colour and debris use them unchanged.
+  - The terrain and boulder tile size comes from Poly Haven's real-world dimensions.
+  - `assets.adjust` (gain, saturation, normal and height strength) and `assets.tileScale` in
+    the config tune each slot.
+  - Missing files, a bad manifest or `?photo=0` fall back to the procedural texture for that
+    slot.
+- **Not in git**: the downloads are git-ignored because they total about 70 MB at 2k. Every
+  machine runs `npm run assets` once.
+- **Testing**: I could only run the script against a local mock of the Poly Haven API that
+  serves the same JSON shapes (catalogue, `/files/{id}`, download URLs). The mock covered the
+  `arm` roughness fallback, a missing displacement map and tag-based picking. The game then
+  loaded the mock textures correctly on terrain, rocks and bark. **The real API and real
+  photoscans are untested here.** Expect to tune colour and tile size once real textures are
+  in.
+- **Scope**: textures only. Trees stay procedural: realistic CC0 conifer models are rare, and
+  the tree system depends on its own LOD, impostor and wind setup.
 
 ## Map
 
@@ -127,6 +155,8 @@ The rest of the game only depends on their outputs.
   - **Glints**: seeing your glint raises awareness and, once sustained, triggers investigate.
   - **Hearing**: shot bearing error is ±14° (growing with distance) and range error ±25%, so a
     heard shot gives an *area*, not a point. Splashes and footsteps are heard at short range.
+- **Logs and stumps** count as cover when sniper spots are scored. Moving AI follow a log to
+  its nearer end instead of walking into it.
 - **Scanning** favours likely hides: mostly good spots on the opposite slope that are visible
   from where the AI sits. That is terrain knowledge, not enemy knowledge. About 45% of scans
   are scoped, so AI glint while they scan.
@@ -137,8 +167,11 @@ The rest of the game only depends on their outputs.
   moving slowly, and ×0.85 against prone. A miss lands 0.6–1.8 m off and still uses real
   raycasts, so trees can eat shots.
 - AI never fire through teammates. You can (friendly fire is on).
-- **Balance check**: six AI-only 3v3 rounds took 90–180 s and all ended in elimination.
-  ALPHA won 5 of 6.
+- **Balance check** (before the forest-floor debris): six AI-only 3v3 rounds took 90–180 s and
+  all ended in elimination. ALPHA won 5 of 6.
+- **After the logs and stumps**, which add cover: four of six AI-only 3v3 rounds ended by
+  elimination within 4 minutes (BRAVO won 3, ALPHA 1). Two were still 1v1 at the 4-minute
+  mark. No AI stayed stuck on a log.
 
 ## Player
 
@@ -167,6 +200,7 @@ The rest of the game only depends on their outputs.
 | Tree crown *core* (inner ~40% radius, where foliage is drawn dense) | yes | yes |
 | Outer needle cards | no | no (gaps you can see through are real) |
 | Rocks | yes | yes |
+| Fallen logs, stumps | yes | yes (cover for prone players; logs block walking, but you can jump over them) |
 | Bushes, ferns | no | soften AI visibility |
 | Water surface | stops bullets (splash) | no |
 
@@ -188,13 +222,31 @@ The rest of the game only depends on their outputs.
 - **Water**: planar reflection at half resolution (it skips grass, undergrowth and LOD0 trees,
   and uses a coarse terrain), fresnel, transparency from the depth heightmap, flowing normals
   and sun glints.
+- **Light shafts**: a screen-space radial blur of the sky around the sun (after GPU Gems 3,
+  ch. 13), at quarter resolution, added in HDR before the viewmodel.
+  - Sky pixels next to branches and trunks feed the shafts; open sky only adds a faint glow,
+    so open views do not wash out.
+  - They fade out when the sun is behind you or far off-screen. Esc → Sun shafts, or
+    `?shafts=0`.
+- **Colour grading** (`grade` in the config): log-space contrast around mid grey, saturation,
+  and split toning (warm highlights, cool shadows), applied before ACES.
+- **Fog** density went from 0.0024 to 0.002 so mid-range scope views are less grey.
+- **Tree colour**: each tree gets a slight hue shift (yellower vs bluer stands plus per-tree
+  jitter), so slopes no longer look like one repeated tree.
+- **Forest floor** (`src/debris.js`):
+  - About 240 fallen logs: mossy tops, one cut end, one splintered end, resting on both ends.
+  - About 320 stumps with root flare and a cut top.
+  - About 2,000 dead branches, drawn within about 70 m.
+  - Everything sits under the canopy and keeps clear of trunks. None of it is drawn in the
+    water reflection.
 - **Post-processing**:
   - Half-res depth-based SSAO. Three's GTAO pass re-renders the scene with an override material
     that ignores alpha-cut foliage.
   - Bloom, tuned so that only the glint, muzzle flash, sun disc and water sparkles bloom.
   - A lens pass with barrel distortion, chromatic aberration, a mil-dot duplex reticle,
     vignette and grain.
-- **Budget**: about 1.3M triangles and about 165 draw calls per frame from a slope vista.
+- **Budget**: about 1.44M triangles and about 220 draw calls per frame from a slope vista,
+  up from about 1.22M and 176 at the same view before the forest floor and light shafts.
   **I could only render with a software rasteriser here, so real frame rates are unmeasured.**
   - Options: render scale, shadow quality (off/low/medium/high), SSAO, bloom, reflections,
     MSAA, grass density.
@@ -208,4 +260,7 @@ The rest of the game only depends on their outputs.
 - AI don't use the sun direction (glare), and the glint ignores the sun angle. Both are cheap
   next steps if the designer wants sun-side tactics.
 - Bird motion is analytic and the flocks don't avoid trees.
+- Grass blades can poke through fallen logs.
+- Light shafts are screen-space, so they need the sun on screen or near it.
+- The light shafts don't affect the AI. Looking into the sun is harder only for the player.
 - No points or ranking (out of scope).

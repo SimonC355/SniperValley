@@ -66,6 +66,7 @@ export class Grass {
       tHeight: { value: terrain.heightTexture },
       tSplat: { value: terrain.splatTexture },
       tGrassA: { value: textures.grass.map },
+      uGrassTile: { value: textures.grass.tile || 3.3 },
       tMacro: { value: textures.macro },
       uHB: { value: terrain.gridBounds },
       uFadeCenter: { value: new THREE.Vector2() },
@@ -132,11 +133,12 @@ vec3 objectTangent = vec3(tangent.xyz);
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
 uniform sampler2D tGrassA, tMacro;
+uniform float uGrassTile;
 varying vec2 vBaseXZ;
 varying float vT;
 varying float vShade;`)
         .replace('#include <map_fragment>', `
-vec3 gcol = texture(tGrassA, vBaseXZ / 3.3).rgb;
+vec3 gcol = textureLod(tGrassA, vBaseXZ / uGrassTile, 3.0).rgb;
 vec4 mac = texture(tMacro, vBaseXZ / 47.0);
 gcol *= 0.82 + 0.36 * mac.r;
 float lum = dot(gcol, vec3(0.3, 0.6, 0.1));

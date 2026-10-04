@@ -107,6 +107,7 @@ export class HUD {
         <label>Shadows</label><select id="set-shadow"><option>off</option><option>low</option><option>medium</option><option>high</option></select>
         <label>Ambient occlusion</label><select id="set-ao"><option value="1">on</option><option value="0">off</option></select>
         <label>Bloom</label><select id="set-bloom"><option value="1">on</option><option value="0">off</option></select>
+        <label>Sun shafts</label><select id="set-shafts"><option value="1">on</option><option value="0">off</option></select>
         <label>Water reflections</label><select id="set-refl"><option value="1">on</option><option value="0">off</option></select>
         <label>MSAA (reload)</label><select id="set-msaa"><option value="4">4x</option><option value="0">off</option></select>
         <label>Grass density (reload)</label><input id="set-grass" type="range" min="0" max="1.5" step="0.1">
@@ -157,6 +158,7 @@ export class HUD {
         g('shadow').value = CONFIG.render.shadowQuality;
         g('ao').value = CONFIG.render.ao ? '1' : '0';
         g('bloom').value = CONFIG.render.bloom ? '1' : '0';
+        g('shafts').value = CONFIG.render.sunShafts ? '1' : '0';
         g('refl').value = CONFIG.render.reflections ? '1' : '0';
         g('msaa').value = String(CONFIG.render.msaa);
         g('grass').value = String(CONFIG.render.grassDensity);
@@ -173,6 +175,7 @@ export class HUD {
       on('shadow', (v) => { CONFIG.render.shadowQuality = v; });
       on('ao', (v) => { CONFIG.render.ao = v === '1'; });
       on('bloom', (v) => { CONFIG.render.bloom = v === '1'; });
+      on('shafts', (v) => { CONFIG.render.sunShafts = v === '1'; });
       on('refl', (v) => { CONFIG.render.reflections = v === '1'; });
       on('msaa', (v) => { CONFIG.render.msaa = parseInt(v, 10); });
       on('grass', (v) => { CONFIG.render.grassDensity = parseFloat(v); });

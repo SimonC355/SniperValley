@@ -2,14 +2,23 @@
 
 ## Assets
 
-All textures, meshes and sounds in this prototype are **generated procedurally at runtime** by
-the code in `src/` (GPU-baked noise textures, Canvas2D foliage and ghillie strips, generated
-trees, rocks, characters, rifle, birds, and WebAudio synthesis). No third-party art or audio
-files are included.
+By default, all textures, meshes and sounds in this prototype are **generated procedurally at
+runtime** by the code in `src/`:
 
-The intended CC0 sources (Poly Haven, Quaternius) could not be downloaded from the build
-environment because its network policy blocked them. `public/assets/` is reserved for CC0
-replacements. If you add any, list them here with author, source URL and licence (CC0).
+- GPU-baked noise textures, Canvas2D foliage and ghillie strips.
+- Generated trees, rocks, logs, stumps, characters, rifle and birds.
+- WebAudio synthesis.
+
+No third-party art or audio files are included in the repository.
+
+`npm run assets` optionally downloads CC0 photoscanned textures from
+[Poly Haven](https://polyhaven.com) into `public/assets/`, which is git-ignored. The script
+rewrites the block below with the downloaded assets and their authors. Poly Haven assets are
+CC0 1.0, so credit is appreciated but not required.
+
+<!-- photo-assets:begin -->
+_No photoscanned textures downloaded. Run `npm run assets` to fetch CC0 textures from Poly Haven._
+<!-- photo-assets:end -->
 
 ## Libraries
 

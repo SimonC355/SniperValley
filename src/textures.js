@@ -330,7 +330,7 @@ export class TextureBaker {
       depthTest: false, depthWrite: false,
     });
     this._render(nmat, normal);
-    return { map: albedo.texture, normalMap: normal.texture };
+    return { map: albedo.texture, normalMap: normal.texture, dispose() { albedo.dispose(); normal.dispose(); } };
   }
 
   bakeData(bakeGLSL, size, seed = 1) {

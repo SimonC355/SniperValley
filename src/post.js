@@ -8,6 +8,10 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { CONFIG } from './config.js';
+import { sunDirection } from './shaders.js';
+
+const SUN_DIR = sunDirection();
+const _fwd = new THREE.Vector3(), _sunP = new THREE.Vector3();
 
 const SSAO_FRAG = /* glsl */`
 uniform sampler2D tDepth;
@@ -160,6 +164,126 @@ class SSAOPass extends Pass {
   }
 }
 
+// Screen-space light shafts (radial blur of the sky around the sun, after Mitchell,
+// GPU Gems 3 ch. 13). The mask and blurs run at quarter resolution; the result is added to
+// the HDR image before the viewmodel is drawn, so the rifle stays in front of the rays.
+// The scene depth comes from the RenderPass target (set per frame by PostFX).
+const SHAFT_MASK_FRAG = /* glsl */`
+uniform sampler2D tDiffuse;
+uniform sampler2D tDepth;
+uniform vec2 uSun;
+uniform float uAspect;
+uniform vec2 uTexel;
+varying vec2 vUv;
+float skyAt(vec2 uv) { return step(0.99999, texture2D(tDepth, uv).r); }
+void main() {
+  float sky = skyAt(vUv);
+  if (sky < 0.5) { gl_FragColor = vec4(0.0); return; }
+  // Shafts come from light breaking through gaps: open sky far from any occluder only
+  // adds a faint glow, sky next to branches and trunks adds the full amount.
+  float occl = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.785398 + 0.39;
+    vec2 o = vec2(cos(a), sin(a)) * uTexel;
+    occl += 1.0 - skyAt(vUv + o * 10.0);
+    occl += 1.0 - skyAt(vUv + o * 26.0);
+  }
+  float edge = smoothstep(0.0, 0.35, occl / 16.0);
+  vec3 c = texture2D(tDiffuse, vUv).rgb;
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  vec2 dv = (vUv - uSun) * vec2(uAspect, 1.0);
+  float fall = pow(max(0.0, 1.0 - length(dv) / 1.0), 2.0);
+  gl_FragColor = vec4(vec3(fall * mix(0.12, 1.0, edge) * (0.35 + 0.65 * clamp(lum / 2.4, 0.0, 1.0))), 1.0);
+}`;
+
+const SHAFT_BLUR_FRAG = /* glsl */`
+uniform sampler2D tSrc;
+uniform vec2 uSun;
+uniform float uLength;
+varying vec2 vUv;
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+void main() {
+  const int N = 36;
+  vec2 delta = (vUv - uSun) * uLength / float(N);
+  vec2 uv = vUv - delta * ign(gl_FragCoord.xy);
+  float illum = 1.0, acc = 0.0, wsum = 0.0;
+  for (int i = 0; i < N; i++) {
+    acc += texture2D(tSrc, uv).r * illum;
+    wsum += illum;
+    illum *= 0.975;
+    uv -= delta;
+  }
+  gl_FragColor = vec4(vec3(acc / wsum), 1.0);
+}`;
+
+const SHAFT_ADD_FRAG = /* glsl */`
+uniform sampler2D tDiffuse;
+uniform sampler2D tShafts;
+uniform vec3 uColor;
+varying vec2 vUv;
+void main() {
+  vec4 c = texture2D(tDiffuse, vUv);
+  float s = texture2D(tShafts, vUv).r;
+  gl_FragColor = vec4(c.rgb + uColor * (1.8 * s / (0.35 + s)), c.a);
+}`;
+
+class SunShaftsPass extends Pass {
+  constructor() {
+    super();
+    this.needsSwap = true;
+    this.depthTexture = null;
+    const mk = () => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+    this.rtA = mk();
+    this.rtB = mk();
+    this.sun = new THREE.Vector2(0.5, 0.5);
+    this.color = new THREE.Color();
+    this.maskMat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: SHAFT_MASK_FRAG,
+      uniforms: { tDiffuse: { value: null }, tDepth: { value: null }, uSun: { value: this.sun }, uAspect: { value: 1 }, uTexel: { value: new THREE.Vector2() } },
+      depthTest: false, depthWrite: false,
+    });
+    this.blurMat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: SHAFT_BLUR_FRAG,
+      uniforms: { tSrc: { value: null }, uSun: { value: this.sun }, uLength: { value: 1 } },
+      depthTest: false, depthWrite: false,
+    });
+    this.addMat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: SHAFT_ADD_FRAG,
+      uniforms: { tDiffuse: { value: null }, tShafts: { value: null }, uColor: { value: this.color } },
+      depthTest: false, depthWrite: false,
+    });
+    this.quad = new FullScreenQuad(null);
+  }
+
+  setSize(w, h) {
+    this.rtA.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+    this.rtB.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+    this.maskMat.uniforms.uAspect.value = w / Math.max(1, h);
+    this.maskMat.uniforms.uTexel.value.set(1 / Math.max(1, w), 1 / Math.max(1, h));
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    this.maskMat.uniforms.tDiffuse.value = readBuffer.texture;
+    this.maskMat.uniforms.tDepth.value = this.depthTexture;
+    renderer.setRenderTarget(this.rtA);
+    this.quad.material = this.maskMat;
+    this.quad.render(renderer);
+    const b = this.blurMat.uniforms;
+    b.tSrc.value = this.rtA.texture; b.uLength.value = 0.85;
+    renderer.setRenderTarget(this.rtB);
+    this.quad.material = this.blurMat;
+    this.quad.render(renderer);
+    b.tSrc.value = this.rtB.texture; b.uLength.value = 0.3;
+    renderer.setRenderTarget(this.rtA);
+    this.quad.render(renderer);
+    this.addMat.uniforms.tShafts.value = this.rtA.texture;
+    this.addMat.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.material = this.addMat;
+    this.quad.render(renderer);
+  }
+}
+
 const FINAL_FRAG = /* glsl */`
 uniform sampler2D tDiffuse;
 uniform float uExposure;
@@ -173,6 +297,7 @@ uniform float uDamage;
 uniform float uOutside;
 uniform float uFade;
 uniform vec2 uReticleOffset;
+uniform vec3 uGrade; // saturation, contrast, warmth
 varying vec2 vUv;
 
 vec3 RRTAndODTFit(vec3 v) {
@@ -213,7 +338,14 @@ void main() {
   } else {
     col = texture2D(tDiffuse, uv).rgb;
   }
-  col = ACES(col * uExposure);
+  col *= uExposure;
+  // grading in linear HDR: log-space contrast around mid grey, saturation, split toning
+  col = 0.18 * exp2(log2(max(col, vec3(1e-5)) / 0.18) * uGrade.y);
+  float lumG = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = max(mix(vec3(lumG), col, uGrade.x), 0.0);
+  float tone = smoothstep(0.03, 0.7, lumG);
+  col *= mix(vec3(1.0 - uGrade.z * 0.6, 1.0, 1.0 + uGrade.z), vec3(1.0 + uGrade.z, 1.0, 1.0 - uGrade.z * 0.8), tone);
+  col = ACES(col);
   col = toSRGB(col);
 
   // general vignette
@@ -276,6 +408,8 @@ export class PostFX {
     this.ssao = new SSAOPass(camera);
     this.ssao.enabled = CONFIG.render.ao;
     this.composer.addPass(this.ssao);
+    this.shafts = new SunShaftsPass();
+    this.composer.addPass(this.shafts);
     if (vmScene) {
       this.vmPass = new RenderPass(vmScene, vmCamera);
       this.vmPass.clear = false;
@@ -301,6 +435,7 @@ export class PostFX {
         uOutside: { value: 0 },
         uFade: { value: 0 },
         uReticleOffset: { value: new THREE.Vector2() },
+        uGrade: { value: new THREE.Vector3(CONFIG.grade.saturation, CONFIG.grade.contrast, CONFIG.grade.warmth) },
       },
     }));
     this.composer.addPass(this.final);
@@ -318,6 +453,24 @@ export class PostFX {
     this.uniforms.uTime.value = time % 1000;
     this.ssao.enabled = CONFIG.render.ao;
     this.bloom.enabled = CONFIG.render.bloom;
+    this._updateShafts();
     this.composer.render(dt);
+  }
+
+  // Sun position on screen and fade (rays only when looking roughly toward the sun).
+  _updateShafts() {
+    const cam = this.camera;
+    const sp = this.shafts;
+    const fwd = cam.getWorldDirection(_fwd);
+    const facing = fwd.dot(SUN_DIR);
+    _sunP.copy(cam.position).addScaledVector(SUN_DIR, 1000).project(cam);
+    const off = Math.max(Math.abs(_sunP.x), Math.abs(_sunP.y));
+    const fade = THREE.MathUtils.smoothstep(facing, 0.05, 0.45) * (1 - THREE.MathUtils.smoothstep(off, 1.1, 2.0));
+    sp.enabled = CONFIG.render.sunShafts && fade > 0.01 && !!this.composer.readBuffer.depthTexture;
+    if (!sp.enabled) return;
+    sp.sun.set(_sunP.x * 0.5 + 0.5, _sunP.y * 0.5 + 0.5);
+    sp.color.set(CONFIG.sun.color).multiplyScalar(CONFIG.grade.shafts * fade);
+    // the RenderPass draws into the composer's current read buffer; its depth is the scene depth
+    sp.depthTexture = this.composer.readBuffer.depthTexture;
   }
 }

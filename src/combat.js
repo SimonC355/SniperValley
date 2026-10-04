@@ -93,7 +93,7 @@ export class Combat {
       return true;
     }
     if (kind) {
-      const k = kind === 'terrain' ? (this.terrain.canopyAt(end.x, end.z) > 0.5 ? 'forest' : 'ground') : kind;
+      const k = kind === 'terrain' ? (this.terrain.canopyAt(end.x, end.z) > 0.5 ? 'forest' : 'ground') : (kind === 'log' || kind === 'stump' ? 'tree' : kind);
       this.effects.impact(end, k === 'forest' ? 'ground' : k);
       this.audio.impact(end, k);
       this.bus.emit({ type: 'impact', position: end.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id, kind: k });

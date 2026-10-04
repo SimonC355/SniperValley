@@ -9,12 +9,29 @@ scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 
 ```bash
 npm install
+npm run assets     # optional: download CC0 photoscanned textures from Poly Haven (~70 MB)
 npm run dev        # http://localhost:5173
 npm run build      # static build in dist/
 ```
 
 Requires a desktop browser with WebGL2 and a mouse. The first load takes a few seconds while
 textures, the forest and sniper positions are generated.
+
+### Photoscanned textures (optional)
+
+`npm run assets` downloads CC0 photoscanned ground, forest-floor, rock, mud and bark
+textures from [Poly Haven](https://polyhaven.com) into `public/assets/`. It writes
+`public/assets/assets.json` and lists the assets in CREDITS.md. The game uses them
+automatically on the next load and falls back to its procedural textures when they are
+missing.
+
+- `npm run assets -- --list` shows the candidates per slot.
+- `--slot forest=<id>` picks a specific Poly Haven texture.
+- `--res 1k` downloads less and uses less GPU memory.
+- `--clean` removes the downloads.
+
+Open the game with `?photo=0` to compare with the procedural textures. The downloads are
+git-ignored because they are large, so every machine runs the command once.
 
 ## Controls
 
@@ -38,7 +55,8 @@ textures, the forest and sniper positions are generated.
 
 `?mode=radial` · `?team=3` (1–5) · `?ballistics=1` · `?tracers=off|faint|bright` ·
 `?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
-hitboxes) · `?autostart` (skip the menu).
+hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
+are downloaded) · `?shafts=0` (no light shafts).
 
 Every other tunable is in [`src/config.js`](src/config.js).
 
@@ -52,9 +70,11 @@ src/
   water.js       river: planar reflection, fresnel, depth transparency
   trees.js       procedural conifers (LOD0/LOD1/impostor/shadow proxy) + undergrowth
   rocks.js       procedural boulders
+  debris.js      fallen logs, stumps and dead branches (logs and stumps are cover)
   grass.js       instanced grass tiles around the viewer
   sky.js         sky, sun, environment light, shadow frustum
   textures.js    GPU-baked terrain/bark/water textures, Canvas2D foliage + ghillie strips
+  assets.js      loads optional photoscanned textures (public/assets) in place of the bakes
   shaders.js     shared uniforms, exponential height fog, foliage material patch
   world.js       analytic raycasts / line of sight / collisions (no physics engine)
   player.js      first-person controller, scope, sway, recoil
@@ -69,7 +89,9 @@ src/
   effects.js     muzzle flash, glint, impacts, tracers
   viewmodel.js   first-person rifle
   audio.js       synthesised WebAudio
-  post.js        SSAO, bloom, tone mapping, scope lens, vignette, grain
+  post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
+scripts/
+  fetch-assets.mjs   `npm run assets`: CC0 texture downloader (Poly Haven API)
   hud.js         HUD and menus
 ```
 
@@ -126,3 +148,14 @@ are in [CREDITS.md](CREDITS.md).
   glints and flashes.
 - Watch tree LODs from far away, then scope in: full detail appears in the scope.
 - Listen for valley echo on distant shots, river ambience near the water, and wind.
+
+**Graphics upgrade (photoscans, light shafts, forest floor)**
+- Run `npm run assets`, then `npm run dev`. The console should log
+  `[assets] photoscanned textures: grass=…, forest=…`. Compare ground, rocks and bark with
+  `?photo=0`. If the colours or texture scale look off, tune `assets.adjust` and
+  `assets.tileScale` in `src/config.js`, or pick other textures with `--slot`.
+- Look toward the low sun (southwest) through the trees to see the light shafts. Switch them off
+  under Esc → Sun shafts to compare.
+- Walk through the forest. Look for fallen logs with moss on top, stumps and dead branches.
+  Lie prone behind a log: it stops bullets and blocks the AI's line of sight. You cannot walk
+  through logs, but you can jump over them.

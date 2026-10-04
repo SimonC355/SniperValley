@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { installHeightFog, SHARED } from './shaders.js';
 import { createTextures } from './textures.js';
+import { loadPhotoTextures } from './assets.js';
+import { Debris } from './debris.js';
 import { Terrain } from './terrain.js';
 import { SkySystem } from './sky.js';
 import { Forest, Undergrowth } from './trees.js';
@@ -61,6 +63,8 @@ class Game {
     this.hud.setLoading('BAKING TEXTURES');
     await nextFrame();
     this.textures = createTextures(renderer, CONFIG.seed);
+    this.hud.setLoading('LOADING PHOTOSCANNED TEXTURES');
+    this.photoSlots = await loadPhotoTextures(renderer, this.textures);
 
     this.hud.setLoading('SHAPING THE VALLEY');
     await nextFrame();
@@ -77,18 +81,19 @@ class Game {
     scene.add(terrain.buildMesh(this.textures));
     this.undergrowth = new Undergrowth(scene, terrain, this.forest, this.textures, CONFIG.seed);
     this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed);
+    this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed);
     this.grass = new Grass(scene, terrain, this.textures);
 
     this.hud.setLoading('FILLING THE RIVER');
     await nextFrame();
     this.water = new Water(scene, terrain, this.textures, renderer);
     // Reflections skip grass, undergrowth and full-detail trees (the far bank dominates the mirror image).
-    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, terrain.mesh);
+    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, this.debris.group, terrain.mesh);
     const reflTerrain = terrain.buildReflectionMesh();
     scene.add(reflTerrain);
     this.water.showDuringReflection.push(reflTerrain);
     for (const name in this.forest.buckets) this.water.hideDuringReflection.push(...this.forest.buckets[name].l0.meshes);
-    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth);
+    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris);
     this.hud.setLoading('SCOUTING SNIPER POSITIONS');
     await nextFrame();
     this.spots = new SpotMap(this.world, terrain, CONFIG.seed);
@@ -163,7 +168,7 @@ class Game {
     window.__game = this;
     window.THREE = THREE;
     this.config = CONFIG;
-    console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}`);
+    console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
   }
 
   pixelRatio() {
@@ -229,7 +234,7 @@ class Game {
       const x = baseX + (Math.random() - 0.5) * 30;
       const z = T.riverCenter(x) + side * (95 + Math.random() * 50);
       if (T.waterDepthAt(x, z) > 0) continue;
-      const near = this.world.query(x, z, 2.5, ['tree', 'rock']);
+      const near = this.world.query(x, z, 2.5, ['tree', 'rock', 'log', 'stump']);
       if (near.length) continue;
       return { x, z };
     }
@@ -295,7 +300,7 @@ class Game {
         const x = bx + (Math.random() - 0.5) * 20;
         const z = T.riverCenter(x) + side * (105 + Math.random() * 45);
         if (Math.abs(z) > T.halfZ - 6 || T.waterDepthAt(x, z) > 0) continue;
-        if (this.world.query(x, z, 1.5, ['tree', 'rock']).length) continue;
+        if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump']).length) continue;
         best = { x, z };
       }
       out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 });

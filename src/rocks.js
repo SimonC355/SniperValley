@@ -58,6 +58,7 @@ export class Rocks {
       shader.uniforms.tRockA = { value: textures.rock.map };
       shader.uniforms.tRockN = { value: textures.rock.normalMap };
       shader.uniforms.tGrassA = { value: textures.forest.map };
+      shader.uniforms.uRockTile = { value: textures.rock.tile || 3.0 };
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;')
         .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
@@ -76,12 +77,13 @@ export class Rocks {
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
 uniform sampler2D tRockA, tRockN, tGrassA;
+uniform float uRockTile;
 varying vec3 vWP;
 varying vec3 vWN;`)
         .replace('#include <map_fragment>', `
 vec3 wn = normalize(vWN);
 vec3 bw = pow(abs(wn), vec3(4.0)); bw /= dot(bw, vec3(1.0));
-vec2 ux = vWP.zy / 3.0, uy = vWP.xz / 3.0, uz = vWP.xy / 3.0;
+vec2 ux = vWP.zy / uRockTile, uy = vWP.xz / uRockTile, uz = vWP.xy / uRockTile;
 vec3 alb = texture(tRockA, ux).rgb * bw.x + texture(tRockA, uy).rgb * bw.y + texture(tRockA, uz).rgb * bw.z;
 vec4 nx = texture(tRockN, ux), ny = texture(tRockN, uy), nz = texture(tRockN, uz);
 float moss = smoothstep(0.55, 0.85, wn.y + (texture(tRockA, uy * 0.5).a - 0.5) * 0.5);

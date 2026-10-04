@@ -34,11 +34,36 @@ export const CONFIG = {
     bloom: true,
     msaa: 4,               // 0 or 4
     reflections: true,
+    sunShafts: true,       // screen-space light shafts when looking toward the sun
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
     grain: 0.035,
     vignette: 0.32,
     farClip: 2600,
+  },
+
+  // Colour grading in the final pass (applied to linear HDR colour before tone mapping).
+  grade: {
+    saturation: 1.12,
+    contrast: 1.1,         // around mid grey, in log space
+    warmth: 0.05,          // warm highlights / cool shadows split toning
+    shafts: 0.45,          // light-shaft strength
+  },
+
+  // Photoscanned textures downloaded with `npm run assets` (CC0, Poly Haven) into
+  // public/assets/. When the folder is empty the procedural textures are used.
+  assets: {
+    photo: true,           // ?photo=0 forces the procedural textures for comparison
+    maxSize: 2048,         // packed texture size cap (1024 saves ~75% GPU memory)
+    tileScale: { grass: 1, forest: 1, rock: 1, mud: 1 },
+    adjust: {              // per-slot colour tweaks: gain, saturation, normal, height
+      grass: { gain: 1.0, saturation: 1.0 },
+      forest: { gain: 1.0, saturation: 1.0 },
+      rock: { gain: 1.0, saturation: 1.0 },
+      mud: { gain: 1.0, saturation: 1.0 },
+      barkSpruce: { gain: 1.0, saturation: 1.0 },
+      barkPine: { gain: 1.0, saturation: 1.0 },
+    },
   },
 
   sun: {
@@ -50,7 +75,7 @@ export const CONFIG = {
   },
 
   fog: {
-    density: 0.0024,       // exponential density at height 0
+    density: 0.002,        // exponential density at height 0
     heightFalloff: 0.028,  // per metre
     color: 0xb9c3c9,
     sunScatter: 0.6,
@@ -62,6 +87,13 @@ export const CONFIG = {
     mieCoefficient: 0.0035,
     mieDirectionalG: 0.84,
     cloudCover: 0.42,
+  },
+
+  // Forest-floor debris. Logs and stumps are cover (they stop bullets and sight).
+  debris: {
+    logs: 240,             // fallen trunks in the play area
+    stumps: 320,
+    branches: 2000,        // dead branches (visual only, drawn within ~70 m)
   },
 
   // ---------------------------------------------------------------- vegetation
@@ -238,5 +270,7 @@ try {
   if (q.get('ballistics')) CONFIG.weapon.ballistics.enabled = q.get('ballistics') === '1';
   if (q.get('tracers')) CONFIG.weapon.tracers = q.get('tracers');
   if (q.get('camo')) CONFIG.camouflageStrength = parseFloat(q.get('camo'));
+  if (q.get('photo')) CONFIG.assets.photo = q.get('photo') !== '0';
+  if (q.get('shafts')) CONFIG.render.sunShafts = q.get('shafts') !== '0';
   if (q.get('quality') === 'low') Object.assign(CONFIG.render, { renderScale: 0.7, shadowQuality: 'low', ao: false, msaa: 0, reflections: false, grassDensity: 0.5 });
 } catch (e) { /* ignore */ }

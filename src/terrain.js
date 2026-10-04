@@ -261,6 +261,8 @@ export class Terrain {
       tMudA: { value: T.mud.map }, tMudN: { value: T.mud.normalMap },
       tMacro: { value: T.macro },
       tSplat: { value: this.splatTexture },
+      // metres per texture repeat: grass, forest floor, rock (terrain scale), mud
+      uTile: { value: new THREE.Vector4(T.grass.tile || 3.3, T.forest.tile || 2.7, (T.rock.tile || 3.0) * 2.33, T.mud.tile || 2.9) },
       uGridBounds: { value: this.gridBounds },
       ...ZONE_UNIFORMS,
     };
@@ -279,6 +281,7 @@ vWNormal = normalize(mat3(modelMatrix) * objectNormal);`);
         .replace('#include <common>', `#include <common>
 uniform sampler2D tGrassA, tGrassN, tForestA, tForestN, tRockA, tRockN, tMudA, tMudN, tMacro, tSplat;
 uniform vec4 uGridBounds;
+uniform vec4 uTile;
 uniform float uZoneMode, uZoneCur, uZoneNext, uZoneWarn, uZoneHalfLen, uZoneRadius;
 uniform vec2 uZoneCenter;
 varying vec3 vWPos;
@@ -311,7 +314,7 @@ float rockW = smoothstep(0.17, 0.3, slope + (macro2.b - 0.5) * 0.12);
 rockW = max(rockW, smoothstep(0.8, 0.86, macro.g) * smoothstep(0.06, 0.14, slope));
 float mudW = 1.0 - smoothstep(0.25, 1.3, vWPos.y + (macro2.b - 0.5) * 0.8);
 float grassW = 1.0;
-vec2 uvG = wxz / 3.3, uvF = wxz / 2.7, uvR = wxz / 7.0, uvM = wxz / 2.9;
+vec2 uvG = wxz / uTile.x, uvF = wxz / uTile.y, uvR = wxz / uTile.z, uvM = wxz / uTile.w;
 vec4 aG = sampleAT(tGrassA, uvG, macro2.g);
 vec4 aF = sampleAT(tForestA, uvF, macro2.g);
 vec4 aR = sampleAT(tRockA, uvR + vec2(vWPos.y * 0.1), macro2.g);

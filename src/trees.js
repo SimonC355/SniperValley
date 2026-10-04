@@ -4,7 +4,7 @@
 // (distance scaled by FOV, so scoped views get full detail) with per-instance culling.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { RNG, Simplex, clamp, lerp, smoothstep } from './noise.js';
+import { RNG, Simplex, clamp, lerp, smoothstep, hash2 } from './noise.js';
 import { patchFoliage, SHARED } from './shaders.js';
 
 const VARIANTS = {
@@ -421,6 +421,9 @@ export class Forest {
     const s = lerp(0.62, 1.22, clamp(age * 0.7 + this.rng.float(0, 0.45), 0, 1));
     const rot = this.rng.float(0, Math.PI * 2);
     const tintJ = this.rng.float(0.88, 1.1);
+    // hue: stands of yellower vs bluer trees plus per-tree jitter (position hash, so the
+    // placement random stream is untouched)
+    const hue = clamp((hash2(Math.floor(x * 7.3), Math.floor(z * 5.1)) * 2 - 1) * 0.6 + this.noise.noise2(x / 70 + 13, z / 70 - 4) * 0.9, -1, 1);
     const height = V.H * s;
     const tree = {
       x, z, y: h - 0.15, s, rot, variant, outer,
@@ -429,7 +432,7 @@ export class Forest {
       crownBase: h + height * V.crownBase,
       crownTop: h + height,
       coreR: variant === 'snag' ? 0 : V.R * s * 0.42,
-      tint: [V.tint[0] * tintJ, V.tint[1] * tintJ, V.tint[2] * tintJ],
+      tint: [V.tint[0] * tintJ * (1 + 0.08 * hue), V.tint[1] * tintJ * (1 + 0.02 * hue), V.tint[2] * tintJ * (1 - 0.12 * hue)],
     };
     this.trees.push(tree);
   }

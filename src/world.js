@@ -1,13 +1,14 @@
 // Analytic spatial queries: raycasts against terrain (ray-marched heightfield), tree trunks,
-// tree crown cores, rocks and (optionally) bushes. Used for bullets, line of sight,
-// glint/flash visibility and movement collision. No physics engine.
+// tree crown cores, rocks, fallen logs, stumps and (optionally) bushes. Used for bullets,
+// line of sight, glint/flash visibility and movement collision. No physics engine.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { rayCapsule } from './hitbox.js';
 
 const CELL = 8;
 
 export class World {
-  constructor(terrain, forest, rocks, undergrowth) {
+  constructor(terrain, forest, rocks, undergrowth, debris) {
     this.terrain = terrain;
     const M = CONFIG.map;
     this.minX = -M.length / 2 - 60;
@@ -26,6 +27,15 @@ export class World {
     }
     for (const r of rocks.items) {
       this._add({ kind: 'rock', x: r.x, z: r.z, y: r.y + r.s * 0.12, r: r.s * 0.78 }, r.s * 0.8);
+    }
+    if (debris) {
+      for (const l of debris.logs) {
+        const mx = (l.a.x + l.b.x) / 2, mz = (l.a.z + l.b.z) / 2;
+        this._add({ kind: 'log', x: mx, z: mz, a: l.a, b: l.b, r: l.r, top: Math.max(l.a.y, l.b.y) + l.r }, l.len / 2 + l.r);
+      }
+      for (const st of debris.stumps) {
+        this._add({ kind: 'stump', x: st.x, z: st.z, y0: st.y, top: st.top, r: st.r }, st.r);
+      }
     }
     for (const b of undergrowth.items) {
       this._add({ kind: 'bush', x: b.x, z: b.z, y: b.y + 0.45 * b.s * (b.sy || 1), r: b.radius * 0.8 }, b.radius);
@@ -140,6 +150,15 @@ export class World {
       if (h && h[1] > 0 && h[0] < maxDist) return Math.max(0, h[0]);
       return Infinity;
     }
+    if (c.kind === 'log') {
+      const t = rayCapsule(o, d, c.a, c.b, c.r);
+      return t >= 0 && t < maxDist ? t : Infinity;
+    }
+    if (c.kind === 'stump') {
+      const hit = World._cyl(o, d, c.x, c.z, c.r, c.y0 - 0.5, c.top);
+      if (hit && hit[1] > 0 && hit[0] < maxDist) return Math.max(0, hit[0]);
+      return Infinity;
+    }
     if (c.kind === 'bush' && opts.bushes) {
       const h = World._sphere(o, d, c.x, c.y, c.z, c.r);
       if (h && h[1] > 0 && h[0] < maxDist) return Math.max(0, h[0]);
@@ -226,7 +245,11 @@ export class World {
         for (let k = 0; k < list.length; k++) {
           const c = this.colliders[list[k]];
           let r;
-          if (c.kind === 'tree') r = c.r + radius;
+          if (c.kind === 'log') {
+            if (footY === undefined || footY < c.top - 0.15) this._pushFromSegment(pos, c, c.r * 0.9 + radius);
+            continue;
+          }
+          if (c.kind === 'tree' || c.kind === 'stump') r = c.r + radius;
           else if (c.kind === 'rock') {
             if (footY !== undefined && footY > c.y + c.r * 0.6) continue;
             r = c.r * 0.9 + radius;
@@ -244,6 +267,26 @@ export class World {
     return pos;
   }
 
+  // closest point on a log's axis in 2D; returns squared distance and sets _cq
+  _logClosest(x, z, c) {
+    const ax = c.a.x, az = c.a.z, dx = c.b.x - ax, dz = c.b.z - az;
+    const L2 = dx * dx + dz * dz;
+    const u = L2 > 1e-8 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2)) : 0;
+    this._cqx = ax + dx * u;
+    this._cqz = az + dz * u;
+    return (x - this._cqx) ** 2 + (z - this._cqz) ** 2;
+  }
+
+  // push a circle out of a log's footprint (2D distance to its axis)
+  _pushFromSegment(pos, c, r) {
+    const d2 = this._logClosest(pos.x, pos.z, c);
+    if (d2 < r * r && d2 > 1e-8) {
+      const d = Math.sqrt(d2);
+      pos.x = this._cqx + ((pos.x - this._cqx) / d) * r;
+      pos.z = this._cqz + ((pos.z - this._cqz) / d) * r;
+    }
+  }
+
   // nearby colliders (for cover evaluation)
   query(x, z, radius, kinds) {
     const out = [];
@@ -257,7 +300,9 @@ export class World {
           seen.add(id);
           const c = this.colliders[id];
           if (kinds && !kinds.includes(c.kind)) continue;
-          if ((c.x - x) ** 2 + (c.z - z) ** 2 < radius * radius) out.push(c);
+          if (c.kind === 'log') {
+            if (this._logClosest(x, z, c) < (radius + c.r) ** 2) out.push(c);
+          } else if ((c.x - x) ** 2 + (c.z - z) ** 2 < radius * radius) out.push(c);
         }
       }
     }
