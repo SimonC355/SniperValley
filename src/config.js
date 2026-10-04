@@ -124,8 +124,8 @@ export const CONFIG = {
   // ---------------------------------------------------------------- reveal mechanics
   reveal: {
     glintAngle: 10,            // aim error under which a scope glints toward someone
-    glintIntensity: 26,        // HDR intensity of the glint core
-    glintSize: 0.0055,         // angular size factor (world size = distance * factor)
+    glintIntensity: 32,        // HDR intensity of the glint core
+    glintSize: 0.011,          // angular size factor (world size = distance * factor)
     glintSustain: 0.4,         // glint must persist this long before it is emitted as an event
     flashRange: 400,
     flashDuration: 0.2,
@@ -179,7 +179,7 @@ export const CONFIG = {
   ai: {
     thinkInterval: 0.2,
     visualRangeHip: 70,        // max close-range spotting distance unscoped (before camo)
-    visualRangeScoped: 180,
+    visualRangeScoped: 260,
     fovHip: 110,
     fovScoped: 9,
     awarenessDecay: 0.35,

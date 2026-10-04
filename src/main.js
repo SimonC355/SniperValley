@@ -21,6 +21,7 @@ import { Combat } from './combat.js';
 import { Viewmodel } from './viewmodel.js';
 import { Hitbox } from './hitbox.js';
 import { TargetDummy } from './dummies.js';
+import { AICombatant, SpotMap, glintToward } from './ai.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
@@ -83,6 +84,9 @@ class Game {
     this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group);
     for (const name in this.forest.buckets) this.water.hideDuringReflection.push(...this.forest.buckets[name].l0.meshes);
     this.world = new World(terrain, this.forest, this.rocks, this.undergrowth);
+    this.hud.setLoading('SCOUTING SNIPER POSITIONS');
+    await nextFrame();
+    this.spots = new SpotMap(this.world, terrain, CONFIG.seed);
 
     this.vmScene = new THREE.Scene();
     this.vmCamera = new THREE.PerspectiveCamera(55, camera.aspect, 0.01, 10);
@@ -99,9 +103,19 @@ class Game {
     this.combat.listener = this.player;
     this.combat.onKill = (shooter, victim, dist, part) => this.onKill(shooter, victim, dist, part);
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
-    this.player.onFootstep = (pos, loud) => this.audio.footstep(pos, loud, this.terrain.canopyAt(pos.x, pos.z) > 0.5 ? 'forest' : 'grass', true);
-    this.player.onSplash = (pos, loud) => this.audio.splash(pos, loud, true);
+    this.player.onFootstep = (pos, loud) => {
+      this.audio.footstep(pos, loud, this.terrain.canopyAt(pos.x, pos.z) > 0.5 ? 'forest' : 'grass', true);
+      this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: 0, sourceId: this.player.id, loudness: loud });
+    };
+    this.player.onSplash = (pos, loud) => {
+      this.audio.splash(pos, loud, true);
+      this.effects.impact(pos.clone().add(new THREE.Vector3(0, 0.05, 0)), 'water');
+      this.bus.emit({ type: 'splash', position: pos.clone(), time: this.time, sourceTeam: 0, sourceId: this.player.id, loudness: loud });
+    };
     this.dummies = [];
+    this.ais = [];
+    this.combatants = [this.player];
+    this.bus.on((ev) => { for (const a of this.ais) a.ai.onEvent(ev); });
     this.params = new URLSearchParams(location.search);
 
     this.hud.bindSettings((kind) => this.onSettingsChanged(kind));
@@ -125,6 +139,7 @@ class Game {
     this.frameCount = 0;
     renderer.setAnimationLoop(() => this.frame());
     window.__game = this;
+    window.THREE = THREE;
     this.config = CONFIG;
     console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}`);
   }
@@ -199,22 +214,64 @@ class Game {
   }
 
   newRound() {
-    const sp = this.findSpawn(0, 0);
-    // ALPHA starts on the north (+Z) slope and looks south across the valley (yaw 0 = -Z)
-    this.player.spawn(sp.x, sp.z, 0);
-    this.player.pos.y = this.terrain.heightAt(sp.x, sp.z);
     this.time = 0;
     this.bus.clear();
     this.combat.projectiles.length = 0;
     this.hud.clearKillFeed();
+    this.hud.showEnd(false);
+    this.roundOver = false;
+    this.deathT = 0;
+    // teams: ALPHA = player + AI mates on the north (+Z) slope, BRAVO = AI on the south slope
+    for (const a of this.ais) a.dispose();
+    this.ais = [];
+    const n = CONFIG.teams.size;
+    const spawnsA = this.teamSpawns(0, n), spawnsB = this.teamSpawns(1, n);
+    this.player.spawn(spawnsA[0].x, spawnsA[0].z, 0);
+    this.player.pos.y = this.terrain.heightAt(spawnsA[0].x, spawnsA[0].z);
+    let idx = 0;
+    for (let i = 1; i < n; i++) {
+      const a = new AICombatant(this, { name: `${CONFIG.teams.names[0]}-${i + 1}`, team: 0, index: idx++, armband: true });
+      a.spawn(spawnsA[i].x, spawnsA[i].z, 0);
+      this.ais.push(a);
+    }
+    for (let i = 0; i < n; i++) {
+      const a = new AICombatant(this, { name: `${CONFIG.teams.names[1]}-${i + 1}`, team: 1, index: idx++, armband: false });
+      a.spawn(spawnsB[i].x, spawnsB[i].z, Math.PI);
+      this.ais.push(a);
+    }
     this.spawnDummies();
-    this.combat.setCombatants([this.player, ...this.dummies]);
+    this.combatants = [this.player, ...this.ais, ...this.dummies];
+    this.combat.setCombatants(this.combatants);
+    this.envTintT = 0;
+  }
+
+  // Spread a team along its slope (upper half, near the ridge).
+  teamSpawns(team, n) {
+    const T = this.terrain;
+    const side = team === 0 ? 1 : -1;
+    const out = [];
+    const span = Math.min(170, 60 * n);
+    const off = (Math.random() - 0.5) * 60;
+    for (let i = 0; i < n; i++) {
+      const bx = off + (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1));
+      let best = null;
+      for (let k = 0; k < 60 && !best; k++) {
+        const x = bx + (Math.random() - 0.5) * 20;
+        const z = T.riverCenter(x) + side * (105 + Math.random() * 45);
+        if (Math.abs(z) > T.halfZ - 6 || T.waterDepthAt(x, z) > 0) continue;
+        if (this.world.query(x, z, 1.5, ['tree', 'rock']).length) continue;
+        best = { x, z };
+      }
+      out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 });
+    }
+    return out;
   }
 
   // Shooting-range targets on the opposite slope (milestone 2 test aid).
   spawnDummies() {
     for (const d of this.dummies) d.dispose(this.scene);
     this.dummies = [];
+    if (!this.params.has('dummies')) return;
     const px = this.player.pos.x;
     const T = this.terrain;
     const spots = [[-25, 45, 'stand'], [15, 90, 'crouch'], [55, 140, 'prone'], [-60, 70, 'stand'], [35, 30, 'crouch']];
@@ -230,7 +287,12 @@ class Game {
     const d = Math.round(dist);
     if (shooter.isPlayer) {
       this.hud.hitMarker(true);
-      this.hud.centerMessage(`${part === 'head' ? 'HEADSHOT' : 'HIT'} · ${d} m`, victim.name, 1.6);
+      const ff = victim.team === shooter.team;
+      this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, victim.name, 1.8);
+    }
+    if (victim.isPlayer) {
+      this.hud.centerMessage('YOU WERE HIT', `${shooter.name} · ${d} m`, 3);
+      this.player.killedBy = shooter;
     }
     this.hud.killFeed(`<span class="${shooter.team === 0 ? 'f' : 'e'}">${shooter.name}</span> ✕ <span class="${victim.team === 0 ? 'f' : 'e'}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}`);
   }
@@ -271,6 +333,7 @@ class Game {
     }
     const running = this.state === 'playing' && !this.paused;
     this.simulate(running ? dtReal : 0, running ? input : this.idleInput());
+    if (this.state === 'playing' && this.roundOver && this.time >= this.endAt) this.showRoundEnd();
     this.effects.update(dtReal, this.camera);
     this.render(dtReal);
     input.endFrame();
@@ -285,8 +348,70 @@ class Game {
     p.bodyYaw = p.yaw;
     p.hitbox.update(p);
     if (dt > 0 && p.alive && input.wasClicked && input.wasClicked(0)) this.playerFire();
-    this.combat.update(dt, this.time);
+    if (dt > 0) {
+      for (const a of this.ais) a.update(dt, this.time);
+      this.combat.update(dt, this.time);
+      this.updateCharacterTints(dt);
+      this.checkRoundEnd();
+    }
     for (const d of this.dummies) d.update(dt);
+    if (!p.alive) this.deathT += dt;
+  }
+
+  showRoundEnd() {
+    this.state = 'ended';
+    const p = this.player;
+    const acc = p.shotsFired ? Math.round((p.hits / p.shotsFired) * 100) : 0;
+    const t = Math.floor(this.time);
+    const sub = this.victory ? (p.alive ? 'YOUR TEAM WINS' : 'YOUR TEAM WINS · YOU DID NOT SURVIVE') : 'YOUR TEAM WAS ELIMINATED';
+    this.hud.showEnd(true, this.victory, sub, [
+      ['Round time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
+      ['Shots fired', p.shotsFired],
+      ['Hits', `${p.hits} (${acc}%)`],
+      ['Eliminations', p.kills],
+      ['Longest hit', p.longestHit ? `${Math.round(p.longestHit)} m` : '-'],
+      ['Killed by', p.alive ? '-' : (p.killedBy ? p.killedBy.name : 'the zone')],
+    ]);
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  // Camouflage: suits blend toward the local ground colour (scaled by camouflageStrength).
+  updateCharacterTints(dt) {
+    this.envTintT -= dt;
+    if (this.envTintT > 0) return;
+    this.envTintT = 1;
+    const c = new THREE.Color();
+    for (const a of this.ais) {
+      const canopy = this.terrain.canopyAt(a.pos.x, a.pos.z);
+      const grass = this.terrain.grassDensityAt(a.pos.x, a.pos.z);
+      c.setRGB(0.92, 0.88, 0.78).lerp(new THREE.Color(0.85, 1.05, 0.75), grass).lerp(new THREE.Color(0.8, 0.78, 0.68), canopy * 0.7);
+      a.character.setEnvironmentTint(c);
+    }
+  }
+
+  aliveCount(team) { return this.combatants.filter((c) => c.team === team && c.alive && !c.isDummy).length; }
+
+  checkRoundEnd() {
+    if (this.roundOver) return;
+    const a = this.aliveCount(0), b = this.aliveCount(1);
+    if (a > 0 && b > 0) return;
+    this.roundOver = true;
+    this.endAt = this.time + 2.5;
+    this.victory = b === 0 && a > 0;
+  }
+
+  // Is any enemy currently lining up a shot on the player (glint toward us + line of sight)?
+  playerAimedAt() {
+    const p = this.player;
+    if (!p.alive) return false;
+    const eye = p.eyePos(new THREE.Vector3());
+    for (const a of this.ais) {
+      if (a.team === p.team || !a.alive || !a.ai) continue;
+      if ((a.ai.state === 'aim' || a.ai.state === 'fire') && a.ai.target === p && glintToward(a, eye) > 0.1) {
+        if (this.world.lineOfSight(a.scopePos(new THREE.Vector3()), eye)) return true;
+      }
+    }
+    return false;
   }
 
   // Test hook: run the simulation without rendering (fixed steps).
@@ -307,9 +432,20 @@ class Game {
     this.post.render(dtReal, this.realTime);
     const p = this.player;
     const boltT = THREE.MathUtils.clamp(1 - (p.boltReadyTime - this.time) / CONFIG.weapon.boltTime, 0, 1);
+    // scope glints of AI snipers, as seen from the player's camera (depth-tested sprites)
+    for (const a of this.ais) {
+      const gi = glintToward(a, this.camera.position);
+      if (gi > 0.001) a.glint.set(a.scopePos(new THREE.Vector3()), gi, this.camera, this.realTime); else a.glint.hide();
+    }
+    this.aimedAtT = (this.aimedAtT || 0) - dtReal;
+    if (this.aimedAtT <= 0) { this.aimedAtT = 0.15; this.aimedAt = this.playerAimedAt(); }
+    const w = window.innerWidth, h = window.innerHeight;
+    this.hud.updateMarkers(this.camera, this.ais.filter((a) => a.team === p.team), w, h);
+    this.hud.updateDebugMarks(this.camera, this.ais, w, h, this.reveal);
+    this.hud.setTeams(this.combatants.filter((c) => c.team === 0 && !c.isDummy), this.combatants.filter((c) => c.team === 1 && !c.isDummy));
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
-      inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped, aimedAt: false,
+      inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped && this.player.alive, aimedAt: this.aimedAt,
       outside: false, holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.player.yaw,
     });
     if (this.debug) this.hud.setDebug(this.debugText(), true); else this.hud.setDebug('', false);
@@ -322,8 +458,18 @@ class Game {
 
   updateRenderSystems(dt) {
     const cam = this.camera;
-    cam.updateMatrixWorld();
     const p = this.player;
+    if (!p.alive) {
+      // death cam: sink to the ground and tilt
+      const k = Math.min(1, this.deathT / 1.4);
+      const e = k * k * (3 - 2 * k);
+      cam.position.set(p.pos.x, p.pos.y + THREE.MathUtils.lerp(p.eye, 0.25, e), p.pos.z);
+      cam.rotation.set(THREE.MathUtils.lerp(p.pitch, -0.25, e), p.yaw, e * 0.6, 'YXZ');
+      if (cam.fov !== CONFIG.player.fovHip) { cam.fov = CONFIG.player.fovHip; cam.updateProjectionMatrix(); }
+      p.scopeT = 0;
+      this.post.uniforms.uFade.value = Math.min(0.55, this.deathT * 0.4);
+    } else this.post.uniforms.uFade.value = 0;
+    cam.updateMatrixWorld();
     // shadow / grass focus: aim point when scoped, slightly ahead of the player otherwise
     let focus, extent;
     if (p.scopeT > 0.5) {

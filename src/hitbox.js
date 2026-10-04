@@ -20,7 +20,7 @@ export class Hitbox {
   }
 
   // Update from combatant stance, feet position, body yaw and eye height.
-  update(cb) {
+  update(cb, terrain) {
     const p = cb.pos;
     const yaw = cb.bodyYaw !== undefined ? cb.bodyYaw : cb.yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);     // forward
@@ -29,10 +29,13 @@ export class Hitbox {
     if (cb.stance === 'prone') {
       // head at the front (eye), body stretched backwards along the ground
       const hx = p.x, hz = p.z, hy = p.y + e - 0.05;
+      // follow the ground along the body on slopes
+      const H = (k) => (terrain ? terrain.heightAt(hx - fx * k, hz - fz * k) : p.y);
+      const y25 = H(0.25), y85 = H(0.85), y95 = H(0.95), y175 = H(1.75);
       this._set(0, 'head', hx, hy, hz, hx, hy, hz, 0.13);
-      this._set(1, 'torso', hx - fx * 0.25, p.y + 0.2, hz - fz * 0.25, hx - fx * 0.85, p.y + 0.18, hz - fz * 0.85, 0.19);
-      this._set(2, 'legs', hx - fx * 0.95 + rx * 0.1, p.y + 0.12, hz - fz * 0.95 + rz * 0.1, hx - fx * 1.75 + rx * 0.18, p.y + 0.1, hz - fz * 1.75 + rz * 0.18, 0.1);
-      this._set(3, 'legs', hx - fx * 0.95 - rx * 0.1, p.y + 0.12, hz - fz * 0.95 - rz * 0.1, hx - fx * 1.75 - rx * 0.18, p.y + 0.1, hz - fz * 1.75 - rz * 0.18, 0.1);
+      this._set(1, 'torso', hx - fx * 0.25, y25 + 0.2, hz - fz * 0.25, hx - fx * 0.85, y85 + 0.18, hz - fz * 0.85, 0.19);
+      this._set(2, 'legs', hx - fx * 0.95 + rx * 0.1, y95 + 0.12, hz - fz * 0.95 + rz * 0.1, hx - fx * 1.75 + rx * 0.18, y175 + 0.1, hz - fz * 1.75 + rz * 0.18, 0.1);
+      this._set(3, 'legs', hx - fx * 0.95 - rx * 0.1, y95 + 0.12, hz - fz * 0.95 - rz * 0.1, hx - fx * 1.75 - rx * 0.18, y175 + 0.1, hz - fz * 1.75 - rz * 0.18, 0.1);
       this._set(4, 'arms', hx + fx * 0.15 + rx * 0.2, p.y + 0.18, hz + fz * 0.15 + rz * 0.2, hx - fx * 0.2 + rx * 0.25, p.y + 0.18, hz - fz * 0.2 + rz * 0.25, 0.07);
       this.count = 5;
     } else if (cb.stance === 'crouch') {
