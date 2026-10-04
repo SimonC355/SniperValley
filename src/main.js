@@ -519,11 +519,29 @@ class Game {
   debugText() {
     const r = this.renderer.info.render;
     const p = this.player;
-    return [
-      `pos ${p.pos.x.toFixed(1)} ${p.pos.y.toFixed(1)} ${p.pos.z.toFixed(1)}  fov ${p.fov.toFixed(1)}`,
-      `draw calls ${r.calls}  tris ${(r.triangles / 1000).toFixed(0)}k`,
-      `time ${this.time.toFixed(1)}`,
-    ].join('\n');
+    const lines = [
+      `pos ${p.pos.x.toFixed(1)} ${p.pos.y.toFixed(1)} ${p.pos.z.toFixed(1)}  fov ${p.fov.toFixed(1)}  stance ${p.stance}`,
+      `draw calls ${r.calls}  tris ${(r.triangles / 1000).toFixed(0)}k  time ${this.time.toFixed(1)}`,
+      `zone ${this.zone ? this.zone.debugText() : '-'}`,
+      '',
+      'AI:',
+    ];
+    for (const a of this.ais) {
+      const aw = [...a.ai.awareness.entries()].filter(([, v]) => v > 0.05).map(([id, v]) => `${this.nameOf(id)}=${v.toFixed(2)}`).join(' ');
+      lines.push(` ${a.name.padEnd(8)} ${a.alive ? a.ai.state.padEnd(11) : 'DEAD       '} ${a.stance.padEnd(6)} ${a.scoped ? 'SCOPED' : '      '} ${a.ai.target ? '-> ' + a.ai.target.name : ''} ${aw}`);
+    }
+    lines.push('', 'Reveal events (last 12 s):');
+    const now = this.time;
+    for (const ev of this.bus.recent(now, 12).slice(-12).reverse()) {
+      if (ev.type === 'footstep') continue;
+      lines.push(` ${(now - ev.time).toFixed(1).padStart(5)}s ago  ${ev.type.padEnd(8)} by ${this.nameOf(ev.sourceId)}${ev.targetId ? ' at ' + this.nameOf(ev.targetId) : ''}  (${ev.position.x.toFixed(0)}, ${ev.position.z.toFixed(0)})`);
+    }
+    return lines.join('\n');
+  }
+
+  nameOf(id) {
+    const c = this.combatants.find((x) => x.id === id);
+    return c ? c.name : (id === -1 ? 'birds' : String(id));
   }
 }
 
