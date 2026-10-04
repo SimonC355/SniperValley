@@ -22,6 +22,7 @@ import { Viewmodel } from './viewmodel.js';
 import { Hitbox } from './hitbox.js';
 import { TargetDummy } from './dummies.js';
 import { AICombatant, SpotMap, glintToward } from './ai.js';
+import { Birds } from './birds.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
@@ -116,6 +117,15 @@ class Game {
     this.ais = [];
     this.combatants = [this.player];
     this.bus.on((ev) => { for (const a of this.ais) a.ai.onEvent(ev); });
+    // birds: flushed by shots, nearby impacts, and proximity (see Birds.checkProximity)
+    this.birds = new Birds(scene, this.forest, terrain, this.audio, CONFIG.seed);
+    this.birds.onFlush = (f, time, team, id, cause) => {
+      this.bus.emit({ type: 'birds', position: f.center.clone().add(new THREE.Vector3(0, 1, 0)), time, sourceTeam: team, sourceId: id, cause, flockId: f.id });
+    };
+    this.bus.on((ev) => {
+      if (ev.type === 'shot') this.birds.onShot(ev.position, ev.time, ev.sourceTeam, ev.sourceId);
+      else if (ev.type === 'impact') this.birds.onImpact(ev.position, ev.time, ev.sourceTeam, ev.sourceId);
+    });
     this.params = new URLSearchParams(location.search);
 
     this.hud.bindSettings((kind) => this.onSettingsChanged(kind));
@@ -221,6 +231,7 @@ class Game {
     this.hud.showEnd(false);
     this.roundOver = false;
     this.deathT = 0;
+    this.birds.reset(0);
     // teams: ALPHA = player + AI mates on the north (+Z) slope, BRAVO = AI on the south slope
     for (const a of this.ais) a.dispose();
     this.ais = [];
@@ -351,6 +362,7 @@ class Game {
     if (dt > 0) {
       for (const a of this.ais) a.update(dt, this.time);
       this.combat.update(dt, this.time);
+      this.birds.update(dt, this.time, this.combatants, this.camera);
       this.updateCharacterTints(dt);
       this.checkRoundEnd();
     }
