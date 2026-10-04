@@ -83,7 +83,10 @@ class Game {
     await nextFrame();
     this.water = new Water(scene, terrain, this.textures, renderer);
     // Reflections skip grass, undergrowth and full-detail trees (the far bank dominates the mirror image).
-    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group);
+    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, terrain.mesh);
+    const reflTerrain = terrain.buildReflectionMesh();
+    scene.add(reflTerrain);
+    this.water.showDuringReflection.push(reflTerrain);
     for (const name in this.forest.buckets) this.water.hideDuringReflection.push(...this.forest.buckets[name].l0.meshes);
     this.world = new World(terrain, this.forest, this.rocks, this.undergrowth);
     this.hud.setLoading('SCOUTING SNIPER POSITIONS');
@@ -187,18 +190,19 @@ class Game {
   }
 
   bindUI() {
-    const start = () => {
+    const start = (fresh) => {
       this.audio.init();
+      if (fresh) { this.newRound(); this.state = 'playing'; }
       this.hud.showStart(false);
       this.hud.showPause(false);
-      this.state = this.state === 'menu' ? 'playing' : this.state;
+      this.hud.showEnd(false);
       this.paused = false;
       this.input.requestLock();
     };
-    document.getElementById('btn-play').addEventListener('click', () => { this.newRound(); start(); });
-    document.getElementById('btn-resume').addEventListener('click', start);
-    document.getElementById('btn-restart').addEventListener('click', () => { this.newRound(); start(); });
-    document.getElementById('btn-again').addEventListener('click', () => { this.newRound(); start(); });
+    document.getElementById('btn-play').addEventListener('click', () => start(true));
+    document.getElementById('btn-resume').addEventListener('click', () => start(false));
+    document.getElementById('btn-restart').addEventListener('click', () => start(true));
+    document.getElementById('btn-again').addEventListener('click', () => start(true));
     this.input.onLockChange = (locked, failed) => {
       if (failed) {
         // pointer lock unavailable: play with arrow keys
@@ -266,6 +270,7 @@ class Game {
     this.combatants = [this.player, ...this.ais, ...this.dummies];
     this.combat.setCombatants(this.combatants);
     this.envTintT = 0;
+    if (CONFIG.round.freezeTime > 0) this.hud.centerMessage('ROUND START', `${this.combatants.filter((c) => c.team === 0).length}v${n} · ${CONFIG.zone.mode.toUpperCase()} ZONE`, CONFIG.round.freezeTime);
   }
 
   // Spread a team along its slope (upper half, near the ridge).
@@ -275,9 +280,17 @@ class Game {
     const out = [];
     const span = Math.min(170, 60 * n);
     const off = (Math.random() - 0.5) * 60;
+    const used = [];
     for (let i = 0; i < n; i++) {
       const bx = off + (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1));
-      let best = null;
+      // prefer a scored sniper spot (open view across the valley) near this slot
+      let best = null, bestS = -1;
+      for (const sp of this.spots.spots[team]) {
+        if (Math.abs(sp.x - bx) > 35 || used.includes(sp)) continue;
+        const sc = sp.view + sp.height * 0.3 + Math.random() * 0.2;
+        if (sc > bestS) { bestS = sc; best = sp; }
+      }
+      if (best) { used.push(best); out.push({ x: best.x, z: best.z }); continue; }
       for (let k = 0; k < 60 && !best; k++) {
         const x = bx + (Math.random() - 0.5) * 20;
         const z = T.riverCenter(x) + side * (105 + Math.random() * 45);
@@ -348,6 +361,10 @@ class Game {
     const input = this.input;
     if (input.wasPressed('F1')) this.debug = !this.debug;
     if (input.wasPressed('F2') && CONFIG.debug.allowReveal) this.reveal = !this.reveal;
+    if (input.wasPressed('Escape') && this.state === 'playing' && input.fallback) {
+      this.paused = !this.paused;
+      this.hud.showPause(this.paused);
+    }
     if (input.wasPressed('KeyT') && this.state === 'playing') {
       this.zone.skip(this.time);
       this.hud.centerMessage('ZONE STEP SKIPPED', this.zone.debugText(), 1.5);
@@ -371,12 +388,15 @@ class Game {
     if (dt > 0) this.time += dt;
     SHARED.uTime.value = this.realTime;
     const p = this.player;
+    // freeze time at round start: look around, no moving or firing
+    const freeze = this.time < CONFIG.round.freezeTime;
+    p.frozen = freeze;
     p.update(dt, input, this.world, this.terrain, this.time);
     p.bodyYaw = p.yaw;
     p.hitbox.update(p);
-    if (dt > 0 && p.alive && input.wasClicked && input.wasClicked(0)) this.playerFire();
+    if (dt > 0 && p.alive && !freeze && input.wasClicked && input.wasClicked(0)) this.playerFire();
     if (dt > 0) {
-      for (const a of this.ais) a.update(dt, this.time);
+      for (const a of this.ais) { a.frozenByRound = freeze; a.update(dt, this.time); }
       this.combat.update(dt, this.time);
       this.birds.update(dt, this.time, this.combatants, this.camera);
       this.zone.update(dt, this.time);

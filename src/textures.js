@@ -154,24 +154,31 @@ const ROCK_FRAG = /* glsl */`
 vec4 bake(vec2 uv) {
   float n1 = pfbm(uv * 3.0, vec2(3.0), 6, 4.0);
   float n2 = pfbm(uv * 9.0, vec2(9.0), 4, 14.0);
-  vec3 w = pworley(uv * 5.0, vec2(5.0), 24.0);
-  vec3 w2 = pworley(uv * 13.0, vec2(13.0), 34.0);
-  float crack = 1.0 - smoothstep(0.0, 0.05, w.y - w.x);
-  float crack2 = 1.0 - smoothstep(0.0, 0.035, w2.y - w2.x);
-  vec3 g1 = vec3(0.21, 0.2, 0.185);
-  vec3 g2 = vec3(0.32, 0.3, 0.27);
-  vec3 g3 = vec3(0.16, 0.15, 0.14);
+  // domain-warped cracks so they don't read as regular cells
+  vec2 warp = vec2(pfbm(uv * 4.0, vec2(4.0), 3, 70.0), pfbm(uv * 4.0 + 0.37, vec2(4.0), 3, 80.0));
+  vec3 w = pworley(uv * 4.0 + warp * 0.9, vec2(4.0), 24.0);
+  vec3 w2 = pworley(uv * 11.0 + warp * 1.6, vec2(11.0), 34.0);
+  float gate = smoothstep(-0.05, 0.25, pnoise(uv * 6.0, vec2(6.0), 90.0));
+  float crack = (1.0 - smoothstep(0.0, 0.03, w.y - w.x)) * gate;
+  float crack2 = (1.0 - smoothstep(0.0, 0.02, w2.y - w2.x)) * (1.0 - gate) * 0.7;
+  // faint strata
+  float strata = sin((uv.y * 7.0 + n1 * 1.2) * 6.2831853) * 0.5 + 0.5;
+  vec3 g1 = vec3(0.24, 0.22, 0.19);
+  vec3 g2 = vec3(0.36, 0.33, 0.29);
+  vec3 g3 = vec3(0.19, 0.18, 0.16);
   vec3 col = mix(g1, g2, smoothstep(-0.4, 0.5, n1));
-  col = mix(col, g3, smoothstep(0.1, 0.6, n2) * 0.5);
-  col *= 0.85 + 0.3 * w.z;
+  col = mix(col, g3, smoothstep(0.1, 0.6, n2) * 0.45);
+  col *= 0.9 + 0.12 * strata;
   float grain = pnoise(uv * 180.0, vec2(180.0), 44.0);
+  float speck = step(0.82, pnoise(uv * 90.0, vec2(90.0), 45.0) * 0.5 + 0.5);
   col *= 0.9 + 0.12 * grain;
-  float h = 0.55 + 0.35 * n1 + 0.1 * n2 - crack * 0.45 - crack2 * 0.2 + grain * 0.03;
-  col *= 1.0 - crack * 0.55 - crack2 * 0.3;
+  col = mix(col, vec3(0.42, 0.4, 0.37), speck * 0.25);
+  float h = 0.55 + 0.32 * n1 + 0.12 * n2 + strata * 0.04 - crack * 0.4 - crack2 * 0.18 + grain * 0.025;
+  col *= 1.0 - crack * 0.5 - crack2 * 0.25;
   // lichen
   vec3 lw = pworley(uv * 22.0, vec2(22.0), 54.0);
   float lichen = smoothstep(0.42, 0.3, lw.x) * step(0.7, lw.z) * smoothstep(0.0, 0.3, pnoise(uv * 4.0, vec2(4.0), 64.0) + 0.2);
-  col = mix(col, mix(vec3(0.38, 0.38, 0.22), vec3(0.45, 0.45, 0.4), fract(lw.z * 9.0)), lichen * 0.8);
+  col = mix(col, mix(vec3(0.4, 0.4, 0.24), vec3(0.46, 0.46, 0.42), fract(lw.z * 9.0)), lichen * 0.75);
   h += lichen * 0.04;
   return vec4(col, clamp(h, 0.0, 1.0));
 }
@@ -181,8 +188,8 @@ const MUD_FRAG = /* glsl */`
 vec4 bake(vec2 uv) {
   float n1 = pfbm(uv * 4.0, vec2(4.0), 5, 6.0);
   vec3 silt = mix(vec3(0.06, 0.05, 0.035), vec3(0.11, 0.09, 0.06), n1 * 0.5 + 0.5);
-  vec3 w = pworley(uv * 14.0, vec2(14.0), 16.0);
-  float peb = smoothstep(0.55, 0.25, w.x) * step(0.35, w.z);
+  vec3 w = pworley(uv * 22.0, vec2(22.0), 16.0);
+  float peb = smoothstep(0.5, 0.22, w.x) * step(0.45, w.z);
   vec3 pc = mix(vec3(0.11, 0.1, 0.085), vec3(0.21, 0.19, 0.16), fract(w.z * 17.0));
   vec3 w2 = pworley(uv * 40.0, vec2(40.0), 26.0);
   float peb2 = smoothstep(0.5, 0.2, w2.x) * step(0.6, w2.z);
@@ -635,8 +642,8 @@ export function createTextures(renderer, seed = 1) {
   const t = {};
   t.grass = baker.bakeMaterial(GRASS_FRAG, { seed: seed + 1, normalStrength: 2.5, roughBase: 0.9, roughVar: 0.1 });
   t.forest = baker.bakeMaterial(FOREST_FRAG, { seed: seed + 2, normalStrength: 3.5, roughBase: 0.92, roughVar: 0.1 });
-  t.rock = baker.bakeMaterial(ROCK_FRAG, { seed: seed + 3, normalStrength: 5, roughBase: 0.78, roughVar: 0.25 });
-  t.mud = baker.bakeMaterial(MUD_FRAG, { seed: seed + 4, normalStrength: 4, roughBase: 0.6, roughVar: 0.3 });
+  t.rock = baker.bakeMaterial(ROCK_FRAG, { seed: seed + 3, normalStrength: 3.2, roughBase: 0.82, roughVar: 0.2 });
+  t.mud = baker.bakeMaterial(MUD_FRAG, { seed: seed + 4, normalStrength: 2.2, roughBase: 0.74, roughVar: 0.2 });
   t.barkSpruce = baker.bakeMaterial(BARK_FRAG, {
     size: 512, seed: seed + 5, normalStrength: 6, roughBase: 0.9, roughVar: 0.1,
     uniforms: { uColA: { value: new THREE.Color(0.035, 0.03, 0.026) }, uColB: { value: new THREE.Color(0.17, 0.14, 0.11) }, uPlates: { value: 0 } },

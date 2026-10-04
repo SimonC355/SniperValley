@@ -22,14 +22,14 @@ export const CONFIG = {
     shallowSpeedMul: 0.55, // movement multiplier in shallow water
     fords: [],             // optional x positions of shallow crossings, e.g. [-120, 140]
     terrainExtent: 1500,   // full rendered terrain size (outer area is scenery)
-    terrainSegments: 520,
+    terrainSpacing: 2.0,   // mesh vertex spacing inside the play area (heights come from a 1 m grid)
   },
 
   // ---------------------------------------------------------------- rendering
   render: {
     renderScale: 1.0,      // 0.5 .. 1.0, multiplied with devicePixelRatio
     maxPixelRatio: 1.5,
-    shadowQuality: 'high', // 'off' | 'low' | 'medium' | 'high'
+    shadowQuality: 'medium', // 'off' | 'low' (1024) | 'medium' (2048) | 'high' (4096)
     ao: true,
     bloom: true,
     msaa: 4,               // 0 or 4

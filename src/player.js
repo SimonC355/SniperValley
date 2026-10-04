@@ -28,7 +28,8 @@ export class Player extends Combatant {
     this.onSplash = null;
     this.lookYaw = 0;         // base look (without sway/recoil)
     this.lookPitch = 0;
-    this.frozen = false;
+    this.frozen = false;      // round-start freeze (no moving/jumping)
+    this.frozenScope = false; // test hook: hold scopeT at a fixed value
   }
 
   spawn(x, z, yaw) {

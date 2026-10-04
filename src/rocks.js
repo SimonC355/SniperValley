@@ -11,11 +11,14 @@ function buildRockGeometry(seed) {
   const sx = 0.8 + (seed % 5) * 0.12, sy = 0.5 + (seed % 3) * 0.12, sz = 0.75 + (seed % 4) * 0.1;
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    const d = 1 + n.noise3(v.x * 1.2, v.y * 1.2, v.z * 1.2) * 0.28 + n.noise3(v.x * 3.1, v.y * 3.1, v.z * 3.1) * 0.08;
-    // flatten facets a little for a fractured look
-    const f = Math.round(d * 6) / 6;
-    const dd = d * 0.6 + f * 0.4;
+    const d = 1 + n.noise3(v.x * 1.1, v.y * 1.1, v.z * 1.1) * 0.34 + n.noise3(v.x * 2.7, v.y * 2.7, v.z * 2.7) * 0.1;
+    // quantise radius for a fractured, faceted look
+    const f = Math.round(d * 5) / 5;
+    const dd = d * 0.45 + f * 0.55;
     v.multiplyScalar(dd);
+    // flattened top (weathered slab) and buried bottom
+    if (v.y > 0.45) v.y = 0.45 + (v.y - 0.45) * 0.35;
+    if (v.y < -0.3) v.y = -0.3 + (v.y + 0.3) * 0.5;
     v.set(v.x * sx, v.y * sy, v.z * sz);
     pos.setXYZ(i, v.x, v.y, v.z);
   }

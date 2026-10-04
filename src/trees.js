@@ -83,7 +83,7 @@ function buildTrunk(B, H, r0, radial, hSegs, rng, bendSeed) {
       const nx = Math.cos(a), nz = Math.sin(a);
       _v.set(ox + nx * r, y, oz + nz * r);
       _n.set(nx, 0.15, nz).normalize();
-      ring.push(B.vert(_v, _n, (i / radial) * 2, y / 1.6, lerp(0.55, 1.0, Math.min(1, t * 3))));
+      ring.push(B.vert(_v, _n, (i / radial) * 3, y / 1.0, lerp(0.55, 1.0, Math.min(1, t * 3))));
     }
     rings.push(ring);
   }
@@ -101,10 +101,10 @@ function buildConifer(variantName, lod, seed) {
   const trunkB = new GeoBuilder();
   const leafB = new GeoBuilder();
   const H = V.H;
-  buildTrunk(trunkB, H, V.r0, lod === 0 ? 8 : 5, lod === 0 ? 7 : 3, rng, seed * 0.37);
+  buildTrunk(trunkB, H, V.r0, lod === 0 ? 8 : lod === 1 ? 5 : 4, lod === 0 ? 7 : lod === 1 ? 3 : 2, rng, seed * 0.37);
   const yb = H * V.crownBase;
   const crownH = H - yb;
-  const whorls = lod === 0 ? V.whorls : Math.ceil(V.whorls / 2);
+  const whorls = lod === 0 ? V.whorls : lod === 1 ? Math.ceil(V.whorls / 2) : Math.ceil(V.whorls / 3);
   const isSnag = variantName === 'snag';
   for (let w = 0; w < whorls; w++) {
     const t = (w + rng.float(0.1, 0.6)) / whorls;
@@ -112,6 +112,7 @@ function buildConifer(variantName, lod, seed) {
     const R = V.R * crownRadius(V.profile, t);
     let nb = Math.round(lerp(V.branches[0], V.branches[1], t));
     if (lod === 1) nb = Math.max(3, Math.round(nb * 0.65));
+    if (lod === 2) nb = 3;
     const off = rng.float(0, Math.PI * 2);
     for (let b = 0; b < nb; b++) {
       const yaw = off + (b / nb) * Math.PI * 2 + rng.float(-0.25, 0.25);
@@ -132,7 +133,7 @@ function buildConifer(variantName, lod, seed) {
         addCard(trunkB, pts, _side, 0.06, y, 0.6, 0.8, _up.set(0, 1, 0));
         continue;
       }
-      const W = L * (lod === 0 ? 0.78 : 1.0) + 0.3;
+      const W = L * (lod === 0 ? 0.78 : lod === 1 ? 1.0 : 1.3) + 0.3;
       const roll = rng.float(-0.35, 0.35);
       _side.set(-Math.sin(yaw), 0, Math.cos(yaw));
       const sideDir = _side.clone().applyAxisAngle(dir, roll);
@@ -149,7 +150,7 @@ function buildConifer(variantName, lod, seed) {
   }
   if (!isSnag) {
     // inner filler cards: make the crown core dense (this is what blocks sight/bullets)
-    const fillers = lod === 0 ? 6 : 3;
+    const fillers = lod === 0 ? 6 : lod === 1 ? 3 : 2;
     for (let f = 0; f < fillers; f++) {
       const a = (f / fillers) * Math.PI;
       const d = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
@@ -314,6 +315,7 @@ export class Forest {
       const V = VARIANTS[name];
       const lod0 = buildConifer(name, 0, 11 + name.length * 7);
       const lod1 = buildConifer(name, 1, 11 + name.length * 7);
+      const lod2 = buildConifer(name, 2, 11 + name.length * 7);
       const barkMat = new THREE.MeshStandardMaterial({
         map: T[V.bark].map, normalMap: T[V.bark].normalMap, roughness: 0.95, vertexColors: true,
       });
@@ -335,7 +337,7 @@ export class Forest {
         alphaToCoverage: CONFIG.render.msaa > 0,
       });
       patchFoliage(impMat, { sway: 0.003, flutter: 0, translucency: 0.35, billboard: true, noFlip: false, key: 'impostor' });
-      this.variants[name] = { V, lod0, lod1, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
+      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
     }
   }
 
@@ -462,8 +464,8 @@ export class Forest {
       const l1 = [makeInstanced(v.lod1.trunk, v.barkMat, c)];
       if (v.lod1.leaves) l1.push(makeInstanced(v.lod1.leaves, v.leafMat, c));
       const imp = [makeInstanced(v.impGeo, v.impMat, c)];
-      const sh = [makeInstanced(v.lod1.trunk, v.shadowBark, c, { castShadow: true, receiveShadow: false })];
-      if (v.lod1.leaves) sh.push(makeInstanced(v.lod1.leaves, v.shadowLeaf, c, { castShadow: true, receiveShadow: false }));
+      const sh = [makeInstanced(v.lod2.trunk, v.shadowBark, c, { castShadow: true, receiveShadow: false })];
+      if (v.lod2.leaves) sh.push(makeInstanced(v.lod2.leaves, v.shadowLeaf, c, { castShadow: true, receiveShadow: false }));
       for (const mm of [...l0, ...l1, ...imp, ...sh]) this.group.add(mm);
       this.buckets[name] = { l0: new Bucket(l0), l1: new Bucket(l1), imp: new Bucket(imp), sh: new Bucket(sh) };
     }

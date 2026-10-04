@@ -134,7 +134,8 @@ export class AICombatant extends Combatant {
 
   update(dt, time) {
     const g = this.game;
-    if (this.alive && !this.frozen) this.ai.update(dt, time);
+    // frozen: test hook; frozenByRound: freeze time at round start
+    if (this.alive && !this.frozen && !this.frozenByRound) this.ai.update(dt, time);
     this.eye = lerp(this.eye, eyeHeightFor(this.stance), 1 - Math.exp(-dt * 6));
     if (this.alive) this.hitbox.update(this, g.terrain);
     this.character.update(dt, this, time, g.terrain);

@@ -185,14 +185,12 @@ export class Terrain {
   }
 
   // ------------------------------------------------------------- mesh
-  buildMesh(textures) {
+  buildMesh(textures, spacing = CONFIG.map.terrainSpacing, segOut = 64, material = null) {
     const M = CONFIG.map;
     const E = M.terrainExtent / 2;
     const innerX = this.halfX + 90, innerZ = this.halfZ + 80;
-    const spacing = 1.6;
     const segInX = Math.round((innerX * 2) / spacing);
     const segInZ = Math.round((innerZ * 2) / spacing);
-    const segOut = 64;
     const xs = this._axis(innerX, E, segInX, segOut);
     const zs = this._axis(innerZ, E, segInZ, segOut);
     const nx = xs.length, nz = zs.length;
@@ -219,14 +217,26 @@ export class Terrain {
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
 
-    const mat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 });
-    this._patchMaterial(mat, textures);
+    let mat = material;
+    if (!mat) {
+      mat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 });
+      this._patchMaterial(mat, textures);
+    }
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.name = 'terrain';
-    this.mesh = mesh;
+    if (!material) this.mesh = mesh;
     return mesh;
+  }
+
+  // Coarse copy of the terrain used only when rendering the water reflection.
+  buildReflectionMesh() {
+    const m = this.buildMesh(null, 7, 24, this.mesh.material);
+    m.name = 'terrain-reflection';
+    m.receiveShadow = false;
+    m.visible = false;
+    return m;
   }
 
   _axis(inner, extent, segIn, segOut) {

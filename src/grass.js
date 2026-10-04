@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { SHARED } from './shaders.js';
 
-function buildClump(blades = 5, segs = 2) {
+function buildClump(blades = 4, segs = 2) {
   const pos = [], uv = [], nrm = [], idx = [], bl = [];
   let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };

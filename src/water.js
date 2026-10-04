@@ -119,12 +119,15 @@ export class Water {
     // Skip the reflection render when disabled, and hide expensive/irrelevant objects during it.
     const origBefore = r.onBeforeRender.bind(r);
     this.hideDuringReflection = [];
+    this.showDuringReflection = [];
     r.onBeforeRender = (rend, sc, cam) => {
       if (!this.enabled) return;
       this._frame = (this._frame || 0) + 1;
       const hidden = [];
       for (const o of this.hideDuringReflection) { if (o.visible) { o.visible = false; hidden.push(o); } }
+      for (const o of this.showDuringReflection) o.visible = true;
       origBefore(rend, sc, cam);
+      for (const o of this.showDuringReflection) o.visible = false;
       for (const o of hidden) o.visible = true;
     };
     scene.add(r);
