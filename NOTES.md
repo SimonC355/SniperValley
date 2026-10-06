@@ -47,10 +47,24 @@ photoscans from Poly Haven into `public/assets/` there.
 - **Scope**: textures only. Trees stay procedural: realistic CC0 conifer models are rare, and
   the tree system depends on its own LOD, impostor and wind setup.
 
+### Megascans (asked about, not added)
+
+Quixel Megascans now live on Epic's Fab marketplace under the Fab Standard License. That
+license allows use in any engine, web included, but Megascans are **not CC0**: most cost money
+since 2025 (assets claimed during the free period in 2024 stay yours), and the license is for
+use inside a project, not for sharing the files themselves. The brief asked for CC0 only, so
+none are in the repository.
+
+If you want them anyway, the plan is the same as for the photoscans: you download the assets
+you own into a git-ignored folder (`public/assets/megascans/`), and a loader uses them when
+they are there and falls back to the procedural forest when they are not. Megascans 3D plants
+are made for desktop engines, so the browser build would use their lowest LODs, bake
+impostors from them, and keep our wind and collision setup.
+
 ## Map
 
-- The valley runs along **X**: the play area is 440 m along it and 380 m across (Z). The river
-  meanders around z ≈ 0 at y = 0.
+- The valley runs along **X**: on the Valley map the play area is 440 m along it and 380 m
+  across (Z). The river meanders around z ≈ 0 at y = 0.
 - **ALPHA (you)** holds the **north slope (+Z)**, **BRAVO** the south slope (−Z). The compass
   puts north toward +Z. You spawn looking south across the valley.
 - Ridges are about 60 m above the water, roughly 175 m from the river. Slopes average about
@@ -64,6 +78,38 @@ photoscans from Poly Haven into `public/assets/` there.
 - About 2,800 trees stand in the play area, with clearings from a noise mask. Measured at
   sniper positions, roughly 17% of cross-valley spot pairs have line of sight, at a median of
   about 210 m.
+
+### Three map sizes
+
+The feedback was that the valley is huge for 2v2, so there are two smaller cuts of the same
+valley (`MAPS` in `src/config.js`):
+
+| Map | Play area | Ridge distance / height | River (deep / waterline half-width) | Zone step |
+|---|---|---|---|---|
+| Valley | 440 × 380 m | 178 m / 64 m | 9 / 17 m | 60 s |
+| Narrow valley | 340 × 270 m | 126 m / 48 m | 7 / 14 m | 50 s |
+| Ravine | 260 × 200 m | 94 m / 38 m | 5.5 / 11.5 m | 42 s |
+
+- **Same style:** the same terrain recipe, scaled. The smaller maps also have a gentler river
+  meander and less relief on the slopes, so the slopes stay walkable and the AI still finds
+  flat sniper spots. The slopes are a little steeper on the smaller maps (a ravine should feel
+  like one).
+- **The mountains stay where they are.** The distant mountains are placed at the same distance
+  from the river on every map, so on the smaller maps a forested plateau lies between the ridge
+  and the mountains. Scaling them with the map put a 30° mountain wall right behind the ridge,
+  which hid the low sun.
+- **Scaled with the map:** AI sniper spots and the slope they look across, AI scan targets,
+  spawn spread along the valley, bird flock placement, and the `?dummies=1` targets. Rocks,
+  bushes, logs, stumps, branches and bird flocks scale with the play area so the forest is as
+  dense as before. Trees already follow the area.
+- **One map per page load.** The world (terrain, forest, colliders, sniper spots) is built at
+  load, so changing the map saves the choice and reloads. Match settings (team size, rounds,
+  zone and so on) are now saved in the browser too, so they survive the reload.
+- **LAN:** the host sends its map with its lobby hello; the relay shows it to everyone. A
+  friend whose map differs reloads with the host's map when they click JOIN and joins by
+  itself. When the host changes map, it tells the joined players first; everyone reloads, the
+  host hosts again and the others rejoin. Round messages also carry the map as a safety net.
+- The benchmark always runs on the Valley map so results stay comparable.
 
 ## Shrinking zone
 
@@ -124,8 +170,17 @@ photoscans from Poly Haven into `public/assets/` there.
 ## Characters and camouflage
 
 - Each ghillie is a skinned capsule body covered by about 550 alpha-cut strips (burlap, leaf and
-  grass). A hood veil and a back cape break up the head and shoulder outline. The strips sway in
-  the wind in the vertex shader.
+  grass), about 210 thin jute threads and 60 grass tufts sticking up and out of the shoulders,
+  upper back and hood. A hood veil and a back cape break up the head and shoulder outline.
+- **The suit moves.** After skinning, every strand is displaced in world space, so the
+  direction is right in any pose (standing, kneeling, prone):
+  - wind sway and flutter, both stronger while a gust passes over the wearer;
+  - drag: strands trail behind when the wearer moves and swing out when they turn (velocity and
+    turn rate are smoothed, which gives the strands a little inertia), plus a bounce with the
+    steps;
+  - threads move the most and tufts a bit less (a per-vertex weight).
+  - The body breathes (chest and spine, slower while aiming) and sways slightly while standing.
+  - Shadows use the unmoved suit; the difference is a few centimetres.
 - **Hit detection uses stance-based body capsules** (head sphere, torso, legs, arms), never the
   suit volume. The procedural poses (stand, kneel, prone, aim, walk, dead) are authored to
   match them. You can see the capsules directly on `?dummies=1` targets.
@@ -289,13 +344,59 @@ photoscans from Poly Haven into `public/assets/` there.
     snap;
   - rock and gravel is a higher, grainier crunch;
   - mud by the river is a wet squelch.
-- Shots gained a low rumble tail (the report rolling through the valley) and a very short
-  muzzle slap for your own shot.
-- Volumes are separate buses: effects, ambience (wind, river) and the echo send, all into the
-  compressor and the master volume.
+- **Gunshots were redesigned** after the feedback that they sounded like a bee flying past.
+  The buzz came from pitch sweeps (a falling thump tone, a sweeping filter and a whizz band).
+  Now there are no pitch sweeps at all (`src/sfx.js`, rendered into buffers at start):
+  - The **muzzle blast** is a Friedlander blast wave (instant rise, about 1.5 ms positive phase,
+    then the negative phase), hot-gas turbulence, a short low body, a ground reflection and a
+    cluster of early reflections from the trees. Distance is applied when playing: level, air
+    absorption (low-pass), a slight slow-down and more echo.
+  - A bullet passing within 30 m plays the **supersonic crack**: an N-wave (the "pisk") with a
+    ground reflection and slap echoes. Its length grows slowly with the miss distance. It
+    arrives before the muzzle report, which is delayed by distance at 340 m/s.
+  - A **soft clipper** (tanh) replaced the compressor on the master bus. The compressor's
+    look-ahead flattened the first millisecond of a shot, which is exactly what makes it crack.
+  - I checked the result by rendering the real sound chain offline in headless Chromium:
+    own shot peaks at −0.2 dBFS, a crack at 3 m at −0.9 dBFS, a distant report at 300 m at
+    −15 dBFS, and the spectrograms show no pitch sweeps.
+- **Forest ambience** (`src/forestsound.js`): five songbirds sing from the trees around you
+  (chaffinch, great tit, robin, thrush and wren patterns), a woodpecker drums now and then,
+  trunks creak in strong gusts, and needles rustle, louder in gusts. The rustle has one source
+  per ear, each following the gust 25 m to that side, so a gust is heard arriving from one
+  side. Any gunshot within 700 m silences the birds for 22–40 s; they come back one by one.
+- Volumes are separate buses: effects, ambience (wind, river, forest) and the echo send, all
+  into the soft clipper and the master volume.
 - Recorded samples can replace any sound through `public/assets/sounds/sounds.json` (see the
   README). Nothing is bundled: the CC0 sound sources were not reachable from this environment,
   and I can't listen here, so **the new synthesis is untested by ear**.
+
+## Weather and the living forest
+
+- **One cloud field for the sky and the ground** (`src/weather.js`). A tileable 256² noise
+  texture covers 1.1 km of a cloud layer 900 m up and drifts with the wind at 7 m/s. The sky
+  draws its clouds from it (with three's cloud lighting), and every lit material looks it up
+  along the sun direction for its cloud shadow, so a cloud you see over the sun is the one
+  shading you. About 30% of the sky is cloud; a cloud blocks 80% of the direct sunlight.
+- **How the shadow reaches every material.** The lookup is added once to three's lighting
+  chunk and its uniforms to the built-in material uniforms. The uniform values are typed
+  arrays, which three shares by reference instead of cloning, so one update per frame drives
+  every material. The first-person rifle opts out (it has its own light).
+- **Clouds use the game clock** plus an offset per round, so in a LAN game everyone sees the
+  same clouds, and each round has different ones.
+- **Gameplay effect:** a scope glint is sunlight on the lens, so under a cloud it is about a
+  third as strong, for the AI's eyes and for yours (`glintSun` in `src/ai.js`). The HUD shows
+  *GLINT DIMMED · CLOUD*. Light shafts fade while the sun is covered. This is a real balance
+  change: waiting for a cloud before scoping in is now a tactic.
+- **Gusts** are bands of stronger wind travelling downwind at 7 m/s, curved across the valley,
+  about one every 20 s with calmer minutes in between. The same function exists in GLSL and
+  JS (`gustAt` in `src/shaders.js`): trees, impostors, ferns, grass and ghillie strands sway
+  harder and lean downwind as a band passes, and the sound and particles read it on the CPU.
+- **Particles** (`src/particles.js`): 2,400 points in one draw call, animated entirely in the
+  vertex shader inside a 28 m box that follows the camera. Needles and bits of bark drift down
+  only under canopy (more in gusts) and catch the sun as they tumble; dust motes show up only
+  against the light. They fade out when you scope in.
+- **Cost:** two texture fetches per lit pixel for the cloud shadow, one draw call for the
+  particles. I could only measure in software rendering here, so please run `?bench` again.
 
 ## Performance tools
 
@@ -358,8 +459,10 @@ photoscans from Poly Haven into `public/assets/` there.
 - LOD transitions are hard switches; dithered cross-fades would hide popping.
 - The AI uses straight-line movement with local trunk avoidance (no navmesh), which is enough
   for open slopes.
-- AI don't use the sun direction (glare), and the glint ignores the sun angle. Both are cheap
-  next steps if the designer wants sun-side tactics.
+- AI don't use the sun direction (glare). The glint dims under clouds but ignores the sun
+  angle. Both are cheap next steps if the designer wants sun-side tactics.
+- Songbirds don't react to where players are, only to gunfire. Birds going quiet near a
+  hidden sniper would be a nice, subtle cue.
 - Bird motion is analytic and the flocks don't avoid trees.
 - Grass blades can poke through fallen logs.
 - Light shafts are screen-space, so they need the sun on screen or near it.

@@ -11,6 +11,7 @@ export class AudioSystem {
     this.ctx = null;
     this.ready = false;
     this.listenerPos = new THREE.Vector3();
+    this.onShotHeard = null;   // fn(distance) for every gunshot played (the forest falls silent)
     this._fwd = new THREE.Vector3();
     this._up = new THREE.Vector3();
   }
@@ -204,6 +205,7 @@ export class AudioSystem {
     if (!this.ready) return;
     const ctx = this.ctx;
     const d = own ? 0 : this.listenerPos.distanceTo(pos);
+    if (this.onShotHeard) this.onShotHeard(d);
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const out = ctx.createGain();
     out.gain.value = own ? 1.0 : Math.min(1, 40 / (d + 15));

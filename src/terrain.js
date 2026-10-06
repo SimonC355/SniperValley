@@ -43,7 +43,7 @@ export class Terrain {
   }
 
   riverCenter(x) {
-    return 14 * Math.sin(x * 0.0105 + 0.6) + 6 * Math.sin(x * 0.027 + 2.1);
+    return (CONFIG.map.meander ?? 1) * (14 * Math.sin(x * 0.0105 + 0.6) + 6 * Math.sin(x * 0.027 + 2.1));
   }
 
   heightAnalytic(x, z) {
@@ -77,18 +77,20 @@ export class Terrain {
     h += ridgeH * p * smoothstep(0, 0.04, t + 0.02);
 
     // terrain character
+    const relief = M.relief ?? 1;
     const slopeMask = smoothstep(0.03, 0.3, t);
-    h += n.fbm2(x * 0.0042 + 11, z * 0.0042, 3) * 9 * slopeMask;
+    h += n.fbm2(x * 0.0042 + 11, z * 0.0042, 3) * 9 * relief * slopeMask;
     // spurs and gullies running down the slopes (stretched across the valley axis)
     const spur = this.noise2.fbm2(x * 0.021, ad * 0.0055 + (north ? 0 : 37), 3);
-    h += spur * 6.5 * slopeMask * (1 - smoothstep(1.0, 1.5, t));
+    h += spur * 6.5 * relief * slopeMask * (1 - smoothstep(1.0, 1.5, t));
     // benches: terraces at mid slope
     const bench = north ? 0.45 : 0.62;
-    h += 3.2 * Math.exp(-Math.pow((t - bench) * 9, 2)) * (0.5 + 0.5 * n.noise2(x * 0.01, 3.3));
+    h += 3.2 * relief * Math.exp(-Math.pow((t - bench) * 9, 2)) * (0.5 + 0.5 * n.noise2(x * 0.01, 3.3));
     h += n.fbm2(x * 0.045, z * 0.045, 3) * 1.4 * smoothstep(0.0, 0.12, t);
     h += n.noise2(x * 0.17, z * 0.17) * 0.22 * smoothstep(0.0, 0.05, t);
-    // distant mountains
-    const far = smoothstep(1.35, 3.2, t);
+    // distant mountains, at the same distance from the river on every map (on the smaller
+    // maps a forested plateau lies between the ridge and the mountains)
+    const far = smoothstep(232.6, 521.2, ad);
     if (far > 0) h += far * (90 + 70 * this.noise2.fbm2(x * 0.0022, z * 0.0022, 4));
     const farX = smoothstep(CONFIG.map.length * 0.9, CONFIG.map.length * 1.7, Math.abs(x));
     if (farX > 0) h += farX * 45 * (0.6 + 0.4 * n.noise2(z * 0.004, x * 0.002)) * smoothstep(0.2, 0.5, t + 0.15);

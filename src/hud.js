@@ -1,7 +1,7 @@
 // DOM HUD: crosshair, team status, zone timer, compass, health, bolt + glint status,
 // "being aimed at" warning, kill feed, teammate markers, overlays (start/pause/settings/end).
 import * as THREE from 'three';
-import { CONFIG, DEFAULT_BINDS, saveRenderSettings } from './config.js';
+import { CONFIG, DEFAULT_BINDS, MAPS, MAP_ID, saveRenderSettings } from './config.js';
 import { keyLabel } from './input.js';
 
 const ACTION_LABELS = {
@@ -112,6 +112,7 @@ export class HUD {
       </div>
       <div class="tabpage" data-page="match">
         <div class="settings">
+          <label>Map (reloads)</label><select id="set-map">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name.toLowerCase()} · ${m.size} · ${m.players}`]))}</select>
           <label>Team size</label><select id="set-team">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n}v${n}</option>`).join('')}</select>
           <label>Rounds to win</label><select id="set-rounds">${opt([['1', '1 (single round)'], ['2', '2 (best of 3)'], ['3', '3 (best of 5)'], ['4', '4 (best of 7)']])}</select>
           <label>Swap sides each round</label><select id="set-swap">${onoff}</select>
@@ -120,7 +121,7 @@ export class HUD {
           <label>Tracers</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'faint'], ['bright', 'bright']])}</select>
           <label>Ballistics</label><select id="set-ball">${opt([['0', 'hitscan'], ['1', 'travel time + drop + wind']])}</select>
         </div>
-        <div class="note">Match settings apply when a new match starts.</div>
+        <div class="note">Match settings apply when a new match starts. Changing the map reloads the game (in a LAN game the host's map is used).</div>
       </div>
       <div class="tabpage" data-page="graphics">
         <div class="settings">
@@ -162,7 +163,8 @@ export class HUD {
         <div class="note" id="lan-note"></div>
       </div>
       ${settings.replace(/id="set-/g, 'id="s0-')}
-      <div class="btnrow"><button class="primary" id="btn-play">SINGLE PLAYER</button></div>
+      <div class="btnrow"><button class="primary" id="btn-play">SINGLE PLAYER</button>
+        <label class="mappick">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label></div>
     </div>`);
     this.pauseScreen = make('pausescreen', `<div class="panel">
       <h1>PAUSED</h1>
@@ -184,6 +186,7 @@ export class HUD {
 
   setLoading(text) {
     if (text === null) { this.loading.style.display = 'none'; return; }
+    this.loading.style.display = '';
     $('loading-s').textContent = text;
   }
 
@@ -192,7 +195,9 @@ export class HUD {
     const C = CONFIG;
     const fmt = { sens: (v) => `${(+v).toFixed(2)}×`, ssens: (v) => `${(+v).toFixed(2)}×`, fov: (v) => `${v}°`, scale: (v) => `${Math.round(v * 100)}%`,
       vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%` };
-    const syncAll = () => { this.sync_s0(); this.sync_s1(); };
+    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; };
+    this.syncAll = syncAll;
+    $('map-quick').addEventListener('change', () => onChange('map', $('map-quick').value));
     for (const p of ['s0', 's1']) {
       const g = (k) => $(`${p}-${k}`);
       const panel = g('team').closest('.panel');
@@ -220,6 +225,7 @@ export class HUD {
         }));
       };
       const sync = () => {
+        g('map').value = MAP_ID;
         g('team').value = String(C.teams.size);
         g('rounds').value = String(C.match.roundsToWin);
         g('swap').value = C.match.swapSides ? '1' : '0';
@@ -249,6 +255,8 @@ export class HUD {
       };
       this[`sync_${p}`] = sync;
       const on = (k, fn, ev = 'change') => g(k).addEventListener(ev, () => { fn(g(k).value); saveRenderSettings(); syncAll(); onChange(k); });
+      // the map is built once per page load: the game saves the choice and reloads
+      g('map').addEventListener('change', () => onChange('map', g('map').value));
       on('team', (v) => { C.teams.size = parseInt(v, 10); });
       on('rounds', (v) => { C.match.roundsToWin = parseInt(v, 10); });
       on('swap', (v) => { C.match.swapSides = v === '1'; });
@@ -400,7 +408,7 @@ export class HUD {
     this.el.bolt.classList.toggle('cycling', !ready);
     this.el.boltbar.style.width = `${Math.min(1, s.boltT) * 100}%`;
     this.el.glint.classList.toggle('on', s.glint);
-    this.el.glinttext.textContent = s.glint ? 'YOUR SCOPE GLINTS' : 'GLINT OFF';
+    this.el.glinttext.textContent = s.glint ? (s.glintDim ? 'GLINT DIMMED · CLOUD' : 'YOUR SCOPE GLINTS') : 'GLINT OFF';
     this.el.breath.textContent = s.scoped ? (s.holdingBreath ? 'HOLDING BREATH' : s.breathCooldown ? 'OUT OF BREATH' : 'SHIFT: HOLD BREATH') : '';
     this.el.aimed.classList.toggle('on', !!s.aimedAt && CONFIG.hud.aimedAtWarning);
     this.el.outside.style.display = s.outside ? 'block' : 'none';

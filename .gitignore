@@ -7,3 +7,6 @@ dist
 # photoscanned textures downloaded by `npm run assets` (CC0, large; fetch per machine)
 public/assets/textures/
 public/assets/assets.json
+
+# Megascans (Fab license, not CC0): keep your own downloads out of git
+public/assets/megascans/

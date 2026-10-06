@@ -1,7 +1,10 @@
 // SniperYard prototype: main loop and game state machine.
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { installHeightFog, SHARED } from './shaders.js';
+import { CONFIG, MAPS, MAP_ID, saveMapChoice, urlWithoutMap } from './config.js';
+import { installHeightFog, SHARED, gustAt } from './shaders.js';
+import { ForestParticles } from './particles.js';
+import { ForestAmbience } from './forestsound.js';
+import { installWeather, updateWeather, sunlightAt, WEATHER } from './weather.js';
 import { createTextures } from './textures.js';
 import { loadPhotoTextures } from './assets.js';
 import { Debris } from './debris.js';
@@ -23,7 +26,7 @@ import { Combat } from './combat.js';
 import { Viewmodel } from './viewmodel.js';
 import { Hitbox } from './hitbox.js';
 import { TargetDummy } from './dummies.js';
-import { AICombatant, SpotMap, glintToward } from './ai.js';
+import { AICombatant, SpotMap, glintToward, glintAim, glintSun } from './ai.js';
 import { yawPitchTo } from './entity.js';
 import { Benchmark } from './bench.js';
 import { RemoteCombatant } from './remote.js';
@@ -44,6 +47,7 @@ import { Birds } from './birds.js';
 import { Zone } from './zone.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+const _eye = new THREE.Vector3();
 
 class Game {
   constructor() {
@@ -68,6 +72,7 @@ class Game {
     this.renderer = renderer;
     renderer.info.autoReset = false;
     installHeightFog();
+    installWeather();
 
     const scene = new THREE.Scene();
     this.scene = scene;
@@ -99,12 +104,13 @@ class Game {
     this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed);
     this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed);
     this.grass = new Grass(scene, terrain, this.textures);
+    this.particles = new ForestParticles(scene, terrain);
 
     this.hud.setLoading('FILLING THE RIVER');
     await nextFrame();
     this.water = new Water(scene, terrain, this.textures, renderer);
     // Reflections skip grass, undergrowth and full-detail trees (the far bank dominates the mirror image).
-    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, this.debris.group, terrain.mesh);
+    this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, this.debris.group, terrain.mesh, this.particles.points);
     const reflTerrain = terrain.buildReflectionMesh();
     scene.add(reflTerrain);
     this.water.showDuringReflection.push(reflTerrain);
@@ -125,6 +131,8 @@ class Game {
     this.bus = new EventBus();
     this.effects = new Effects(scene, this.vmScene);
     this.audio = new AudioSystem();
+    this.forestSound = new ForestAmbience(this.audio, terrain);
+    this.audio.onShotHeard = (d) => this.forestSound.onShot(d);
     this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
     this.combat.listener = this.player;
     this.combat.onKill = (shooter, victim, dist, part, point) => {
@@ -137,6 +145,10 @@ class Game {
     };
     this.combat.onClaim = (shooter, victim, part, point, dist) => { if (this.net) this.net.sendClaim(shooter, victim, part, point, dist); };
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
+    // the rifle is lit by its own light (dimmed in shade); world cloud shadows don't apply to it
+    this.vmScene.traverse((o) => {
+      for (const m of [].concat(o.material || [])) { m.defines = { ...(m.defines || {}), NO_CLOUD_SHADOW: '' }; m.needsUpdate = true; }
+    });
     this.player.onFootstep = (pos, loud) => {
       this.audio.footstep(pos, loud, this.surfaceAt(pos.x, pos.z), true);
       this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: this.player.team, sourceId: this.player.id, loudness: loud });
@@ -198,6 +210,7 @@ class Game {
     this.frameCount = 0;
     renderer.setAnimationLoop(() => this.frame());
     window.__game = this;
+    window.__weather = WEATHER;
     window.THREE = THREE;
     this.config = CONFIG;
     console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
@@ -250,12 +263,54 @@ class Game {
     this.water.setQuality(CONFIG.render.reflections, w * pr);
   }
 
-  onSettingsChanged(kind) {
+  onSettingsChanged(kind, value) {
+    if (kind === 'map') { this.changeMap(value); return; }
     if (['scale', 'refl'].includes(kind)) this.resize();
     if (kind === 'shadow') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
     if (['msaa', 'grass'].includes(kind)) this.hud.centerMessage('RELOAD TO APPLY', '', 2);
     if (['vmaster', 'vfx', 'vamb', 'echo'].includes(kind)) this.audio.setVolumes();
     if (kind === 'autores' && !CONFIG.render.autoResolution) { this.dynScale = 1; this.resize(); }
+  }
+
+  // The world is built once per page load, so a new map saves the choice and reloads.
+  // A LAN host takes its players along (they reload and rejoin by themselves).
+  changeMap(id) {
+    if (id === MAP_ID || !MAPS[id]) return;
+    const net = this.net;
+    if (net && !net.isHost) {
+      this.hud.centerMessage('THE HOST CHOOSES THE MAP', '', 2);
+      this.hud.syncAll();
+      return;
+    }
+    saveMapChoice(id);
+    if (net) {
+      net.s.toAll({ k: 'mapchange', map: id });
+      this.setAutoNet('host');
+    }
+    this.reloadPage(`LOADING ${MAPS[id].name}`);
+  }
+
+  // A joined LAN client follows the host to another map.
+  followHostMap(id) {
+    if (!MAPS[id] || this.reloading) return;
+    saveMapChoice(id);
+    this.setAutoNet('join');
+    this.reloadPage(`LOADING ${MAPS[id].name}`);
+  }
+
+  // Remember to host or join again after the reload (sessionStorage lives per browser tab).
+  setAutoNet(role) {
+    const $ = (id) => document.getElementById(id);
+    const tries = (this.autoNetTries || 0) + 1;
+    try { sessionStorage.setItem('sniperyard.autonet', JSON.stringify({ role, name: $('lan-name').value, team: $('lan-team').value, ai: $('lan-ai').value, tries })); } catch { /* ignore */ }
+  }
+
+  reloadPage(text) {
+    this.reloading = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.hud.setLoading(text);
+    // a moment for queued LAN messages to leave before the socket closes
+    setTimeout(() => { location.href = urlWithoutMap(); }, 250);
   }
 
   bindUI() {
@@ -288,6 +343,8 @@ class Game {
     this.renderer.domElement.addEventListener('click', () => {
       if (this.state === 'playing' && !this.input.locked && !this.input.fallback) this.input.requestLock();
     });
+    // sound that started without a click (rejoining a LAN game after a map change) needs one
+    window.addEventListener('pointerdown', () => { if (this.audio.ctx) this.audio.init(); });
   }
 
   // ---------------------------------------------------------------- match flow
@@ -330,6 +387,7 @@ class Game {
     const authority = !net || net.isHost;
     if (msg.settings && !authority) {
       const st = msg.settings;
+      if (st.map && st.map !== MAP_ID) { this.followHostMap(st.map); return; }
       CONFIG.zone.mode = st.zone; CONFIG.camouflageStrength = st.camo; CONFIG.weapon.ballistics.enabled = st.ball;
       CONFIG.weapon.tracers = st.tracers; CONFIG.match.roundsToWin = st.rounds; CONFIG.match.swapSides = st.swap; CONFIG.teams.size = st.size;
     }
@@ -394,7 +452,7 @@ class Game {
     const score = CONFIG.match.roundsToWin > 1 ? ` · ${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]}` : '';
     const n = CONFIG.teams.size;
     this.hud.centerMessage(CONFIG.match.roundsToWin > 1 ? `ROUND ${M.round + 1}` : 'ROUND START',
-      `${n}v${n} · YOU HOLD THE ${slope} SLOPE${score}`, Math.max(2.5, CONFIG.round.freezeTime));
+      `${n}v${n} · ${MAPS[MAP_ID].name} · YOU HOLD THE ${slope} SLOPE${score}`, Math.max(2.5, CONFIG.round.freezeTime));
   }
 
   // Called once when a round's result is final (a short delay after the last elimination).
@@ -461,23 +519,25 @@ class Game {
     try {
       const note = sessionStorage.getItem('sniperyard.note');
       if (note) { this.lanNote = note; sessionStorage.removeItem('sniperyard.note'); }
+      // host or join again after a map change reloaded the page
+      const auto = JSON.parse(sessionStorage.getItem('sniperyard.autonet') || 'null');
+      sessionStorage.removeItem('sniperyard.autonet');
+      if (auto && (auto.role === 'host' || auto.role === 'join')) {
+        this.autoNet = auto.role;
+        this.autoNetTries = auto.tries || 1;
+        if (auto.name) $('lan-name').value = auto.name;
+        if (auto.team) $('lan-team').value = auto.team;
+        if (auto.ai) { $('lan-ai').value = auto.ai; CONFIG.lan.fillWithAI = auto.ai === '1'; }
+        this.lanNote = auto.role === 'host' ? `HOSTING AGAIN ON ${MAPS[MAP_ID].name}` : `${MAPS[MAP_ID].name} LOADED · JOINING THE HOST`;
+      }
     } catch { /* ignore */ }
     S.onAvailable = (ok) => { $('lanbox').style.display = ok ? 'block' : 'none'; this.renderLobby(); };
-    S.onLobby = () => this.renderLobby();
+    S.onLobby = () => { this.renderLobby(); this.tryAutoNet(); };
     S.onError = (msg) => { this.lanNote = msg; this.renderLobby(); };
-    S.onHostGone = () => { if (this.net) this.leaveNet('THE HOST LEFT THE GAME'); };
+    S.onHostGone = () => { if (this.net && !this.reloading) this.leaveNet('THE HOST LEFT THE GAME'); };
     S.connect();
-    const join = (host) => {
-      this.audio.init();
-      const name = ($('lan-name').value || '').trim().toUpperCase() || 'PLAYER';
-      try { localStorage.setItem('sniperyard.name', name); } catch { /* ignore */ }
-      this.lanNote = '';
-      S.hello(name, $('lan-team').value, host);
-      this.net = new LanGame(this, S);
-      this.renderLobby();
-    };
-    $('btn-host').addEventListener('click', () => join(true));
-    $('btn-join').addEventListener('click', () => join(false));
+    $('btn-host').addEventListener('click', () => this.lanJoin(true));
+    $('btn-join').addEventListener('click', () => this.lanJoin(false));
     $('lan-team').addEventListener('change', () => { if (S.joined) S.setTeam($('lan-team').value); });
     $('lan-ai').addEventListener('change', () => { CONFIG.lan.fillWithAI = $('lan-ai').value === '1'; });
     $('btn-mpstart').addEventListener('click', () => {
@@ -489,6 +549,39 @@ class Game {
     });
     $('btn-leave').addEventListener('click', () => this.leaveNet());
     $('btn-leavegame').addEventListener('click', () => this.leaveNet());
+  }
+
+  lanJoin(host) {
+    const $ = (id) => document.getElementById(id);
+    const S = this.lanSession;
+    if (S.joined || this.reloading) return;
+    // the host plays another map: load it first, then join by itself
+    if (!host && MAPS[S.hostMap] && S.hostMap !== MAP_ID) {
+      if ((this.autoNetTries || 0) >= 3) { this.lanNote = 'COULD NOT LOAD THE HOST\'S MAP · RELOAD THE PAGE'; this.renderLobby(); return; }
+      this.followHostMap(S.hostMap);
+      return;
+    }
+    this.audio.init();
+    const name = ($('lan-name').value || '').trim().toUpperCase() || 'PLAYER';
+    try { localStorage.setItem('sniperyard.name', name); } catch { /* ignore */ }
+    this.lanNote = '';
+    this.autoNetTries = 0;
+    S.hello(name, $('lan-team').value, host);
+    this.net = new LanGame(this, S);
+    this.renderLobby();
+  }
+
+  // After a map change: host again, or join once the host is back.
+  tryAutoNet() {
+    const S = this.lanSession;
+    if (!this.autoNet || !S.available || S.joined) return;
+    if (this.autoNet === 'host') {
+      this.autoNet = null;
+      if (!S.hostId) this.lanJoin(true);
+    } else if (S.hostId && S.hostMap) {
+      this.autoNet = null;
+      this.lanJoin(false);
+    }
   }
 
   renderLobby() {
@@ -507,8 +600,11 @@ class Game {
     $('btn-join').disabled = !S.hostId;
     $('btn-host').disabled = !!S.hostId;
     $('btn-play').disabled = joined;
-    $('lan-note').textContent = this.lanNote || (!S.available ? '' : !joined ? (S.hostId ? 'A GAME IS HOSTED ON THIS NETWORK · CHOOSE A NAME AND JOIN' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
-      : S.isHost ? `YOU HOST · ${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'} · THE MATCH TAB SETS TEAM SIZE, ROUNDS AND ZONE`
+    // joined players play the host's map
+    for (const id of ['map-quick', 's0-map', 's1-map']) $(id).disabled = joined && !S.isHost;
+    const hostMap = MAPS[S.hostMap] ? MAPS[S.hostMap].name : '';
+    $('lan-note').textContent = this.lanNote || (!S.available ? '' : !joined ? (S.hostId ? `A GAME IS HOSTED ON THIS NETWORK${hostMap ? ` (${hostMap})` : ''} · CHOOSE A NAME AND JOIN` : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
+      : S.isHost ? `YOU HOST ${MAPS[MAP_ID].name} · ${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`
         : S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH');
     this.updateMenuButtons();
   }
@@ -534,6 +630,7 @@ class Game {
   }
 
   leaveNet(note) {
+    if (this.reloading) return;
     try { if (note) sessionStorage.setItem('sniperyard.note', note); } catch { /* ignore */ }
     location.href = location.pathname + location.search;
   }
@@ -543,8 +640,10 @@ class Game {
     const T = this.terrain;
     const side = this.sideSign(team);
     const out = [];
-    const span = Math.min(170, 60 * n);
-    const off = (Math.random() - 0.5) * 120;
+    // map scale along the valley and across it (1 on the valley map)
+    const kx = CONFIG.map.length / 440, ks = CONFIG.map.ridgeDist / 178;
+    const span = Math.min(170, 60 * n) * kx;
+    const off = (Math.random() - 0.5) * 120 * kx;
     const used = [];
     for (let i = 0; i < n; i++) {
       const bx = off + (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1));
@@ -558,12 +657,12 @@ class Game {
       if (best) { used.push(best); out.push({ x: best.x, z: best.z }); continue; }
       for (let k = 0; k < 60 && !best; k++) {
         const x = bx + (Math.random() - 0.5) * 20;
-        const z = T.riverCenter(x) + side * (105 + Math.random() * 45);
+        const z = T.riverCenter(x) + side * (105 + Math.random() * 45) * ks;
         if (Math.abs(z) > T.halfZ - 6 || T.waterDepthAt(x, z) > 0) continue;
         if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump']).length) continue;
         best = { x, z };
       }
-      out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 });
+      out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 * ks });
     }
     return out;
   }
@@ -577,7 +676,8 @@ class Game {
     const T = this.terrain;
     const spots = [[-25, 45, 'stand'], [15, 90, 'crouch'], [55, 140, 'prone'], [-60, 70, 'stand'], [35, 30, 'crouch']];
     spots.forEach(([dx, dz, stance], i) => {
-      let x = px + dx, z = T.riverCenter(px + dx) - 20 - dz;
+      const ks = CONFIG.map.ridgeDist / 178;
+      let x = px + dx, z = T.riverCenter(px + dx) - (20 + dz) * ks;
       const q = { x, z };
       for (let k = 0; k < 3; k++) this.world.collideCircle(q, 1.2);
       this.dummies.push(new TargetDummy(this.scene, `TARGET ${i + 1}`, q.x, q.z, T, stance, Math.PI));
@@ -876,7 +976,7 @@ class Game {
       // AI lining up on us (local brain, or the host's AI via aimTargetId); a remote player
       // with their glint on us (within ~2.5° of their aim)
       const aiming = a.ai ? (a.ai.state === 'aim' || a.ai.state === 'fire') && a.ai.target === p
-        : a.isRemote && (a.aimTargetId === p.id || (a.human && a.scoped && glintToward(a, eye) > 0.6));
+        : a.isRemote && (a.aimTargetId === p.id || (a.human && a.scoped && glintAim(a, eye) > 0.6));
       if (aiming && glintToward(a, eye) > 0.1 && this.world.lineOfSight(a.scopePos(new THREE.Vector3()), eye)) return true;
     }
     return false;
@@ -923,6 +1023,7 @@ class Game {
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
       inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped && this.player.alive, aimedAt: this.aimedAt,
+      glintDim: glintSun(this.player.scopePos(_eye)) < 0.6,
       outside: p.alive && !this.zone.contains(p.pos.x, p.pos.z), outsideDps: this.zone.damagePerSecond(),
       holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.camera.rotation.y,
     });
@@ -1017,14 +1118,21 @@ class Game {
     this.undergrowth.update(cam);
     this.grass.update(p.scopeT > 0.5 || (!p.alive && kc) ? focus : cam.position);
     this.water.update(this.realTime);
+    // clouds drift with game time (the same for everyone in a LAN game; new clouds each round)
+    updateWeather(this.time + (this.match ? this.match.round * 977 : 0), cam);
+    this.post.sunVis = WEATHER.sunVis;
+    this.particles.update(cam, this.renderer, gustAt(cam.position.x, cam.position.z, this.realTime), WEATHER.sunVis, p.alive ? p.scopeT : 0);
+    this.forestSound.update(dt, cam, this.realTime);
     SHARED.uSunDirView.value.copy(this.sky.sunDir).transformDirection(cam.matrixWorldInverse);
-    // is the player standing in shade? (dims the first-person rifle)
+    // sunlight on the player: 0 in the shade of trees or terrain, less under a cloud (dims the
+    // first-person rifle)
     this.shadeTimer = (this.shadeTimer || 0) - dt;
     if (this.shadeTimer <= 0) {
       this.shadeTimer = 0.25;
       this.inShade = !!this.world.raycast(p.eyePos(new THREE.Vector3()), this.sky.sunDir, 200, { terrain: true });
     }
-    this.viewmodel.update(dt, this.time, p, SHARED.uSunDirView.value, this.inShade);
+    const eye = p.eyePos(_eye);
+    this.viewmodel.update(dt, this.time, p, SHARED.uSunDirView.value, this.inShade ? 0 : sunlightAt(eye));
     this.audio.updateListener(cam);
     // river ambience from the nearest point on the river centre line
     const rz = this.terrain.riverCenter(cam.position.x);

@@ -465,7 +465,8 @@ export class PostFX {
     const facing = fwd.dot(SUN_DIR);
     _sunP.copy(cam.position).addScaledVector(SUN_DIR, 1000).project(cam);
     const off = Math.max(Math.abs(_sunP.x), Math.abs(_sunP.y));
-    const fade = THREE.MathUtils.smoothstep(facing, 0.05, 0.45) * (1 - THREE.MathUtils.smoothstep(off, 1.1, 2.0));
+    // no rays while a cloud covers the sun (sunVis comes from the weather)
+    const fade = THREE.MathUtils.smoothstep(facing, 0.05, 0.45) * (1 - THREE.MathUtils.smoothstep(off, 1.1, 2.0)) * (this.sunVis ?? 1);
     sp.enabled = CONFIG.render.sunShafts && fade > 0.01 && !!this.composer.readBuffer.depthTexture;
     if (!sp.enabled) return;
     sp.sun.set(_sunP.x * 0.5 + 0.5, _sunP.y * 0.5 + 0.5);

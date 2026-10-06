@@ -358,7 +358,8 @@ export class Forest {
   _chooseVariant(x, z, h) {
     const r = this.rng.next();
     if (r < 0.04) return 'snag';
-    const hn = clamp(h / 60, 0, 1);
+    // more pines toward the ridge (ridge heights differ between maps)
+    const hn = clamp(h / (60 * CONFIG.map.ridgeHeightNorth / 64), 0, 1);
     const n = this.noise.noise2(x / 60 + 40, z / 60);
     const pPine = 0.06 + hn * 0.16 + (n > 0.35 ? 0.14 : 0);
     if (this.rng.next() < pPine) return 'pine';

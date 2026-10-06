@@ -3,7 +3,7 @@
 // Blade height comes from the baked heightmap, density from the terrain splat map.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { SHARED } from './shaders.js';
+import { SHARED, GUST_GLSL } from './shaders.js';
 
 function buildClump(blades = 4, segs = 2) {
   const pos = [], uv = [], nrm = [], idx = [], bl = [];
@@ -94,6 +94,7 @@ attribute float aBlade;
 varying vec2 vBaseXZ;
 varying float vT;
 varying float vShade;
+${GUST_GLSL}
 uvec2 pcg2(uvec2 v) {
   v = v * 1664525u + 1013904223u;
   v.x += v.y * 1664525u; v.y += v.x * 1664525u;
@@ -120,7 +121,8 @@ float ca = cos(ang), sa = sin(ang);
 vec3 p = position;
 vec2 pr = vec2(p.x * ca - p.z * sa, p.x * sa + p.z * ca) * (0.6 + 0.6 * show);
 float t = p.y;
-vec2 wind = uWindDir * (sin(uTime * 1.9 + dot(wxz, vec2(0.21, 0.17))) * 0.6 + 0.5 + sin(uTime * 4.7 + wxz.x * 1.3) * 0.15) * uWindStrength * 0.22;
+float gust = gustAt(wxz) * ${CONFIG.weather.gusts.toFixed(3)};
+vec2 wind = uWindDir * ((sin(uTime * 1.9 + dot(wxz, vec2(0.21, 0.17))) * 0.6 + sin(uTime * 4.7 + wxz.x * 1.3) * 0.15) * (0.7 + 0.9 * gust) + 0.4 + 0.9 * gust) * uWindStrength * 0.22;
 vec2 bend = (wind + (rr.yz - 0.5) * 0.25) * t * t * H;
 vec3 transformed = vec3(wxz.x + pr.x + bend.x - tileO.x, gy + t * H - tileO.y - 0.02, wxz.y + pr.y + bend.y - tileO.z);
 vBaseXZ = wxz;

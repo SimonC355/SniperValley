@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 
 export function attachRelay(httpServer, { log = console.log } = {}) {
   const wss = new WebSocketServer({ noServer: true });
-  const peers = new Map();   // id -> { ws, name, team }
+  const peers = new Map();   // id -> { ws, name, team, map }
   let nextId = 1;
   let hostId = 0;
   let inGame = false;
@@ -13,7 +13,8 @@ export function attachRelay(httpServer, { log = console.log } = {}) {
   const send = (ws, obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
   const lobby = () => {
     const players = [...peers.entries()].filter(([, p]) => p.name).map(([id, p]) => ({ id, name: p.name, team: p.team }));
-    const msg = { t: 'lobby', hostId, inGame, players };
+    const host = peers.get(hostId);
+    const msg = { t: 'lobby', hostId, inGame, players, map: host ? host.map : '' };
     for (const p of peers.values()) send(p.ws, msg);
   };
 
@@ -24,7 +25,7 @@ export function attachRelay(httpServer, { log = console.log } = {}) {
 
   wss.on('connection', (ws, req) => {
     const id = nextId++;
-    peers.set(id, { ws, name: '', team: 'auto' });
+    peers.set(id, { ws, name: '', team: 'auto', map: '' });
     send(ws, { t: 'welcome', id });
     lobby();
     ws.on('message', (raw) => {
@@ -36,6 +37,7 @@ export function attachRelay(httpServer, { log = console.log } = {}) {
         case 'hello':
           me.name = String(m.name || `PLAYER${id}`).toUpperCase().replace(/[^A-Z0-9 _-]/g, '').slice(0, 12) || `PLAYER${id}`;
           me.team = ['0', '1', 'auto'].includes(String(m.team)) ? String(m.team) : 'auto';
+          me.map = String(m.map || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24);
           if (m.host) {
             if (hostId && peers.has(hostId) && hostId !== id) send(ws, { t: 'error', msg: 'A game is already hosted on this server. Join it instead.' });
             else { hostId = id; inGame = false; log(`[lan] ${me.name} hosts`); }

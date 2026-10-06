@@ -109,6 +109,8 @@ html, body {
 .controls b { color: var(--fg); font-weight: 700; }
 .controls span { color: var(--dim); }
 .btnrow { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+.mappick { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 14px; letter-spacing: 0.14em; color: var(--dim); }
+.mappick select { font-family: inherit; font-size: 14px; letter-spacing: 0.06em; background: #1a201c; color: var(--fg); border: 1px solid #3a443d; border-radius: 3px; padding: 6px 8px; }
 button { font-family: inherit; font-size: 17px; font-weight: 700; letter-spacing: 0.14em; padding: 10px 22px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06); color: var(--fg); border-radius: 3px; cursor: pointer; }
 button.primary { background: var(--accent); color: #111; border-color: var(--accent); }
 button:hover { filter: brightness(1.15); }

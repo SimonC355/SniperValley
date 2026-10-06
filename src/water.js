@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { CONFIG } from './config.js';
 import { SHARED } from './shaders.js';
+import { cloudUniforms, CLOUD_FUNCTIONS } from './weather.js';
 
 const WaterShader = {
   name: 'RiverWater',
@@ -53,6 +54,7 @@ const WaterShader = {
     varying vec4 vUvR;
     varying vec3 vWPos;
     #include <fog_pars_fragment>
+    ${CLOUD_FUNCTIONS}
     void main() {
       vec2 p = vWPos.xz;
       float bed = texture2D(tHeight, (p - uHB.xy) / uHB.zw).r;
@@ -73,7 +75,7 @@ const WaterShader = {
       refl = mix(uSkyColor, refl, uReflStrength);
       vec3 body = mix(uShallow, uDeep, 1.0 - exp(-depth * 0.9));
       float sunR = max(dot(reflect(-uSunDir, N), V), 0.0);
-      vec3 spec = uSunColor * (pow(sunR, 380.0) * 6.0 + pow(sunR, 60.0) * 0.25);
+      vec3 spec = uSunColor * (pow(sunR, 380.0) * 6.0 + pow(sunR, 60.0) * 0.25) * (1.0 - cloudCoverAt(vWPos) * 0.9);
       vec3 col = mix(body, refl, fres) + spec;
       // shoreline foam
       float foamN = texture2D(tNormal, p / 1.7 + uTime * 0.05).a;
@@ -109,6 +111,7 @@ export class Water {
     r.material.depthWrite = false;
     r.renderOrder = 1;
     const u = r.material.uniforms;
+    Object.assign(u, cloudUniforms());
     u.tNormal.value = textures.water.normalMap;
     u.tHeight.value = terrain.heightTexture;
     u.uHB.value = terrain.gridBounds;

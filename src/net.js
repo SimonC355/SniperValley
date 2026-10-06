@@ -4,7 +4,7 @@
 // tells the host, which confirms the kill to everyone. Messages go through the small relay
 // in server/relay.mjs (ws://<server>/net).
 import * as THREE from 'three';
-import { CONFIG } from './config.js';
+import { CONFIG, MAP_ID } from './config.js';
 import { STANCES } from './remote.js';
 
 const SEND_INTERVAL = 0.05;   // 20 Hz
@@ -17,6 +17,7 @@ export class NetSession {
     this.ws = null;
     this.myId = 0;
     this.hostId = 0;
+    this.hostMap = '';        // the map the host's game is built with
     this.players = [];
     this.inGame = false;
     this.available = false;
@@ -41,7 +42,7 @@ export class NetSession {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m.t === 'welcome') { this.myId = m.id; this.available = true; if (this.onAvailable) this.onAvailable(true); }
-      else if (m.t === 'lobby') { this.hostId = m.hostId; this.players = m.players; this.inGame = m.inGame; if (this.onLobby) this.onLobby(); }
+      else if (m.t === 'lobby') { this.hostId = m.hostId; this.hostMap = m.map || ''; this.players = m.players; this.inGame = m.inGame; if (this.onLobby) this.onLobby(); }
       else if (m.t === 'm') { if (this.onMessage) this.onMessage(m.from, m.d); }
       else if (m.t === 'left') { if (this.onLeft) this.onLeft(m.id); }
       else if (m.t === 'hostgone') { if (this.onHostGone) this.onHostGone(); }
@@ -57,7 +58,7 @@ export class NetSession {
   }
 
   _raw(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
-  hello(name, team, host) { this.joined = true; this._raw({ t: 'hello', name, team, host }); }
+  hello(name, team, host) { this.joined = true; this._raw({ t: 'hello', name, team, host, map: MAP_ID }); }
   setTeam(team) { this._raw({ t: 'team', team }); }
   setInGame(v) { this._raw({ t: 'ingame', v }); }
   toHost(d) { this._raw({ t: 'm', to: 'host', d }); }
@@ -125,7 +126,7 @@ export class LanGame {
   settings() {
     return {
       zone: CONFIG.zone.mode, camo: CONFIG.camouflageStrength, ball: CONFIG.weapon.ballistics.enabled,
-      tracers: CONFIG.weapon.tracers, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, size: CONFIG.teams.size,
+      tracers: CONFIG.weapon.tracers, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, size: CONFIG.teams.size, map: MAP_ID,
     };
   }
 
@@ -206,6 +207,11 @@ export class LanGame {
 
   onMessage(from, d) {
     const g = this.game;
+    // the host switched maps: load it too and rejoin
+    if (d.k === 'mapchange') {
+      if (!this.isHost && from === this.s.hostId) g.followHostMap(d.map);
+      return;
+    }
     // a joined client ignores game traffic until the host has put it into a round
     if (!this.isHost && d.k !== 'round' && (!this.roundId || g.roundId !== this.roundId)) return;
     switch (d.k) {

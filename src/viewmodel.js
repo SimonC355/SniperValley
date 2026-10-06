@@ -278,7 +278,9 @@ export class Viewmodel {
       this.flash.material.color.setRGB(I, I * 0.85, I * 0.6);
     } else this.flash.visible = false;
     // lighting follows the world sun (dimmed in shade)
-    this.shade = THREE.MathUtils.lerp(this.shade, inShade ? 0.15 : 1, 1 - Math.exp(-dt * 4));
+    // inShade: sunlight reaching the player, 0 (shade) .. 1 (open sun)
+    const sun = typeof inShade === 'number' ? inShade : inShade ? 0 : 1;
+    this.shade = THREE.MathUtils.lerp(this.shade, 0.15 + 0.85 * sun, 1 - Math.exp(-dt * 4));
     this.sun.position.copy(sunDirView);
     this.sun.intensity = 2.6 * this.shade;
   }

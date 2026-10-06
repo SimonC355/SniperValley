@@ -5,6 +5,8 @@ export const CONFIG = {
   seed: 1337,
 
   // ---------------------------------------------------------------- map
+  // The size and shape numbers below are the VALLEY map; the chosen map (MAPS, at the end of
+  // this file) overwrites them before anything is built.
   map: {
     // Playable rectangle. X runs along the valley, Z across it (the two slopes).
     length: 440,           // x extent
@@ -18,6 +20,8 @@ export const CONFIG = {
     ridgeDist: 178,        // distance from the river centre to the ridge line
     ridgeHeightNorth: 64,
     ridgeHeightSouth: 58,
+    meander: 1,            // scale of the river's side-to-side bends
+    relief: 1,             // scale of the bumps, spurs and terraces on the slopes
     deepWaterDepth: 0.85,  // water deeper than this is impassable
     shallowSpeedMul: 0.55, // movement multiplier in shallow water
     fords: [],             // optional x positions of shallow crossings, e.g. [-120, 140]
@@ -80,6 +84,14 @@ export const CONFIG = {
     heightFalloff: 0.028,  // per metre
     color: 0xb9c3c9,
     sunScatter: 0.6,
+  },
+
+  // Drifting clouds (sky + their shadows on the ground) and gusts sweeping the valley.
+  weather: {
+    cloudCover: 0.3,       // share of the sky (and the ground) under cloud
+    cloudShadow: 0.8,      // how much direct sunlight a cloud blocks
+    cloudSpeed: 7,         // m/s, with the wind
+    gusts: 1.0,            // strength of the gusts in trees, grass and ghillie suits
   },
 
   sky: {
@@ -302,8 +314,28 @@ try {
   }
 } catch (e) { /* storage unavailable */ }
 
+// Persisted match settings (team size, rounds, zone and so on).
+try {
+  const s = JSON.parse(localStorage.getItem('sniperyard.match') || 'null');
+  if (s && typeof s === 'object') {
+    if (s.size) CONFIG.teams.size = Math.max(1, Math.min(5, s.size | 0));
+    if (s.rounds) CONFIG.match.roundsToWin = Math.max(1, Math.min(4, s.rounds | 0));
+    if ('swap' in s) CONFIG.match.swapSides = !!s.swap;
+    if (s.zone === 'ends' || s.zone === 'radial') CONFIG.zone.mode = s.zone;
+    if (typeof s.camo === 'number') CONFIG.camouflageStrength = s.camo;
+    if (['off', 'faint', 'bright'].includes(s.tracers)) CONFIG.weapon.tracers = s.tracers;
+    if ('ball' in s) CONFIG.weapon.ballistics.enabled = !!s.ball;
+  }
+} catch (e) { /* storage unavailable */ }
+
 export function saveRenderSettings() {
   try { localStorage.setItem('sniperyard.render', JSON.stringify(CONFIG.render)); } catch (e) { /* ignore */ }
+  try {
+    localStorage.setItem('sniperyard.match', JSON.stringify({
+      size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode,
+      camo: CONFIG.camouflageStrength, tracers: CONFIG.weapon.tracers, ball: CONFIG.weapon.ballistics.enabled,
+    }));
+  } catch (e) { /* ignore */ }
   try {
     const C = CONFIG.controls;
     localStorage.setItem('sniperyard.controls', JSON.stringify({
@@ -327,3 +359,59 @@ try {
   if (q.get('rounds')) CONFIG.match.roundsToWin = Math.max(1, parseInt(q.get('rounds'), 10) || 2);
   if (q.get('quality') === 'low') Object.assign(CONFIG.render, { renderScale: 0.7, shadowQuality: 'low', ao: false, msaa: 0, reflections: false, grassDensity: 0.5 });
 } catch (e) { /* ignore */ }
+
+// ---------------------------------------------------------------- maps
+// Three sizes of the same forested river valley. The chosen map's numbers replace CONFIG.map,
+// and the numbers of rocks, bushes, fallen trees and bird flocks follow the play area so the
+// forest is as dense on every map. Trees follow the area by themselves.
+export const MAPS = {
+  valley: {
+    name: 'VALLEY', size: '440 × 380 m', players: '3v3 – 5v5', zoneInterval: 60,
+    map: { length: 440, width: 380, ridgeDist: 178, ridgeHeightNorth: 64, ridgeHeightSouth: 58, riverDeepHalfWidth: 9, riverShelfStart: 12.5, riverShelfEnd: 17, riverDepth: 2.8, meander: 1, relief: 1 },
+  },
+  narrow: {
+    name: 'NARROW VALLEY', size: '340 × 270 m', players: '2v2 – 3v3', zoneInterval: 50,
+    map: { length: 340, width: 270, ridgeDist: 126, ridgeHeightNorth: 48, ridgeHeightSouth: 44, riverDeepHalfWidth: 7, riverShelfStart: 10, riverShelfEnd: 14, riverDepth: 2.5, meander: 0.75, relief: 0.85 },
+  },
+  ravine: {
+    name: 'RAVINE', size: '260 × 200 m', players: '1v1 – 2v2', zoneInterval: 42,
+    map: { length: 260, width: 200, ridgeDist: 94, ridgeHeightNorth: 38, ridgeHeightSouth: 35, riverDeepHalfWidth: 5.5, riverShelfStart: 8, riverShelfEnd: 11.5, riverDepth: 2.2, meander: 0.55, relief: 0.7 },
+  },
+};
+
+// Which map this page builds: ?map=<id>, else the one chosen in the menu, else the valley.
+// The benchmark always uses the valley so results compare between PCs.
+export const MAP_ID = (() => {
+  let id = null;
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.has('bench')) return 'valley';
+    id = q.get('map') || localStorage.getItem('sniperyard.map');
+  } catch (e) { /* ignore */ }
+  return MAPS[id] ? id : 'valley';
+})();
+
+{
+  const P = MAPS[MAP_ID];
+  Object.assign(CONFIG.map, P.map);
+  const k = (P.map.length * P.map.width) / (440 * 380);
+  CONFIG.rocks.count = Math.round(340 * k);
+  CONFIG.bushes.count = Math.round(5200 * k);
+  CONFIG.debris.logs = Math.round(240 * k);
+  CONFIG.debris.stumps = Math.round(320 * k);
+  CONFIG.debris.branches = Math.round(2000 * k);
+  CONFIG.birds.flocks = Math.max(6, Math.round(12 * k));
+  CONFIG.zone.interval = P.zoneInterval;
+}
+
+// Choose the map for the next page load (the world is built once per load).
+export function saveMapChoice(id) {
+  try { localStorage.setItem('sniperyard.map', id); } catch (e) { /* ignore */ }
+}
+
+// The current address without ?map= (so the saved choice applies after a reload). Other
+// options are kept exactly as written (e.g. ?autostart stays a bare flag).
+export function urlWithoutMap() {
+  const s = location.search.replace(/([?&])map=[^&]*(&|$)/, '$1').replace(/[?&]$/, '');
+  return location.pathname + s;
+}
