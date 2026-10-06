@@ -88,10 +88,11 @@ export class Combat {
       const t = Math.max(0, Math.min(endT, _v.subVectors(head, origin).dot(dir)));
       const closest = _p.copy(origin).addScaledVector(dir, t);
       const miss = closest.distanceTo(head);
-      if (miss < 5 && travelledBefore + t > 8) {
+      // the supersonic crack is heard well off the bullet's path (a whip-like "PISK")
+      if (miss < CONFIG.audio.crackRadius && travelledBefore + t > 12) {
         ctx.nearMissDone = true;
-        this.audio.crack(closest);
-        if (this.onNearMiss) this.onNearMiss(shooter, miss);
+        this.audio.crack(closest, miss);
+        if (this.onNearMiss && miss < 5) this.onNearMiss(shooter, miss);
       }
     }
     if (tracerFrom) this.effects.tracer(tracerFrom, end);

@@ -260,6 +260,7 @@ export const CONFIG = {
     effects: 1.0,          // gunshots, impacts, footsteps, birds
     ambience: 1.0,         // wind and river
     echo: true,
+    crackRadius: 30,       // a passing bullet's supersonic crack is heard this far from its path
   },
 
   // Player controls (saved per browser from the settings menu).

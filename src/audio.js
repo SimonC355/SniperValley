@@ -4,6 +4,7 @@
 // public/assets/sounds/sounds.json replace individual sounds (see README).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { muzzleBlast, supersonicCrack } from './sfx.js';
 
 export class AudioSystem {
   constructor() {
@@ -14,18 +15,28 @@ export class AudioSystem {
     this._up = new THREE.Vector3();
   }
 
-  // Must be called from a user gesture.
-  init() {
+  // Must be called from a user gesture. `ctx` lets tests render into an OfflineAudioContext.
+  init(ctx = null, { ambience = true, samples = true } = {}) {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      ctx = new AC();
+    }
     this.ctx = ctx;
-    this.bus = ctx.createGain();     // everything -> compressor -> master volume
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 6; comp.attack.value = 0.002; comp.release.value = 0.25;
+    this.bus = ctx.createGain();     // everything -> soft clipper -> master volume
+    // A soft clipper instead of a compressor: a compressor's look-ahead flattens the first
+    // millisecond of a shot, which is exactly what makes it crack. tanh only rounds off peaks.
+    const clip = ctx.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(1.2 * x * 1.5) / Math.tanh(1.8);
+    }
+    clip.curve = curve;
+    clip.oversample = '4x';
     this.out = ctx.createGain();
-    this.bus.connect(comp).connect(this.out).connect(ctx.destination);
+    this.bus.connect(clip).connect(this.out).connect(ctx.destination);
     // effect and ambience sub-buses; one-shots connect to `master` (= the effects bus)
     this.master = ctx.createGain();
     this.master.connect(this.bus);
@@ -38,9 +49,17 @@ export class AudioSystem {
     this.echo.connect(this.echoGain).connect(this.master);
     this.noise = this._noiseBuffer(2);
     this.brown = this._brownBuffer(4);
+    // synthesised gunshot buffers (a few variations each, see sfx.js)
+    const toBuffer = (data) => {
+      const b = ctx.createBuffer(1, data.length, ctx.sampleRate);
+      b.getChannelData(0).set(data);
+      return b;
+    };
+    this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));
+    this.cracks = [[1.5, 5], [6, 17], [16, 29]].map(([miss, sd]) => ({ miss, bufs: [sd, sd + 1].map((k) => toBuffer(supersonicCrack(ctx.sampleRate, k, miss))) }));
     this.samples = {};
-    this._loadSamples();
-    this._startAmbience();
+    if (samples) this._loadSamples();
+    if (ambience) this._startAmbience();
     this.setVolumes();
     this.ready = true;
   }
@@ -178,78 +197,54 @@ export class AudioSystem {
   }
 
   // ------------------------------------------------------------------ gunshot
+  // Muzzle report. Close up it is a hard "SMELD" (blast wave + tree reflections); far away the
+  // same blast arrives later, duller (air absorption), a little stretched and with more valley
+  // echo. The bullet's own crack is crack() below.
   shot(pos, own = false) {
     if (!this.ready) return;
     const ctx = this.ctx;
     const d = own ? 0 : this.listenerPos.distanceTo(pos);
-    const delay = d / CONFIG.reveal.soundSpeed;
-    const t = ctx.currentTime + delay;
-    const vol = own ? 1.0 : Math.min(1, 28 / (d + 10));
+    const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const out = ctx.createGain();
-    out.gain.value = vol;
+    out.gain.value = own ? 1.0 : Math.min(1, 40 / (d + 15));
     if (own) out.connect(this.master);
     else out.connect(this._panner(pos)).connect(this.master);
-    // send to echo (relatively stronger for distant shots)
+    // send to the valley echo (relatively stronger for distant shots)
     const send = ctx.createGain();
-    send.gain.value = own ? 0.5 : Math.min(1.2, 0.35 + d / 400);
+    send.gain.value = own ? 0.45 : Math.min(1.4, 0.4 + d / 300);
     out.connect(send).connect(this.echo);
     const air = ctx.createBiquadFilter();
     air.type = 'lowpass';
-    air.frequency.value = own ? 14000 : Math.max(900, 12000 / (1 + d / 120));
+    air.Q.value = 0.5;
+    air.frequency.value = own ? 20000 : Math.max(1800, 16000 / (1 + d / 180));
     air.connect(out);
     if (this._sample(own || d < 60 ? 'shot' : 'shot_far', air, t, 1) || this._sample('shot', air, t, 1)) return;
-    // rumble: the report rolling through the valley
-    const rum = ctx.createBufferSource(); rum.buffer = this.brown; rum.start(t, Math.random() * 2); rum.stop(t + 2.2);
-    const rlp = ctx.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 260;
-    const rg = ctx.createGain();
-    rg.gain.setValueAtTime(0.0001, t);
-    rg.gain.exponentialRampToValueAtTime(own ? 0.9 : 0.7 + Math.min(0.5, d / 600), t + 0.03);
-    rg.gain.exponentialRampToValueAtTime(0.0001, t + 1.6 + Math.min(0.6, d / 500));
-    rum.connect(rlp).connect(rg).connect(air);
-    if (own) {
-      // muzzle blast right at the ear: a very short broadband slap
-      const sl = this._noiseSrc(t, 0.02);
-      const sg = ctx.createGain();
-      this._env(sg, t, 1.6, 0.0005, 0.012);
-      sl.connect(sg).connect(air);
-    }
-    // crack
-    const crack = this._noiseSrc(t, 0.06);
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
-    const cg = ctx.createGain();
-    this._env(cg, t, own ? 1.2 : 0.7, 0.001, 0.05);
-    crack.connect(hp).connect(cg).connect(air);
-    // boom
-    const boom = this._noiseSrc(t, 0.6);
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1600, t); lp.frequency.exponentialRampToValueAtTime(220, t + 0.4);
-    const bg = ctx.createGain();
-    this._env(bg, t, own ? 1.4 : 1.0, 0.004, 0.5);
-    boom.connect(lp).connect(bg).connect(air);
-    // thump
-    const osc = ctx.createOscillator();
-    osc.frequency.setValueAtTime(130, t); osc.frequency.exponentialRampToValueAtTime(42, t + 0.18);
-    const og = ctx.createGain();
-    this._env(og, t, own ? 1.0 : 0.6, 0.002, 0.28);
-    osc.connect(og).connect(air);
-    osc.start(t); osc.stop(t + 0.35);
+    const src = ctx.createBufferSource();
+    src.buffer = this.blasts[Math.floor(Math.random() * this.blasts.length)];
+    src.playbackRate.value = own ? 1 : 1 / (1 + d / 1200);
+    src.connect(air);
+    src.start(t);
   }
 
-  // Supersonic crack of a bullet passing close to the listener.
-  crack(pos) {
+  // Supersonic crack of a bullet passing within ~30 m: an N-wave "PISK" from the closest point
+  // of the bullet's path. It arrives before the muzzle report (the bullet outruns the sound).
+  crack(pos, miss = 2) {
     if (!this.ready) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    if (this._sample('crack', this._panner(pos).connect(this.master), t, 1)) return;
-    const s = this._noiseSrc(t, 0.03);
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2500;
+    const p = this._panner(pos);
     const g = ctx.createGain();
-    this._env(g, t, 1.3, 0.0005, 0.02);
-    s.connect(hp).connect(g).connect(this._panner(pos)).connect(this.master);
-    // whizz
-    const w = this._noiseSrc(t, 0.25);
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 6; bp.frequency.setValueAtTime(3500, t); bp.frequency.exponentialRampToValueAtTime(900, t + 0.2);
-    const wg = ctx.createGain();
-    this._env(wg, t, 0.25, 0.01, 0.2);
-    w.connect(bp).connect(wg).connect(this.master);
+    g.gain.value = Math.min(1.4, Math.max(0.25, Math.pow(6 / (miss + 3), 0.8)));
+    g.connect(p).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.35;
+    g.connect(send).connect(this.echo);
+    if (this._sample('crack', g, t, 1)) return;
+    let set = this.cracks[0];
+    for (const c of this.cracks) if (Math.abs(c.miss - miss) < Math.abs(set.miss - miss)) set = c;
+    const src = ctx.createBufferSource();
+    src.buffer = set.bufs[Math.floor(Math.random() * set.bufs.length)];
+    src.connect(g);
+    src.start(t);
   }
 
   bolt(startDelay = 0.25) {
