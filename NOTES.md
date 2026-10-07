@@ -155,8 +155,25 @@ valley (`MAPS` in `src/config.js`):
 
 ## Birds
 
-- 12 flocks of 6–12 crows sit on the outside of tree crowns (preferring snags and tall trees),
-  6 per slope, spread along the valley.
+- **30 flocks of 3–10 crows** on the Valley map (16 on Narrow valley, 10 in the Ravine), one
+  per cell of a grid that runs along the valley and up both slopes (low, middle and high),
+  so there are birds everywhere. Each flock spreads over up to four neighbouring trees and
+  prefers snags and tall trees. The play tests found the old 12 flocks too few to notice.
+- **Perched crows sit upright**, mostly on the treetops, so they stand out against the sky.
+  The old perch kept the flight pose (body flat), which from the front or behind was a sliver
+  of two to four pixels at 25 m.
+- **Perched life.** Birds look around every few seconds, flick their wings, and now and then
+  one hops to another branch and back. A perched flock calls about every 48 s: one bird, one
+  to three caws, quieter than the alarm, and it leans forward with each caw. You can find
+  flocks by ear before you see them.
+- **LAN:** calls and hops are computed from the flock, the round and the game clock (no
+  random state), so everyone sees and hears the same ones at the same time.
+- **Sounds:** a flush is a burst of wing beats from every bird (a low "whup" of air per stroke
+  plus a feather swish, strongest at take-off), twigs thrashing as they leave the crown, and
+  alarm caws while they circle. You also hear wing beats when a bird flies close past you,
+  when one hops nearby, and when the flock settles back into the trees. Caws got a rougher
+  voice and a little valley echo. Recorded `wings` and `caw` samples can replace them (see
+  the README).
 - **What flushes a flock**:
   - **Proximity** inside `8 m + speed × 2.5`: a sprint at 7 m/s disturbs them from about 25 m,
     scoped prone movement from about 10 m.
@@ -166,6 +183,9 @@ valley (`MAPS` in `src/config.js`):
   25 s. Landing is postponed while someone is still close.
 - Each flush emits one `birds` event at the flock's ground centre. Opposing AI within 380 m
   investigate it; no line of sight is needed, because they hear the caws.
+- With 30 flocks, a minute of AI play flushed 0 flocks on the Valley map and 2 in the Ravine
+  (the AI mostly holds still), so birds give players away more often without becoming noise.
+  Perched calls and hops never trigger a reveal.
 
 ## Characters and camouflage
 
@@ -360,8 +380,29 @@ valley (`MAPS` in `src/config.js`):
     own shot peaks at −0.2 dBFS, a crack at 3 m at −0.9 dBFS, a distant report at 300 m at
     −15 dBFS, and the spectrograms show no pitch sweeps.
 - **Forest ambience** (`src/forestsound.js`): five songbirds sing from the trees around you
-  (chaffinch, great tit, robin, thrush and wren patterns), a woodpecker drums now and then,
-  trunks creak in strong gusts, and needles rustle, louder in gusts. The rustle has one source
+  (chaffinch, great tit, robin and thrush patterns), a woodpecker drums now and then,
+  and needles rustle, louder in gusts. (Trunks creaked in strong gusts too; see below why
+  that is gone.)
+- **The second "bee".** After the gunshot fix, a play test still heard a bee flying around,
+  and after the first fix "much better, but not completely gone". I built a buzz meter: it
+  renders each sound offline and counts the 40 ms windows that have a real pitch (a
+  repeating autocorrelation peak) in the insect band, 100–700 Hz. Results:
+
+  | Sound | Windows with a pitch | Periodicity |
+  |---|---|---|
+  | Trunk creak, first version (gliding sawtooth) | 14 % | 0.99 |
+  | Trunk creak, second version (wood slips ringing a 200 Hz resonance) | 19–20 % | 0.99–1.00 |
+  | Crow caw, old (clean sawtooth, falling glide) | 18 % | 0.94 |
+  | Everything now: gunshots, cracks, caws, wing beats, woodpecker, songbirds, gusts, river, wind | 0–3 % | ≤ 0.70 |
+
+  So the bee was the creak both times (a creak is a tone in that range, however it is
+  built), and the old caw was close. The creak is gone. The caw is rendered at start
+  (`src/sfx.js`) as a harsh voice: pulses at an irregular rate, sometimes skipping one (a
+  croak an octave down), with breath noise, through throat and beak resonances. The
+  woodpecker knocks are now dry and countable (11–14 per second, no ringing resonance), the
+  wren's fast trill is out, and a flushed flock caws at most nine times.
+- **What was that noise?** The F1 debug panel lists the sounds of the last 10 s with their
+  distance, so an odd sound can be named in a play test. The rustle has one source
   per ear, each following the gust 25 m to that side, so a gust is heard arriving from one
   side. Any gunshot within 700 m silences the birds for 22–40 s; they come back one by one.
 - Volumes are separate buses: effects, ambience (wind, river, forest) and the echo send, all

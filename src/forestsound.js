@@ -1,11 +1,12 @@
 // Forest ambience: songbirds in the trees around you (gunfire silences them, then they come
-// back one by one), a woodpecker now and then, trunks creaking and needles rustling in the
-// gusts (left and right follow the gust as it sweeps past), and a low roar in strong gusts.
-// Everything is synthesised and goes to the ambience bus.
+// back one by one), a woodpecker now and then, needles rustling in the gusts (left and right
+// follow the gust as it sweeps past), and a low roar in strong gusts. Everything is
+// synthesised and goes to the ambience bus. Nothing here may buzz: a steady pulse or tone in
+// the 100-700 Hz range reads as an insect (two play tests heard "a bee flying around").
 import * as THREE from 'three';
 import { gustAt } from './shaders.js';
 
-const SPECIES = ['chaffinch', 'tit', 'robin', 'thrush', 'wren'];
+const SPECIES = ['chaffinch', 'tit', 'robin', 'thrush'];
 const SINGERS = 5;
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -17,7 +18,6 @@ export class ForestAmbience {
     this.singers = [];
     this.quietUntil = 0;       // audio-clock time until which the birds keep quiet
     this.woodpeckerAt = 0;
-    this.creakCheck = 0;
     this.started = false;
     this._right = new THREE.Vector3();
   }
@@ -88,12 +88,6 @@ export class ForestAmbience {
       if (now >= this.quietUntil) this._woodpecker(p, now + 0.05);
       this.woodpeckerAt = now + rand(45, 120);
     }
-    // creaking trunks in strong gusts (forest only)
-    this.creakCheck -= dt;
-    if (this.creakCheck <= 0) {
-      this.creakCheck = 0.5;
-      if (g > 0.45 && canopy > 0.3 && Math.random() < 0.12 * g) this._creak(p, now + 0.05);
-    }
   }
 
   _spot(p, minD, maxD, up) {
@@ -112,7 +106,7 @@ export class ForestAmbience {
     return {
       species,
       pos: this._spot(p, 18, 95, rand(7, 18)),
-      interval: species === 'wren' ? rand(9, 16) : rand(4, 11),
+      interval: rand(4, 11),
       pitch: rand(0.92, 1.08),
       next: Math.max(now, this.quietUntil) + rand(0.5, 9),
     };
@@ -151,6 +145,7 @@ export class ForestAmbience {
   }
 
   _sing(s, t0) {
+    this.a._log(`songbird (${s.species})`, this.a.listenerPos.distanceTo(s.pos));
     const out = this._out(s.pos, 0.16);
     const k = s.pitch;
     let t = t0;
@@ -194,57 +189,28 @@ export class ForestAmbience {
         }
         break;
       }
-      default: {            // wren: a long, fast, loud trill
-        const n = Math.floor(rand(26, 40));
-        const f0 = rand(6200, 7600) * k;
-        for (let i = 0; i < n; i++) {
-          const f = f0 * (1 + 0.08 * Math.sin(i * 0.9));
-          this._note(out, t, 0.026, f * 1.06, f * 0.94, 0.7);
-          t += 0.042;
-        }
-      }
     }
   }
 
   _woodpecker(p, t0) {
     const a = this.a, ctx = a.ctx;
     const pos = this._spot(p, 50, 150, rand(4, 12));
+    this.a._log('woodpecker', a.listenerPos.distanceTo(pos));
     const out = this._out(pos, 0.8);
-    const n = Math.floor(rand(14, 22));
-    const rate = rand(15, 19);
+    // dry, broadband knocks at a rate you can count (a ringing resonance under a fast roll
+    // turns it into a buzz)
+    const n = Math.floor(rand(10, 15));
+    const rate = rand(11, 14);
+    let t = t0;
     for (let i = 0; i < n; i++) {
-      const t = t0 + i / (rate * (1 - i * 0.008));
       const src = a._noiseSrc(t, 0.03);
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 1.5;
-      const res = ctx.createBiquadFilter(); res.type = 'peaking'; res.frequency.value = 560; res.Q.value = 6; res.gain.value = 14;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = rand(1000, 1400); bp.Q.value = 0.8;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.9 * (1 - i / (n * 1.6)), t + 0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.018);
-      src.connect(bp).connect(res).connect(g).connect(out);
+      g.gain.exponentialRampToValueAtTime(0.9 * (1 - i / (n * 1.6)), t + 0.0015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+      src.connect(bp).connect(g).connect(out);
+      t += (1 / rate) * (1 + i * 0.012) * (0.92 + Math.random() * 0.16);
     }
-  }
-
-  // stick-slip creak of a trunk bending in the wind
-  _creak(p, t0) {
-    const a = this.a, ctx = a.ctx;
-    const pos = this._spot(p, 8, 35, rand(4, 10));
-    const out = this._out(pos, 0.5);
-    const dur = rand(0.6, 1.5);
-    const o = ctx.createOscillator(); o.type = 'sawtooth';
-    const f = rand(28, 70);
-    o.frequency.setValueAtTime(f, t0);
-    o.frequency.linearRampToValueAtTime(f * rand(1.4, 2.4), t0 + dur * 0.6);
-    o.frequency.linearRampToValueAtTime(f * rand(0.8, 1.2), t0 + dur);
-    const b1 = ctx.createBiquadFilter(); b1.type = 'bandpass'; b1.frequency.value = rand(550, 850); b1.Q.value = 7;
-    const b2 = ctx.createBiquadFilter(); b2.type = 'bandpass'; b2.frequency.value = rand(1200, 1700); b2.Q.value = 9;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(0.7, t0 + dur * 0.35);
-    g.gain.linearRampToValueAtTime(0.5, t0 + dur * 0.7);
-    g.gain.linearRampToValueAtTime(0, t0 + dur);
-    o.connect(b1).connect(g); o.connect(b2).connect(g);
-    g.connect(out);
-    o.start(t0); o.stop(t0 + dur + 0.05);
   }
 }

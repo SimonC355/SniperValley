@@ -1,4 +1,4 @@
-// Gunshot sound synthesis into sample buffers (pure functions, no WebAudio).
+// Sound synthesis into sample buffers (pure functions, no WebAudio): gunshots and crow caws.
 //
 // - Muzzle blast: a Friedlander blast wave (instant rise, ~1.5 ms positive phase, negative
 //   phase), hot-gas turbulence noise, a low body, a ground reflection and a cluster of early
@@ -144,4 +144,46 @@ export function supersonicCrack(sr, seed = 1, miss = 3) {
     mixInto(out, tap, Math.round(sr * t), (0.25 + r() * 0.25) * Math.exp(-t / 0.05));
   }
   return normalize(out, 0.95);
+}
+
+// Band-pass resonator (RBJ biquad, 0 dB peak), returns a new buffer.
+function bandpass(x, sr, f, Q) {
+  const w = (2 * Math.PI * f) / sr, alpha = Math.sin(w) / (2 * Q), cs = Math.cos(w);
+  const a0 = 1 + alpha, b0 = alpha / a0, b2 = -alpha / a0, a1 = (-2 * cs) / a0, a2 = (1 - alpha) / a0;
+  const y = new Float32Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = b0 * x[i] + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v;
+  }
+  return y;
+}
+
+// One crow caw ("kraa"). A crow's voice is harsh: the pulses from its syrinx come at an
+// irregular rate (and sometimes skip one, a croak an octave down), with breath noise, shaped
+// by the throat and beak. A clean, steady tone here sounds like an insect, not a bird.
+export function crowCaw(sr, seed = 1) {
+  const r = rng(seed);
+  const dur = 0.26 + r() * 0.14;
+  const n = Math.floor(sr * (dur + 0.06));
+  const exc = new Float32Array(n);
+  const f0 = 400 + r() * 120;
+  const env = (u) => (u < 0 || u > 1 ? 0 : Math.min(1, u / 0.06) * (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3));
+  let t = 0;
+  while (t < dur) {
+    const u = t / dur;
+    let period = (1 / (f0 * (1.05 - 0.15 * u))) * (0.72 + r() * 0.56);
+    if (r() < 0.35) period *= 2;
+    const i0 = Math.floor(t * sr);
+    const a = env(u) * (0.6 + 0.4 * r());
+    if (i0 + 2 < n) { exc[i0] += a; exc[i0 + 1] += a * 0.6; exc[i0 + 2] -= a * 0.3; }
+    t += period;
+  }
+  for (let i = 0; i < n; i++) exc[i] += (r() * 2 - 1) * 0.4 * env(i / sr / dur);
+  const A = bandpass(exc, sr, 1000 + r() * 200, 3);
+  const B = bandpass(exc, sr, 1950 + r() * 350, 4);
+  const C = bandpass(exc, sr, 3100 + r() * 450, 4);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = A[i] + B[i] * 0.8 + C[i] * 0.35;
+  return normalize(out, 0.9);
 }

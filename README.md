@@ -133,7 +133,7 @@ file or a list of variations:
   "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
   "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
   "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
-  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"] }
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg" }
 ```
 
 Any sound you leave out stays synthesised. Use CC0 recordings, for example
@@ -182,7 +182,7 @@ src/
   viewmodel.js   first-person rifle
   audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river)
   sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack
-  forestsound.js songbirds, woodpecker, creaking trunks, needle rustle and gust roar
+  forestsound.js songbirds, woodpecker, needle rustle and gust roar
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
   hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
   input.js       keyboard/mouse, pointer lock, rebindable actions
@@ -227,13 +227,17 @@ are in [CREDITS.md](CREDITS.md).
   no human outline and a faint armband.
 
 **4. Event bus, investigate, AI teammate**
-- Press F1. Fire one shot and watch BRAVO switch to `investigate` (flash if they had line of
+- Press F1. The panel also lists the sounds of the last 10 seconds with their distance, so you
+  can name any odd noise.
+- Fire one shot and watch BRAVO switch to `investigate` (flash if they had line of
   sight; otherwise sound, arriving later and less accurately), then `aim`.
 - Your teammate (blue marker) picks a ridge spot, scans, and engages enemies on its own.
 
 **5. Birds**
-- Sprint toward a flock of crows on a treetop. They flush at about 25 m (about 10 m when
-  crawling), circle with caws, and resettle after about 25 s.
+- Crows sit on treetops all over both slopes. Listen for their calls, then look for black
+  upright birds against the sky; they look around and hop between branches.
+- Sprint toward a flock. They burst out of the trees with loud wing beats at about 25 m
+  (about 10 m when crawling), circle with alarm caws, and resettle after about 25 s.
 - Fire near a flock (within 40 m) to flush it. Watch F1: the enemy investigates the flock.
 - Watch the opposite slope for birds that BRAVO flushes.
 
@@ -290,8 +294,8 @@ are in [CREDITS.md](CREDITS.md).
   gust rolls down the valley, the trees lean and shake harder, and you hear it in the
   needles, first on one side, then the other.
 - **Forest life.** Under the trees, needles drift down; look toward the sun to see dust
-  motes. Listen for songbirds, a woodpecker now and then, and creaking trunks in strong
-  gusts. Fire a shot: the birds fall silent for half a minute, then start again one by one.
+  motes. Listen for songbirds and a woodpecker now and then. Fire a shot: the birds fall
+  silent for half a minute, then start again one by one.
 - **Ghillie suits.** Look at your teammate up close (F2 helps to find them): thin jute
   threads and grass tufts on the shoulders and hood, strands that blow in the gusts, trail
   behind when they move and swing out when they turn, and slow breathing when they hold

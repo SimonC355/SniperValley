@@ -407,7 +407,7 @@ class Game {
     this.deathT = 0;
     this.killcam = null;
     this.aimHistory = [];
-    this.birds.reset(0);
+    this.birds.reset(0, this.match.round);
     this.zone.reset();
     this.spectating = null;
     this.damageFlash = 0;
@@ -1182,6 +1182,15 @@ class Game {
     for (const a of this.ais) {
       const aw = [...a.ai.awareness.entries()].filter(([, v]) => v > 0.05).map(([id, v]) => `${this.nameOf(id)}=${v.toFixed(2)}`).join(' ');
       lines.push(` ${a.name.padEnd(8)} ${a.alive ? a.ai.state.padEnd(11) : 'DEAD       '} ${a.stance.padEnd(6)} ${a.scoped ? 'SCOPED' : '      '} ${a.ai.target ? '-> ' + a.ai.target.name : ''} ${aw}`);
+    }
+    // what was that noise? the last sounds played, newest first
+    const A = this.audio;
+    if (A.ready) {
+      lines.push('', 'Sounds (last 10 s):');
+      for (const e of A.log.slice().reverse()) {
+        const age = A.ctx.currentTime - e.t;
+        if (age <= 10) lines.push(` ${age.toFixed(1).padStart(5)}s ago  ${e.name.padEnd(24)} ${e.d} m`);
+      }
     }
     lines.push('', 'Reveal events (last 12 s):');
     const now = this.time;

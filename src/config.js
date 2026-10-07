@@ -184,9 +184,12 @@ export const CONFIG = {
 
   // ---------------------------------------------------------------- birds
   birds: {
-    flocks: 12,
-    minPerFlock: 6,
-    maxPerFlock: 12,
+    flocks: 30,                // on the Valley map; fewer on the smaller maps (by area)
+    minPerFlock: 3,
+    maxPerFlock: 10,
+    treesPerFlock: 4,          // a flock spreads over up to this many neighbouring trees
+    callChance: 0.25,          // chance per 12 s that a perched flock calls (about every 48 s)
+    hopChance: 0.35,           // chance per 6 s that a perched bird hops to another branch
     flushBase: 8,              // flush radius = flushBase + speed * flushSpeedMul
     flushSpeedMul: 2.5,
     shotFlushRadius: 40,
@@ -400,7 +403,7 @@ export const MAP_ID = (() => {
   CONFIG.debris.logs = Math.round(240 * k);
   CONFIG.debris.stumps = Math.round(320 * k);
   CONFIG.debris.branches = Math.round(2000 * k);
-  CONFIG.birds.flocks = Math.max(6, Math.round(12 * k));
+  CONFIG.birds.flocks = Math.max(10, Math.round(CONFIG.birds.flocks * k));
   CONFIG.zone.interval = P.zoneInterval;
 }
 
