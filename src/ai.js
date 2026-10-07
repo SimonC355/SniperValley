@@ -9,6 +9,7 @@ import { Combatant, eyeHeightFor, angleBetween } from './entity.js';
 import { Hitbox } from './hitbox.js';
 import { GhillieCharacter } from './characters.js';
 import { GlintSprite } from './effects.js';
+import { cloudCoverAt } from './weather.js';
 import { RNG, clamp, lerp } from './noise.js';
 
 const DEG = Math.PI / 180;
@@ -20,8 +21,8 @@ function wrapAngle(a) {
   return a;
 }
 
-// Glint intensity (0..1) that `shooter` shows toward point `p`.
-export function glintToward(shooter, p) {
+// How directly `shooter`'s scope points at point `p` (0..1, geometry only).
+export function glintAim(shooter, p) {
   if (!shooter.alive || !shooter.scoped) return 0;
   const s = shooter.scopePos(_a);
   const dir = _b.subVectors(p, s).normalize();
@@ -33,6 +34,17 @@ export function glintToward(shooter, p) {
   return t * t * (3 - 2 * t);
 }
 
+// Glint intensity (0..1) that `shooter` shows toward point `p`: the aim, dimmed under a cloud.
+export function glintToward(shooter, p) {
+  const g = glintAim(shooter, p);
+  return g > 0 ? g * glintSun(shooter.scopePos(_a)) : 0;
+}
+
+// A glint is sunlight off the lens: under a cloud it is weaker (about a third).
+export function glintSun(p) {
+  return 0.35 + 0.65 * (1 - cloudCoverAt(p.x, p.y, p.z));
+}
+
 // ---------------------------------------------------------------------------- spots
 
 export class SpotMap {
@@ -42,12 +54,16 @@ export class SpotMap {
     const rng = new RNG(seed + 401);
     this.spots = [[], []];   // per side: 0 = north slope (+Z), 1 = south slope (-Z)
     const T = terrain;
+    const M = CONFIG.map;
+    // map scale across (ridge distance) and along the valley (length), 1 on the valley map
+    const ks = M.ridgeDist / 178, kx = M.length / 440;
+    const dzMin = M.riverShelfEnd + 13, dzMax = M.ridgeDist - 6;
     for (let team = 0; team < 2; team++) {
       const side = team === 0 ? 1 : -1;
       const cands = [];
       for (let k = 0; k < 240; k++) {
         const x = rng.float(-T.halfX + 10, T.halfX - 10);
-        const dz = rng.float(30, 172);
+        const dz = rng.float(dzMin, dzMax);
         const z = T.riverCenter(x) + side * dz;
         if (Math.abs(z) > T.halfZ - 5) continue;
         if (T.waterDepthAt(x, z) > 0) continue;
@@ -58,14 +74,14 @@ export class SpotMap {
         const eye = new THREE.Vector3(x, h + 0.55, z);
         let vis = 0;
         for (let s = 0; s < 6; s++) {
-          const tx = x + (s - 2.5) * 50;
-          const tz = T.riverCenter(tx) - side * (35 + (s % 3) * 45);
+          const tx = x + (s - 2.5) * 50 * kx;
+          const tz = T.riverCenter(tx) - side * (35 + (s % 3) * 45) * ks;
           const tp = new THREE.Vector3(tx, T.heightAt(tx, tz) + 1.0, tz);
           if (world.lineOfSight(eye, tp)) vis++;
         }
         if (vis === 0) continue;
         const cover = Math.min(1, world.query(x, z, 3, ['tree', 'rock', 'bush', 'log', 'stump']).length * 0.3);
-        const height = dz / 172;
+        const height = dz / dzMax;
         const canopy = T.canopyAt(x, z);
         cands.push({
           x, z, team, view: vis / 6, cover, height,
@@ -466,11 +482,12 @@ class AIBrain {
       }
     }
     const side = g.sideOf(cb.team) === 0 ? -1 : 1;
-    let x = cb.pos.x + this.rng.float(-120, 120);
+    const ks = CONFIG.map.ridgeDist / 178;
+    let x = cb.pos.x + this.rng.float(-120, 120) * (CONFIG.map.length / 440);
     const zn = this.zone;
     if (zn && zn.mode === 'ends') x = clamp(x, -zn.halfLen * zn.current + 5, zn.halfLen * zn.current - 5);
     x = clamp(x, -T.halfX, T.halfX);
-    const z = T.riverCenter(x) + side * this.rng.float(20, 150);
+    const z = T.riverCenter(x) + side * this.rng.float(20, 150) * ks;
     return new THREE.Vector3(x, T.heightAt(x, z) + 1, z);
   }
 

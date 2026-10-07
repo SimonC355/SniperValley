@@ -4,9 +4,14 @@ A Three.js + Vite prototype of **SniperYard**, a team sniper game in a forested 
 Play 2v2 (up to 5v5) against AI ghillie snipers, or with friends on your local network.
 
 - Everyone has one bolt-action rifle, one hit kills, and nobody respawns.
-- The map shrinks every minute.
+- Three maps of the same valley: **Valley** (large, 3v3–5v5), **Narrow valley** (2v2–3v3) and
+  **Ravine** (small, 1v1–2v2).
+- The play area shrinks every minute or so.
 - A match is best of three rounds, and teams swap slopes (and sun side) between rounds.
 - Detection comes from scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
+- The forest is alive: clouds drift over and their shadows sweep the slopes (a scope glints
+  less under a cloud), gusts roll through the trees, grass and ghillie suits, needles drift
+  down, and songbirds fall silent after gunfire.
 
 ## Run it
 
@@ -20,6 +25,23 @@ npm run build      # static build in dist/
 
 Requires a desktop browser with WebGL2 and a mouse. The first load takes a few seconds while
 textures, the forest and sniper positions are generated.
+
+### Maps
+
+Pick the map with **MAP** next to *SINGLE PLAYER* on the start screen, or in the **MATCH** tab
+of the menu. Changing the map reloads the game (the world is built once per load); your
+settings stay.
+
+| Map | Size | Players | Typical shots |
+|---|---|---|---|
+| Valley | 440 × 380 m | 3v3 – 5v5 | 150 – 350 m |
+| Narrow valley | 340 × 270 m | 2v2 – 3v3 | 100 – 250 m |
+| Ravine | 260 × 200 m | 1v1 – 2v2 | 60 – 180 m |
+
+All three are the same forested river valley at different sizes: narrower slopes, a smaller
+river and lower ridges, with the same mountains behind. The zone also closes faster on the
+smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
 
@@ -45,7 +67,7 @@ git-ignored because they are large, so every machine runs the command once.
 3. **Friends** on the same network: open the address with your IP, type a name and click
    **JOIN GAME**. They don't need to install anything; the browser is enough.
 4. **Pick teams** in the lobby, or leave them on auto-balance. In the **MATCH** tab, the host
-   sets team size, rounds and zone mode. With *Fill empty slots with AI* on, AI snipers fill
+   sets the map, team size, rounds and zone mode. With *Fill empty slots with AI* on, AI snipers fill
    the teams up to the team size.
 5. **Host:** click **START MATCH**. Friends click once in the game window to capture the
    mouse.
@@ -120,7 +142,7 @@ CREDITS.md.
 
 ## URL options
 
-`?mode=radial` · `?team=3` (1–5) · `?ballistics=1` · `?tracers=off|faint|bright` ·
+`?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–5) · `?ballistics=1` · `?tracers=off|faint|bright` ·
 `?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
@@ -140,10 +162,12 @@ src/
   rocks.js       procedural boulders
   debris.js      fallen logs, stumps and dead branches (logs and stumps are cover)
   grass.js       instanced grass tiles around the viewer
-  sky.js         sky, sun, environment light, shadow frustum
+  sky.js         sky (clouds from weather.js), sun, environment light, shadow frustum
+  weather.js     drifting cloud field: sky clouds + cloud shadows on every lit material
+  particles.js   needles drifting down under the canopy, dust motes in the sun
   textures.js    GPU-baked terrain/bark/water textures, Canvas2D foliage + ghillie strips
   assets.js      loads optional photoscanned textures (public/assets) in place of the bakes
-  shaders.js     shared uniforms, exponential height fog, foliage material patch
+  shaders.js     shared uniforms, gusts, exponential height fog, foliage material patch
   world.js       analytic raycasts / line of sight / collisions (no physics engine)
   player.js      first-person controller, scope, sway, recoil
   entity.js      shared combatant state
@@ -156,18 +180,20 @@ src/
   zone.js        shrinking zone
   effects.js     muzzle flash, glint, impacts, tracers
   viewmodel.js   first-person rifle
-  audio.js       synthesised WebAudio
+  audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river)
+  sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack
+  forestsound.js songbirds, woodpecker, creaking trunks, needle rustle and gust roar
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
+  hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
+  input.js       keyboard/mouse, pointer lock, rebindable actions
+  net.js         LAN multiplayer: lobby session, host snapshots, shot/kill sync, map sync
+  remote.js      network-driven combatants (other players, the host's AI on clients)
+  bench.js       ?bench benchmark (always on the Valley map)
 scripts/
   fetch-assets.mjs   `npm run assets`: CC0 texture downloader (Poly Haven API)
 server/
   lan.mjs        `npm run host`: serves dist/ and the relay, prints LAN addresses
   relay.mjs      WebSocket lobby + message relay (also used by the dev server)
-  hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
-  input.js       keyboard/mouse, pointer lock, rebindable actions
-  net.js         LAN multiplayer: lobby session, host snapshots, shot/kill sync
-  remote.js      network-driven combatants (other players, the host's AI on clients)
-  bench.js       ?bench benchmark
 ```
 
 Design interpretations, numbers and open questions are in [NOTES.md](NOTES.md). Asset credits
@@ -249,3 +275,24 @@ are in [CREDITS.md](CREDITS.md).
   - Shoot each other. The victim gets the killcam, and the kill feed matches on both screens.
   - Birds, glints, muzzle flashes and the zone look the same for both players.
   - Hold Tab for the scoreboard.
+
+**Maps, living forest, ghillie suits and gunshots**
+- **Gunshots.** Your own shot is a hard crack with a short rumble. When an enemy shot passes
+  close, you first hear a sharp *pisk* (the bullet's supersonic crack), then the report from
+  the rifle a moment later; the further away the shooter, the longer the gap.
+- **Maps.** Pick *Ravine* next to SINGLE PLAYER and play 2v2. The opposite slope is much
+  closer and rounds are faster. Try *Narrow valley* as well. In a LAN game, the host switches
+  map in the MATCH tab: friends reload and rejoin by themselves.
+- **Clouds.** Look up: clouds drift with the wind. Watch the opposite slope for cloud shadows
+  sweeping across it. When a cloud covers the sun, the light shafts fade, and your scope
+  glint is weaker (the HUD says *GLINT DIMMED · CLOUD*).
+- **Gusts.** Stand still on a ridge and watch the trees and grass: every 20 seconds or so a
+  gust rolls down the valley, the trees lean and shake harder, and you hear it in the
+  needles, first on one side, then the other.
+- **Forest life.** Under the trees, needles drift down; look toward the sun to see dust
+  motes. Listen for songbirds, a woodpecker now and then, and creaking trunks in strong
+  gusts. Fire a shot: the birds fall silent for half a minute, then start again one by one.
+- **Ghillie suits.** Look at your teammate up close (F2 helps to find them): thin jute
+  threads and grass tufts on the shoulders and hood, strands that blow in the gusts, trail
+  behind when they move and swing out when they turn, and slow breathing when they hold
+  still.

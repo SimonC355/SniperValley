@@ -1,9 +1,12 @@
 // Atmospheric sky (three's Preetham Sky with clouds) blended into the fog colour at the
 // horizon, plus sun/ambient lights and a PMREM environment map generated from the sky.
+// The clouds come from the drifting cloud field in weather.js (the same one that casts the
+// cloud shadows), lit with three's cloud shading.
 import * as THREE from 'three';
 import { Sky as ThreeSky } from 'three/examples/jsm/objects/Sky.js';
 import { CONFIG } from './config.js';
 import { sunDirection, SHARED } from './shaders.js';
+import { cloudUniforms } from './weather.js';
 
 export class SkySystem {
   constructor(renderer, scene) {
@@ -29,21 +32,39 @@ export class SkySystem {
     const fogCol = new THREE.Color(CONFIG.fog.color);
     sky.material.uniforms.uFogColor = { value: fogCol };
     sky.material.uniforms.uSkyGain = { value: 0.6 };
-    sky.material.fragmentShader = sky.material.fragmentShader
-      .replace('uniform float time;', 'uniform float time;\nuniform vec3 uFogColor;\nuniform float uSkyGain;')
+    Object.assign(sky.material.uniforms, cloudUniforms());
+    let fs = sky.material.fragmentShader
+      .replace('uniform float time;', 'uniform float time;\nuniform vec3 uFogColor;\nuniform float uSkyGain;\nuniform sampler2D uCloudTex;\nuniform vec4 uCloudA;\nuniform vec4 uCloudB;')
+      .replace('vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );',
+        'vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );\n\t\t\tfloat cloudAlpha = 0.0;')
+      .replace('float alpha = ( 1.0 - exp( depth * cloudDensity * -12.0 ) ) * horizonFade;',
+        'float alpha = smoothstep( threshold - 0.02, threshold + 0.16, cloudNoise ) * horizonFade;\n\t\t\t\tcloudAlpha = alpha;')
       .replace('gl_FragColor = vec4( texColor, 1.0 );', `
       {
         float hz = 1.0 - smoothstep(-0.04, 0.16, direction.y);
         float sunAmt = pow(max(dot(direction, vSunDirection), 0.0), 8.0);
         vec3 fc = mix(uFogColor, uFogColor * vec3(1.6, 1.4, 1.1), sunAmt * ${CONFIG.fog.sunScatter.toFixed(3)});
-        // keep the sky below the bloom threshold; only the sun disc itself blooms
-        vec3 base = max(texColor - sundiscColor, vec3(0.0)) * uSkyGain;
+        // keep the sky below the bloom threshold; only the sun disc itself blooms (unless a
+        // cloud covers it)
+        vec3 base = max(texColor - sundiscColor * (1.0 - cloudAlpha), vec3(0.0)) * uSkyGain;
         float bl = dot(base, vec3(0.2126, 0.7152, 0.0722));
         base *= min(1.0, 2.4 / max(bl, 1e-4));
         base = mix(base, fc, hz * 0.85);
-        texColor = base + sundisc * vec3(40.0, 34.0, 26.0);
+        texColor = base + sundisc * (1.0 - cloudAlpha) * vec3(40.0, 34.0, 26.0);
       }
       gl_FragColor = vec4( texColor, 1.0 );`);
+    // cloud density from the weather cloud field, projected onto the same cloud layer the
+    // ground shadows use (so a cloud over the sun shades the place you stand)
+    const a = fs.indexOf('float elevation = mix( 1.0, 0.1, cloudElevation );');
+    const bTag = 'float cloudMask = smoothstep( threshold, threshold + 0.3, cloudNoise );';
+    const b = fs.indexOf(bTag);
+    if (a < 0 || b < 0) throw new Error('Sky shader changed: cloud block not found');
+    fs = fs.slice(0, a) + `vec2 cq = cameraPosition.xz + direction.xz / max( direction.y, 1e-3 ) * ( uCloudB.z - cameraPosition.y );
+				vec2 cuv = cq * uCloudB.w + uCloudA.xy;
+				float cloudNoise = texture( uCloudTex, cuv ).r * 0.72 + texture( uCloudTex, cuv * 3.3 + vec2( 0.37, 0.61 ) ).r * 0.28;
+				float threshold = uCloudA.z;
+				float cloudMask = smoothstep( threshold, threshold + 0.1, cloudNoise );` + fs.slice(b + bTag.length);
+    sky.material.fragmentShader = fs;
     sky.material.needsUpdate = true;
     sky.frustumCulled = false;
     this.sky = sky;

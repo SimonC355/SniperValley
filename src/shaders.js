@@ -12,6 +12,28 @@ export const SHARED = {
   uSunColor: { value: new THREE.Color(1, 1, 1) },
 };
 
+// Gusts: bands of stronger wind that travel down the valley. Trees, grass and ghillie
+// strands sway harder as a band passes (GLSL), and the wind sound follows it (JS).
+// Bands of stronger wind travelling downwind (~7 m/s); 0 = lull, 1 = the peak of a gust.
+// GUST_GLSL needs uTime and uWindDir (SHARED) in the shader.
+export const GUST_GLSL = /* glsl */`
+float gustAt(vec2 p) {
+  float a = dot(p, uWindDir);
+  float c = dot(p, vec2(-uWindDir.y, uWindDir.x));
+  float ph = (a - uTime * 7.0) * 0.042 + sin(c * 0.018 + uTime * 0.05) * 1.6 + sin(c * 0.043 - uTime * 0.07) * 0.7;
+  float g = sin(ph) * 0.5 + 0.5;
+  return g * g * g * (0.5 + 0.5 * sin(uTime * 0.021 + 1.3));
+}`;
+
+export function gustAt(x, z, t) {
+  const w = SHARED.uWindDir.value;
+  const a = x * w.x + z * w.y;
+  const c = -x * w.y + z * w.x;
+  const ph = (a - t * 7.0) * 0.042 + Math.sin(c * 0.018 + t * 0.05) * 1.6 + Math.sin(c * 0.043 - t * 0.07) * 0.7;
+  const g = Math.sin(ph) * 0.5 + 0.5;
+  return g * g * g * (0.5 + 0.5 * Math.sin(t * 0.021 + 1.3));
+}
+
 export function sunDirection() {
   const el = THREE.MathUtils.degToRad(CONFIG.sun.elevation);
   const az = THREE.MathUtils.degToRad(CONFIG.sun.azimuth);
@@ -97,7 +119,8 @@ export function patchFoliage(material, { sway = 0.004, flutter = 0.03, transluce
 uniform float uTime;
 uniform vec2 uWindDir;
 uniform float uWindStrength;
-varying float vFoliageAO;`)
+varying float vFoliageAO;
+${GUST_GLSL}`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
 #ifdef BILLBOARD
   {
@@ -125,10 +148,12 @@ vec4 mvPosition = vec4(transformed, 1.0);
 {
   float ph = dot(instPos.xz, vec2(0.13, 0.17));
   float hgt = max(transformed.y, 0.0) * instScale;
-  float s = (sin(uTime * 1.05 + ph) * 0.6 + sin(uTime * 2.3 + ph * 1.7) * 0.25 + 0.35) * uWindStrength;
+  // calmer between gusts; a passing gust leans the tree downwind and shakes it harder
+  float gust = gustAt(instPos.xz) * ${f(CONFIG.weather.gusts)};
+  float s = ((sin(uTime * 1.05 + ph) * 0.6 + sin(uTime * 2.3 + ph * 1.7) * 0.25) * (0.7 + 0.8 * gust) + 0.25 + 0.6 * gust) * uWindStrength;
   mvPosition.xz += uWindDir * s * hgt * hgt * FOLIAGE_SWAY;
   #ifndef BILLBOARD
-    mvPosition.xyz += normalize(vec3(sin(dot(transformed, vec3(3.1, 2.3, 1.7))), 0.6, cos(dot(transformed, vec3(1.3, 2.9, 3.7))))) * sin(uTime * 6.5 + dot(transformed, vec3(2.0, 3.0, 1.0)) + ph) * FOLIAGE_FLUTTER * uv.x * uWindStrength;
+    mvPosition.xyz += normalize(vec3(sin(dot(transformed, vec3(3.1, 2.3, 1.7))), 0.6, cos(dot(transformed, vec3(1.3, 2.9, 3.7))))) * sin(uTime * 6.5 + dot(transformed, vec3(2.0, 3.0, 1.0)) + ph) * FOLIAGE_FLUTTER * uv.x * uWindStrength * (0.6 + 1.6 * gust);
   #endif
 }
 mvPosition = modelViewMatrix * mvPosition;

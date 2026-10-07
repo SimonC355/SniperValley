@@ -100,7 +100,8 @@ export class Birds {
         const x1 = -T.halfX + ((band + 0.85) / perSide) * T.halfX * 2;
         const inBand = cands.filter((t) => {
           const dz = t.z - T.riverCenter(t.x);
-          return t.x > x0 && t.x < x1 && (side === 0 ? dz > 25 : dz < -25) && Math.abs(dz) < 165;
+          const near = CONFIG.map.riverShelfEnd + 8, far = CONFIG.map.ridgeDist - 13;
+          return t.x > x0 && t.x < x1 && (side === 0 ? dz > near : dz < -near) && Math.abs(dz) < far;
         });
         if (!inBand.length) continue;
         // crows like dead snags and tall trees
