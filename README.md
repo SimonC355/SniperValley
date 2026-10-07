@@ -133,7 +133,7 @@ file or a list of variations:
   "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
   "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
   "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
-  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"] }
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg" }
 ```
 
 Any sound you leave out stays synthesised. Use CC0 recordings, for example
@@ -232,8 +232,10 @@ are in [CREDITS.md](CREDITS.md).
 - Your teammate (blue marker) picks a ridge spot, scans, and engages enemies on its own.
 
 **5. Birds**
-- Sprint toward a flock of crows on a treetop. They flush at about 25 m (about 10 m when
-  crawling), circle with caws, and resettle after about 25 s.
+- Crows sit on treetops all over both slopes. Listen for their calls, then look for black
+  upright birds against the sky; they look around and hop between branches.
+- Sprint toward a flock. They burst out of the trees with loud wing beats at about 25 m
+  (about 10 m when crawling), circle with alarm caws, and resettle after about 25 s.
 - Fire near a flock (within 40 m) to flush it. Watch F1: the enemy investigates the flock.
 - Watch the opposite slope for birds that BRAVO flushes.
 

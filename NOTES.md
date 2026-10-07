@@ -155,8 +155,25 @@ valley (`MAPS` in `src/config.js`):
 
 ## Birds
 
-- 12 flocks of 6–12 crows sit on the outside of tree crowns (preferring snags and tall trees),
-  6 per slope, spread along the valley.
+- **30 flocks of 3–10 crows** on the Valley map (16 on Narrow valley, 10 in the Ravine), one
+  per cell of a grid that runs along the valley and up both slopes (low, middle and high),
+  so there are birds everywhere. Each flock spreads over up to four neighbouring trees and
+  prefers snags and tall trees. The play tests found the old 12 flocks too few to notice.
+- **Perched crows sit upright**, mostly on the treetops, so they stand out against the sky.
+  The old perch kept the flight pose (body flat), which from the front or behind was a sliver
+  of two to four pixels at 25 m.
+- **Perched life.** Birds look around every few seconds, flick their wings, and now and then
+  one hops to another branch and back. A perched flock calls about every 48 s: one bird, one
+  to three caws, quieter than the alarm, and it leans forward with each caw. You can find
+  flocks by ear before you see them.
+- **LAN:** calls and hops are computed from the flock, the round and the game clock (no
+  random state), so everyone sees and hears the same ones at the same time.
+- **Sounds:** a flush is a burst of wing beats from every bird (a low "whup" of air per stroke
+  plus a feather swish, strongest at take-off), twigs thrashing as they leave the crown, and
+  alarm caws while they circle. You also hear wing beats when a bird flies close past you,
+  when one hops nearby, and when the flock settles back into the trees. Caws got a rougher
+  voice and a little valley echo. Recorded `wings` and `caw` samples can replace them (see
+  the README).
 - **What flushes a flock**:
   - **Proximity** inside `8 m + speed × 2.5`: a sprint at 7 m/s disturbs them from about 25 m,
     scoped prone movement from about 10 m.
@@ -166,6 +183,9 @@ valley (`MAPS` in `src/config.js`):
   25 s. Landing is postponed while someone is still close.
 - Each flush emits one `birds` event at the flock's ground centre. Opposing AI within 380 m
   investigate it; no line of sight is needed, because they hear the caws.
+- With 30 flocks, a minute of AI play flushed 0 flocks on the Valley map and 2 in the Ravine
+  (the AI mostly holds still), so birds give players away more often without becoming noise.
+  Perched calls and hops never trigger a reveal.
 
 ## Characters and camouflage
 

@@ -1,6 +1,6 @@
 // WebAudio: distance-delayed gunshots with valley echo (convolver), bolt cycling, supersonic
-// near-miss cracks, impacts, surface-dependent footsteps, water splashes, crow caws, wind and
-// river. Everything is synthesised; optional recorded samples listed in
+// near-miss cracks, impacts, surface-dependent footsteps, water splashes, crow caws and wing
+// beats, wind and river. Everything is synthesised; optional recorded samples listed in
 // public/assets/sounds/sounds.json replace individual sounds (see README).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
@@ -366,21 +366,25 @@ export class AudioSystem {
     }
   }
 
-  // A single crow caw, distance-delayed and spatialised.
-  caw(pos, pitch = 1) {
+  // Crow caws, distance-delayed and spatialised. A flushed flock gives full alarm caws; a
+  // perched one calls more quietly (gain). reps/gap fix the series (so the caller can bob its
+  // head in time); otherwise one to three caws at a natural spacing.
+  caw(pos, pitch = 1, { gain = 1, reps = 0, gap = 0 } = {}) {
     if (!this.ready) return;
     const ctx = this.ctx;
     const d = this.listenerPos.distanceTo(pos);
     if (d > 450) return;
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
-    const vol = Math.min(0.5, 14 / (d + 12));
+    const vol = Math.min(0.5, 14 / (d + 12)) * gain;
     const out = ctx.createGain(); out.gain.value = vol;
     const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(1200, 9000 / (1 + d / 150));
     out.connect(air).connect(this._panner(pos)).connect(this.master);
+    const send = ctx.createGain(); send.gain.value = Math.min(0.5, 0.1 + d / 400);
+    air.connect(send).connect(this.echo);
     if (this._sample('caw', out, t, 1, pitch)) return;
-    const reps = 1 + Math.floor(Math.random() * 3);
-    for (let r = 0; r < reps; r++) {
-      const tt = t + r * (0.32 + Math.random() * 0.1);
+    const n = reps || 1 + Math.floor(Math.random() * 3);
+    for (let r = 0; r < n; r++) {
+      const tt = t + r * (gap || 0.32 + Math.random() * 0.1);
       const dur = 0.22 + Math.random() * 0.08;
       const o = ctx.createOscillator();
       o.type = 'sawtooth';
@@ -390,37 +394,78 @@ export class AudioSystem {
       o.frequency.linearRampToValueAtTime(f0 * 0.82, tt + dur);
       const formant = ctx.createBiquadFilter(); formant.type = 'bandpass'; formant.frequency.value = 1300 * pitch; formant.Q.value = 3;
       const formant2 = ctx.createBiquadFilter(); formant2.type = 'bandpass'; formant2.frequency.value = 2400 * pitch; formant2.Q.value = 5;
+      // a crow's voice is rough: amplitude flutter at 60-90 Hz
+      const rough = ctx.createGain(); rough.gain.value = 0.65;
+      const am = ctx.createOscillator(); am.frequency.value = 60 + Math.random() * 30;
+      const amg = ctx.createGain(); amg.gain.value = 0.35;
+      am.connect(amg).connect(rough.gain);
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, tt);
       g.gain.exponentialRampToValueAtTime(0.9, tt + 0.02);
       g.gain.setValueAtTime(0.9, tt + dur * 0.6);
       g.gain.exponentialRampToValueAtTime(0.0001, tt + dur);
-      // rasp: noise amplitude modulation
-      const n = this._noiseSrc(tt, dur);
+      // rasp: noise through the same formants
+      const ns = this._noiseSrc(tt, dur);
       const ng = ctx.createGain(); ng.gain.value = 0.35;
-      n.connect(ng).connect(formant);
+      ns.connect(ng).connect(formant);
       o.connect(formant); o.connect(formant2);
-      formant.connect(g); formant2.connect(g);
-      g.connect(out);
+      formant.connect(rough); formant2.connect(rough);
+      rough.connect(g).connect(out);
       o.start(tt); o.stop(tt + dur + 0.02);
+      am.start(tt); am.stop(tt + dur + 0.02);
     }
   }
 
-  // wing flutter when a flock takes off
-  flutter(pos) {
+  // Wing beats: `birds` birds flapping `beats` times at `rate` per second. Each beat is a soft,
+  // low "whup" of air with a little feather swish on top; a flock bursting out of a crown also
+  // thrashes the twigs (branches).
+  wings(pos, { birds = 1, beats = 4, rate = 3.6, gain = 1, branches = false } = {}) {
     if (!this.ready) return;
     const ctx = this.ctx;
     const d = this.listenerPos.distanceTo(pos);
-    if (d > 120) return;
-    const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
-    const s = this._noiseSrc(t, 1.2);
-    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.7;
-    const g = ctx.createGain();
-    const vol = Math.min(0.5, 6 / (d + 6));
-    g.gain.setValueAtTime(0.0001, t);
-    for (let i = 0; i < 12; i++) g.gain.setValueAtTime(i % 2 ? vol * 0.3 : vol, t + i * 0.08);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
-    s.connect(f).connect(g).connect(this._panner(pos)).connect(this.master);
+    if (d > 220) return;
+    const t0 = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
+    const out = ctx.createGain(); out.gain.value = gain * Math.min(1.2, 9 / (d + 4));
+    const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(1500, 12000 / (1 + d / 60));
+    out.connect(air).connect(this._panner(pos)).connect(this.master);
+    if (this._sample('wings', out, t0, 1, 1)) return;
+    const n = Math.min(birds, 10);
+    const norm = 1.5 / Math.sqrt(n);
+    for (let i = 0; i < n; i++) {
+      const start = t0 + (i === 0 ? 0 : Math.random() * 0.5);
+      const per = 1 / (rate * (0.85 + Math.random() * 0.3));
+      const nb = beats + Math.floor(Math.random() * 2);
+      const src = ctx.createBufferSource(); src.buffer = this.noise; src.loop = true;
+      const low = ctx.createBiquadFilter(); low.type = 'bandpass'; low.frequency.value = 380 + Math.random() * 300; low.Q.value = 1.1;
+      const high = ctx.createBiquadFilter(); high.type = 'bandpass'; high.frequency.value = 2600 + Math.random() * 1400; high.Q.value = 0.9;
+      const hg = ctx.createGain(); hg.gain.value = 0.22;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, start);
+      for (let k = 0; k < nb; k++) {
+        // the first strokes are the strongest (pushing off), then they fade as the bird climbs away
+        const tb = start + k * per;
+        const a = (k < 2 ? 1 : Math.pow(0.78, k - 1)) * (0.7 + Math.random() * 0.3) * norm;
+        g.gain.setValueAtTime(0, tb);
+        g.gain.linearRampToValueAtTime(a, tb + 0.014);
+        g.gain.linearRampToValueAtTime(a * 0.3, tb + 0.05);
+        g.gain.linearRampToValueAtTime(0, tb + Math.min(per * 0.9, 0.13));
+      }
+      src.connect(low).connect(g);
+      src.connect(high).connect(hg).connect(g);
+      g.connect(out);
+      src.start(start, Math.random() * 1.5);
+      src.stop(start + nb * per + 0.2);
+    }
+    if (branches) {
+      const s = this._noiseSrc(t0, 0.9);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 4200; bp.Q.value = 0.7;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.45, t0 + 0.03);
+      g.gain.linearRampToValueAtTime(0.14, t0 + 0.3);
+      g.gain.linearRampToValueAtTime(0, t0 + 0.85);
+      s.connect(bp).connect(g).connect(out);
+    }
   }
 
   beep(freq = 880, dur = 0.08, vol = 0.12) {

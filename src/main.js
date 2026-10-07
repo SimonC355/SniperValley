@@ -407,7 +407,7 @@ class Game {
     this.deathT = 0;
     this.killcam = null;
     this.aimHistory = [];
-    this.birds.reset(0);
+    this.birds.reset(0, this.match.round);
     this.zone.reset();
     this.spectating = null;
     this.damageFlash = 0;
