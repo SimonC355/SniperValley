@@ -380,18 +380,27 @@ valley (`MAPS` in `src/config.js`):
     own shot peaks at −0.2 dBFS, a crack at 3 m at −0.9 dBFS, a distant report at 300 m at
     −15 dBFS, and the spectrograms show no pitch sweeps.
 - **Forest ambience** (`src/forestsound.js`): five songbirds sing from the trees around you
-  (chaffinch, great tit, robin, thrush and wren patterns), a woodpecker drums now and then,
-  trunks creak in strong gusts, and needles rustle, louder in gusts.
-- **The second "bee".** After the gunshot fix, a play test still heard a bee flying around.
-  It was the trunk creak: a sawtooth at 30–170 Hz gliding up and down for about a second,
-  each time from a new direction, which is close to how you would synthesise a bumblebee.
-  The crow caw was a similar clean tone (420–500 Hz with a falling glide). Both are now
-  rendered into buffers at start (`src/sfx.js`) without a steady pitch:
-  - a **creak** is wood slipping in irregular little jerks (stick-slip), each slip knocking
-    the trunk's resonances at about 200, 500 and 1,200 Hz;
-  - a **caw** is a harsh voice: pulses at an irregular rate (sometimes skipping one, a croak
-    an octave down) plus breath noise, through throat and beak resonances.
-  Spectrograms of the old and new versions show the buzz is gone.
+  (chaffinch, great tit, robin and thrush patterns), a woodpecker drums now and then,
+  and needles rustle, louder in gusts. (Trunks creaked in strong gusts too; see below why
+  that is gone.)
+- **The second "bee".** After the gunshot fix, a play test still heard a bee flying around,
+  and after the first fix "much better, but not completely gone". I built a buzz meter: it
+  renders each sound offline and counts the 40 ms windows that have a real pitch (a
+  repeating autocorrelation peak) in the insect band, 100–700 Hz. Results:
+
+  | Sound | Windows with a pitch | Periodicity |
+  |---|---|---|
+  | Trunk creak, first version (gliding sawtooth) | 14 % | 0.99 |
+  | Trunk creak, second version (wood slips ringing a 200 Hz resonance) | 19–20 % | 0.99–1.00 |
+  | Crow caw, old (clean sawtooth, falling glide) | 18 % | 0.94 |
+  | Everything now: gunshots, cracks, caws, wing beats, woodpecker, songbirds, gusts, river, wind | 0–3 % | ≤ 0.70 |
+
+  So the bee was the creak both times (a creak is a tone in that range, however it is
+  built), and the old caw was close. The creak is gone. The caw is rendered at start
+  (`src/sfx.js`) as a harsh voice: pulses at an irregular rate, sometimes skipping one (a
+  croak an octave down), with breath noise, through throat and beak resonances. The
+  woodpecker knocks are now dry and countable (11–14 per second, no ringing resonance), the
+  wren's fast trill is out, and a flushed flock caws at most nine times.
 - **What was that noise?** The F1 debug panel lists the sounds of the last 10 s with their
   distance, so an odd sound can be named in a play test. The rustle has one source
   per ear, each following the gust 25 m to that side, so a gust is heard arriving from one

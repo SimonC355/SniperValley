@@ -1,5 +1,4 @@
-// Sound synthesis into sample buffers (pure functions, no WebAudio): gunshots, crow caws and
-// creaking trunks.
+// Sound synthesis into sample buffers (pure functions, no WebAudio): gunshots and crow caws.
 //
 // - Muzzle blast: a Friedlander blast wave (instant rise, ~1.5 ms positive phase, negative
 //   phase), hot-gas turbulence noise, a low body, a ground reflection and a cluster of early
@@ -160,56 +159,30 @@ function bandpass(x, sr, f, Q) {
   return y;
 }
 
-// A trunk creaking in the wind. Wood under load slips in irregular little jerks (stick-slip)
-// and each slip knocks the trunk's resonances. The irregular spacing is the point: a steady
-// pulse train would have a pitch and sound like a buzzing insect.
-export function treeCreak(sr, seed = 1) {
-  const r = rng(seed);
-  const dur = 0.6 + r() * 0.8;
-  const n = Math.floor(sr * (dur + 0.25));
-  const exc = new Float32Array(n);
-  let t = 0.01;
-  while (t < dur) {
-    const u = t / dur;
-    // the trunk bends (slips come faster), then relaxes
-    const rate = 10 + 34 * Math.pow(Math.sin(Math.PI * u), 1.5);
-    const amp = (0.35 + 0.65 * Math.sin(Math.PI * Math.min(1, u * 1.25))) * (0.4 + 0.6 * r());
-    const i0 = Math.floor(t * sr), len = Math.floor(sr * (0.0015 + r() * 0.003));
-    for (let k = 0; k < len && i0 + k < n; k++) exc[i0 + k] += (r() * 2 - 1) * amp * Math.exp(-k / (len * 0.35));
-    t += (1 / rate) * (0.4 + r() * 1.2);
-  }
-  const lo = bandpass(exc, sr, 180 + r() * 60, 5);
-  const mid = bandpass(exc, sr, 430 + r() * 140, 6);
-  const hi = bandpass(exc, sr, 1050 + r() * 350, 4);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = lo[i] * 0.9 + mid[i] * 0.8 + hi[i] * 0.45 + exc[i] * 0.08;
-  return normalize(out, 0.9);
-}
-
 // One crow caw ("kraa"). A crow's voice is harsh: the pulses from its syrinx come at an
 // irregular rate (and sometimes skip one, a croak an octave down), with breath noise, shaped
 // by the throat and beak. A clean, steady tone here sounds like an insect, not a bird.
 export function crowCaw(sr, seed = 1) {
   const r = rng(seed);
-  const dur = 0.24 + r() * 0.14;
+  const dur = 0.26 + r() * 0.14;
   const n = Math.floor(sr * (dur + 0.06));
   const exc = new Float32Array(n);
-  const f0 = 480 + r() * 160;
+  const f0 = 400 + r() * 120;
   const env = (u) => (u < 0 || u > 1 ? 0 : Math.min(1, u / 0.06) * (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3));
   let t = 0;
   while (t < dur) {
     const u = t / dur;
-    let period = (1 / (f0 * (1.05 - 0.15 * u))) * (0.8 + r() * 0.4);
-    if (r() < 0.3) period *= 2;
+    let period = (1 / (f0 * (1.05 - 0.15 * u))) * (0.72 + r() * 0.56);
+    if (r() < 0.35) period *= 2;
     const i0 = Math.floor(t * sr);
     const a = env(u) * (0.6 + 0.4 * r());
     if (i0 + 2 < n) { exc[i0] += a; exc[i0 + 1] += a * 0.6; exc[i0 + 2] -= a * 0.3; }
     t += period;
   }
-  for (let i = 0; i < n; i++) exc[i] += (r() * 2 - 1) * 0.22 * env(i / sr / dur);
-  const A = bandpass(exc, sr, 1100 + r() * 250, 4);
-  const B = bandpass(exc, sr, 2200 + r() * 400, 5);
-  const C = bandpass(exc, sr, 3500 + r() * 500, 5);
+  for (let i = 0; i < n; i++) exc[i] += (r() * 2 - 1) * 0.4 * env(i / sr / dur);
+  const A = bandpass(exc, sr, 1000 + r() * 200, 3);
+  const B = bandpass(exc, sr, 1950 + r() * 350, 4);
+  const C = bandpass(exc, sr, 3100 + r() * 450, 4);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) out[i] = A[i] + B[i] * 0.8 + C[i] * 0.35;
   return normalize(out, 0.9);

@@ -227,7 +227,7 @@ export class Birds {
     for (const b of f.birds) b.from.copy(b.pos);
     // alarm caws over the circling period
     f.caws.length = 0;
-    const n = Math.min(16, f.birds.length + 4);
+    const n = Math.min(9, f.birds.length + 2);
     for (let i = 0; i < n; i++) f.caws.push({ at: time + (i < 4 ? this.rng.float(0, 1.2) : this.rng.float(1, CONFIG.birds.circleTime + 3)), bird: i % f.birds.length, pitch: this.rng.float(0.88, 1.12) });
     // the whole flock bursting out of the crowns
     if (this.audio) this.audio.wings(_v.set(f.center.x, f.top - 1, f.center.z), { birds: f.birds.length, beats: 7, rate: 3.6, branches: true });

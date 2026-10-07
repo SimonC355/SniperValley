@@ -4,7 +4,7 @@
 // public/assets/sounds/sounds.json replace individual sounds (see README).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { muzzleBlast, supersonicCrack, crowCaw, treeCreak } from './sfx.js';
+import { muzzleBlast, supersonicCrack, crowCaw } from './sfx.js';
 
 export class AudioSystem {
   constructor() {
@@ -60,7 +60,6 @@ export class AudioSystem {
     this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));
     this.cracks = [[1.5, 5], [6, 17], [16, 29]].map(([miss, sd]) => ({ miss, bufs: [sd, sd + 1].map((k) => toBuffer(supersonicCrack(ctx.sampleRate, k, miss))) }));
     this.cawBufs = [41, 42, 43, 44, 45, 46].map((sd) => toBuffer(crowCaw(ctx.sampleRate, sd)));
-    this.creakBufs = [71, 72, 73, 74].map((sd) => toBuffer(treeCreak(ctx.sampleRate, sd)));
     this.samples = {};
     if (samples) this._loadSamples();
     if (ambience) this._startAmbience();
@@ -457,25 +456,6 @@ export class AudioSystem {
       g.gain.linearRampToValueAtTime(0, t0 + 0.85);
       s.connect(bp).connect(g).connect(out);
     }
-  }
-
-  // A trunk creaking in a strong gust (ambience bus).
-  creak(pos, gain = 1) {
-    if (!this.ready) return;
-    const ctx = this.ctx;
-    const d = this.listenerPos.distanceTo(pos);
-    if (d > 80) return;
-    const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
-    const out = ctx.createGain(); out.gain.value = gain * 0.18 * Math.min(1, 14 / (d + 6));
-    const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(2000, 12000 / (1 + d / 60));
-    out.connect(air).connect(this._panner(pos)).connect(this.amb);
-    this._log('creak', d);
-    if (this._sample('creak', out, t, 1, 1)) return;
-    const src = ctx.createBufferSource();
-    src.buffer = this.creakBufs[Math.floor(Math.random() * this.creakBufs.length)];
-    src.playbackRate.value = 0.9 + Math.random() * 0.2;
-    src.connect(out);
-    src.start(t);
   }
 
   beep(freq = 880, dur = 0.08, vol = 0.12) {
