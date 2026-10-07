@@ -1,4 +1,5 @@
-// Gunshot sound synthesis into sample buffers (pure functions, no WebAudio).
+// Sound synthesis into sample buffers (pure functions, no WebAudio): gunshots, crow caws and
+// creaking trunks.
 //
 // - Muzzle blast: a Friedlander blast wave (instant rise, ~1.5 ms positive phase, negative
 //   phase), hot-gas turbulence noise, a low body, a ground reflection and a cluster of early
@@ -144,4 +145,72 @@ export function supersonicCrack(sr, seed = 1, miss = 3) {
     mixInto(out, tap, Math.round(sr * t), (0.25 + r() * 0.25) * Math.exp(-t / 0.05));
   }
   return normalize(out, 0.95);
+}
+
+// Band-pass resonator (RBJ biquad, 0 dB peak), returns a new buffer.
+function bandpass(x, sr, f, Q) {
+  const w = (2 * Math.PI * f) / sr, alpha = Math.sin(w) / (2 * Q), cs = Math.cos(w);
+  const a0 = 1 + alpha, b0 = alpha / a0, b2 = -alpha / a0, a1 = (-2 * cs) / a0, a2 = (1 - alpha) / a0;
+  const y = new Float32Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = b0 * x[i] + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v;
+  }
+  return y;
+}
+
+// A trunk creaking in the wind. Wood under load slips in irregular little jerks (stick-slip)
+// and each slip knocks the trunk's resonances. The irregular spacing is the point: a steady
+// pulse train would have a pitch and sound like a buzzing insect.
+export function treeCreak(sr, seed = 1) {
+  const r = rng(seed);
+  const dur = 0.6 + r() * 0.8;
+  const n = Math.floor(sr * (dur + 0.25));
+  const exc = new Float32Array(n);
+  let t = 0.01;
+  while (t < dur) {
+    const u = t / dur;
+    // the trunk bends (slips come faster), then relaxes
+    const rate = 10 + 34 * Math.pow(Math.sin(Math.PI * u), 1.5);
+    const amp = (0.35 + 0.65 * Math.sin(Math.PI * Math.min(1, u * 1.25))) * (0.4 + 0.6 * r());
+    const i0 = Math.floor(t * sr), len = Math.floor(sr * (0.0015 + r() * 0.003));
+    for (let k = 0; k < len && i0 + k < n; k++) exc[i0 + k] += (r() * 2 - 1) * amp * Math.exp(-k / (len * 0.35));
+    t += (1 / rate) * (0.4 + r() * 1.2);
+  }
+  const lo = bandpass(exc, sr, 180 + r() * 60, 5);
+  const mid = bandpass(exc, sr, 430 + r() * 140, 6);
+  const hi = bandpass(exc, sr, 1050 + r() * 350, 4);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = lo[i] * 0.9 + mid[i] * 0.8 + hi[i] * 0.45 + exc[i] * 0.08;
+  return normalize(out, 0.9);
+}
+
+// One crow caw ("kraa"). A crow's voice is harsh: the pulses from its syrinx come at an
+// irregular rate (and sometimes skip one, a croak an octave down), with breath noise, shaped
+// by the throat and beak. A clean, steady tone here sounds like an insect, not a bird.
+export function crowCaw(sr, seed = 1) {
+  const r = rng(seed);
+  const dur = 0.24 + r() * 0.14;
+  const n = Math.floor(sr * (dur + 0.06));
+  const exc = new Float32Array(n);
+  const f0 = 480 + r() * 160;
+  const env = (u) => (u < 0 || u > 1 ? 0 : Math.min(1, u / 0.06) * (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3));
+  let t = 0;
+  while (t < dur) {
+    const u = t / dur;
+    let period = (1 / (f0 * (1.05 - 0.15 * u))) * (0.8 + r() * 0.4);
+    if (r() < 0.3) period *= 2;
+    const i0 = Math.floor(t * sr);
+    const a = env(u) * (0.6 + 0.4 * r());
+    if (i0 + 2 < n) { exc[i0] += a; exc[i0 + 1] += a * 0.6; exc[i0 + 2] -= a * 0.3; }
+    t += period;
+  }
+  for (let i = 0; i < n; i++) exc[i] += (r() * 2 - 1) * 0.22 * env(i / sr / dur);
+  const A = bandpass(exc, sr, 1100 + r() * 250, 4);
+  const B = bandpass(exc, sr, 2200 + r() * 400, 5);
+  const C = bandpass(exc, sr, 3500 + r() * 500, 5);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = A[i] + B[i] * 0.8 + C[i] * 0.35;
+  return normalize(out, 0.9);
 }

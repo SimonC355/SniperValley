@@ -92,7 +92,7 @@ export class ForestAmbience {
     this.creakCheck -= dt;
     if (this.creakCheck <= 0) {
       this.creakCheck = 0.5;
-      if (g > 0.45 && canopy > 0.3 && Math.random() < 0.12 * g) this._creak(p, now + 0.05);
+      if (g > 0.45 && canopy > 0.3 && Math.random() < 0.08 * g) this._creak(p);
     }
   }
 
@@ -151,6 +151,7 @@ export class ForestAmbience {
   }
 
   _sing(s, t0) {
+    this.a._log(`songbird (${s.species})`, this.a.listenerPos.distanceTo(s.pos));
     const out = this._out(s.pos, 0.16);
     const k = s.pitch;
     let t = t0;
@@ -209,6 +210,7 @@ export class ForestAmbience {
   _woodpecker(p, t0) {
     const a = this.a, ctx = a.ctx;
     const pos = this._spot(p, 50, 150, rand(4, 12));
+    this.a._log('woodpecker', a.listenerPos.distanceTo(pos));
     const out = this._out(pos, 0.8);
     const n = Math.floor(rand(14, 22));
     const rate = rand(15, 19);
@@ -225,26 +227,8 @@ export class ForestAmbience {
     }
   }
 
-  // stick-slip creak of a trunk bending in the wind
-  _creak(p, t0) {
-    const a = this.a, ctx = a.ctx;
-    const pos = this._spot(p, 8, 35, rand(4, 10));
-    const out = this._out(pos, 0.5);
-    const dur = rand(0.6, 1.5);
-    const o = ctx.createOscillator(); o.type = 'sawtooth';
-    const f = rand(28, 70);
-    o.frequency.setValueAtTime(f, t0);
-    o.frequency.linearRampToValueAtTime(f * rand(1.4, 2.4), t0 + dur * 0.6);
-    o.frequency.linearRampToValueAtTime(f * rand(0.8, 1.2), t0 + dur);
-    const b1 = ctx.createBiquadFilter(); b1.type = 'bandpass'; b1.frequency.value = rand(550, 850); b1.Q.value = 7;
-    const b2 = ctx.createBiquadFilter(); b2.type = 'bandpass'; b2.frequency.value = rand(1200, 1700); b2.Q.value = 9;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(0.7, t0 + dur * 0.35);
-    g.gain.linearRampToValueAtTime(0.5, t0 + dur * 0.7);
-    g.gain.linearRampToValueAtTime(0, t0 + dur);
-    o.connect(b1).connect(g); o.connect(b2).connect(g);
-    g.connect(out);
-    o.start(t0); o.stop(t0 + dur + 0.05);
+  // a trunk creaking in the gust (the sound is synthesised in sfx.js: irregular wood slips)
+  _creak(p) {
+    this.a.creak(this._spot(p, 8, 35, rand(4, 10)));
   }
 }

@@ -4,7 +4,7 @@
 // public/assets/sounds/sounds.json replace individual sounds (see README).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { muzzleBlast, supersonicCrack } from './sfx.js';
+import { muzzleBlast, supersonicCrack, crowCaw, treeCreak } from './sfx.js';
 
 export class AudioSystem {
   constructor() {
@@ -12,6 +12,7 @@ export class AudioSystem {
     this.ready = false;
     this.listenerPos = new THREE.Vector3();
     this.onShotHeard = null;   // fn(distance) for every gunshot played (the forest falls silent)
+    this.log = [];             // recent sounds { name, d, t } for the F1 debug panel
     this._fwd = new THREE.Vector3();
     this._up = new THREE.Vector3();
   }
@@ -58,6 +59,8 @@ export class AudioSystem {
     };
     this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));
     this.cracks = [[1.5, 5], [6, 17], [16, 29]].map(([miss, sd]) => ({ miss, bufs: [sd, sd + 1].map((k) => toBuffer(supersonicCrack(ctx.sampleRate, k, miss))) }));
+    this.cawBufs = [41, 42, 43, 44, 45, 46].map((sd) => toBuffer(crowCaw(ctx.sampleRate, sd)));
+    this.creakBufs = [71, 72, 73, 74].map((sd) => toBuffer(treeCreak(ctx.sampleRate, sd)));
     this.samples = {};
     if (samples) this._loadSamples();
     if (ambience) this._startAmbience();
@@ -191,6 +194,12 @@ export class AudioSystem {
     return s;
   }
 
+  // remember a sound for the F1 debug panel (what was that noise?)
+  _log(name, d) {
+    this.log.push({ name, d: Math.round(d), t: this.ctx.currentTime });
+    if (this.log.length > 14) this.log.shift();
+  }
+
   _env(g, t, peak, attack, decay) {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(peak, t + attack);
@@ -206,6 +215,7 @@ export class AudioSystem {
     const ctx = this.ctx;
     const d = own ? 0 : this.listenerPos.distanceTo(pos);
     if (this.onShotHeard) this.onShotHeard(d);
+    this._log(own ? 'shot (yours)' : 'shot', d);
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const out = ctx.createGain();
     out.gain.value = own ? 1.0 : Math.min(1, 40 / (d + 15));
@@ -233,6 +243,7 @@ export class AudioSystem {
   crack(pos, miss = 2) {
     if (!this.ready) return;
     const ctx = this.ctx, t = ctx.currentTime;
+    this._log(`bullet crack (${Math.round(miss)} m miss)`, this.listenerPos.distanceTo(pos));
     const p = this._panner(pos);
     const g = ctx.createGain();
     g.gain.value = Math.min(1.4, Math.max(0.25, Math.pow(6 / (miss + 3), 0.8)));
@@ -276,6 +287,7 @@ export class AudioSystem {
     if (d > 350) return;
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const vol = Math.min(0.9, 9 / (d + 4));
+    this._log(`impact ${kind}`, d);
     if (this._sample(`impact_${kind === 'forest' ? 'ground' : kind}`, this._panner(pos).connect(this.master), t, vol)) return;
     const s = this._noiseSrc(t, 0.3);
     const f = ctx.createBiquadFilter();
@@ -353,6 +365,7 @@ export class AudioSystem {
     if (d > CONFIG.reveal.splashHearingRange) return;
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const vol = (own ? 0.35 : 0.8 / (1 + d / 8)) * (0.5 + loud);
+    this._log(own ? 'splash (yours)' : 'splash', d);
     if (this._sample('splash', own ? this.master : this._panner(pos).connect(this.master), t, vol)) return;
     for (let i = 0; i < 2; i++) {
       const tt = t + i * 0.07;
@@ -381,38 +394,15 @@ export class AudioSystem {
     out.connect(air).connect(this._panner(pos)).connect(this.master);
     const send = ctx.createGain(); send.gain.value = Math.min(0.5, 0.1 + d / 400);
     air.connect(send).connect(this.echo);
+    this._log('caw', d);
     if (this._sample('caw', out, t, 1, pitch)) return;
     const n = reps || 1 + Math.floor(Math.random() * 3);
     for (let r = 0; r < n; r++) {
-      const tt = t + r * (gap || 0.32 + Math.random() * 0.1);
-      const dur = 0.22 + Math.random() * 0.08;
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      const f0 = (420 + Math.random() * 80) * pitch;
-      o.frequency.setValueAtTime(f0 * 1.15, tt);
-      o.frequency.linearRampToValueAtTime(f0, tt + dur * 0.4);
-      o.frequency.linearRampToValueAtTime(f0 * 0.82, tt + dur);
-      const formant = ctx.createBiquadFilter(); formant.type = 'bandpass'; formant.frequency.value = 1300 * pitch; formant.Q.value = 3;
-      const formant2 = ctx.createBiquadFilter(); formant2.type = 'bandpass'; formant2.frequency.value = 2400 * pitch; formant2.Q.value = 5;
-      // a crow's voice is rough: amplitude flutter at 60-90 Hz
-      const rough = ctx.createGain(); rough.gain.value = 0.65;
-      const am = ctx.createOscillator(); am.frequency.value = 60 + Math.random() * 30;
-      const amg = ctx.createGain(); amg.gain.value = 0.35;
-      am.connect(amg).connect(rough.gain);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, tt);
-      g.gain.exponentialRampToValueAtTime(0.9, tt + 0.02);
-      g.gain.setValueAtTime(0.9, tt + dur * 0.6);
-      g.gain.exponentialRampToValueAtTime(0.0001, tt + dur);
-      // rasp: noise through the same formants
-      const ns = this._noiseSrc(tt, dur);
-      const ng = ctx.createGain(); ng.gain.value = 0.35;
-      ns.connect(ng).connect(formant);
-      o.connect(formant); o.connect(formant2);
-      formant.connect(rough); formant2.connect(rough);
-      rough.connect(g).connect(out);
-      o.start(tt); o.stop(tt + dur + 0.02);
-      am.start(tt); am.stop(tt + dur + 0.02);
+      const src = ctx.createBufferSource();
+      src.buffer = this.cawBufs[Math.floor(Math.random() * this.cawBufs.length)];
+      src.playbackRate.value = pitch * (0.96 + Math.random() * 0.08);
+      src.connect(out);
+      src.start(t + r * (gap || 0.32 + Math.random() * 0.1));
     }
   }
 
@@ -428,6 +418,7 @@ export class AudioSystem {
     const out = ctx.createGain(); out.gain.value = gain * Math.min(1.2, 9 / (d + 4));
     const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(1500, 12000 / (1 + d / 60));
     out.connect(air).connect(this._panner(pos)).connect(this.master);
+    this._log('wings', d);
     if (this._sample('wings', out, t0, 1, 1)) return;
     const n = Math.min(birds, 10);
     const norm = 1.5 / Math.sqrt(n);
@@ -466,6 +457,25 @@ export class AudioSystem {
       g.gain.linearRampToValueAtTime(0, t0 + 0.85);
       s.connect(bp).connect(g).connect(out);
     }
+  }
+
+  // A trunk creaking in a strong gust (ambience bus).
+  creak(pos, gain = 1) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const d = this.listenerPos.distanceTo(pos);
+    if (d > 80) return;
+    const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
+    const out = ctx.createGain(); out.gain.value = gain * 0.18 * Math.min(1, 14 / (d + 6));
+    const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = Math.max(2000, 12000 / (1 + d / 60));
+    out.connect(air).connect(this._panner(pos)).connect(this.amb);
+    this._log('creak', d);
+    if (this._sample('creak', out, t, 1, 1)) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.creakBufs[Math.floor(Math.random() * this.creakBufs.length)];
+    src.playbackRate.value = 0.9 + Math.random() * 0.2;
+    src.connect(out);
+    src.start(t);
   }
 
   beep(freq = 880, dur = 0.08, vol = 0.12) {

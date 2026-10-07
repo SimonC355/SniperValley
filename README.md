@@ -133,7 +133,8 @@ file or a list of variations:
   "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
   "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
   "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
-  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg" }
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg",
+  "creak": "creak.ogg" }
 ```
 
 Any sound you leave out stays synthesised. Use CC0 recordings, for example
@@ -227,7 +228,9 @@ are in [CREDITS.md](CREDITS.md).
   no human outline and a faint armband.
 
 **4. Event bus, investigate, AI teammate**
-- Press F1. Fire one shot and watch BRAVO switch to `investigate` (flash if they had line of
+- Press F1. The panel also lists the sounds of the last 10 seconds with their distance, so you
+  can name any odd noise.
+- Fire one shot and watch BRAVO switch to `investigate` (flash if they had line of
   sight; otherwise sound, arriving later and less accurately), then `aim`.
 - Your teammate (blue marker) picks a ridge spot, scans, and engages enemies on its own.
 

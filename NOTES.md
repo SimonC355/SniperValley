@@ -381,7 +381,19 @@ valley (`MAPS` in `src/config.js`):
     −15 dBFS, and the spectrograms show no pitch sweeps.
 - **Forest ambience** (`src/forestsound.js`): five songbirds sing from the trees around you
   (chaffinch, great tit, robin, thrush and wren patterns), a woodpecker drums now and then,
-  trunks creak in strong gusts, and needles rustle, louder in gusts. The rustle has one source
+  trunks creak in strong gusts, and needles rustle, louder in gusts.
+- **The second "bee".** After the gunshot fix, a play test still heard a bee flying around.
+  It was the trunk creak: a sawtooth at 30–170 Hz gliding up and down for about a second,
+  each time from a new direction, which is close to how you would synthesise a bumblebee.
+  The crow caw was a similar clean tone (420–500 Hz with a falling glide). Both are now
+  rendered into buffers at start (`src/sfx.js`) without a steady pitch:
+  - a **creak** is wood slipping in irregular little jerks (stick-slip), each slip knocking
+    the trunk's resonances at about 200, 500 and 1,200 Hz;
+  - a **caw** is a harsh voice: pulses at an irregular rate (sometimes skipping one, a croak
+    an octave down) plus breath noise, through throat and beak resonances.
+  Spectrograms of the old and new versions show the buzz is gone.
+- **What was that noise?** The F1 debug panel lists the sounds of the last 10 s with their
+  distance, so an odd sound can be named in a play test. The rustle has one source
   per ear, each following the gust 25 m to that side, so a gust is heard arriving from one
   side. Any gunshot within 700 m silences the birds for 22–40 s; they come back one by one.
 - Volumes are separate buses: effects, ambience (wind, river, forest) and the echo send, all
