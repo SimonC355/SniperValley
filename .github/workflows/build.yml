@@ -1,0 +1,55 @@
+# Builds the Windows program (a zip with SniperValley.exe) for every pull request and every
+# push to main; each run keeps the zip under Artifacts. A push to main whose package.json
+# version has no release yet also publishes that release with the zip.
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run exe
+
+      - name: Zip the program
+        shell: pwsh
+        run: Compress-Archive -Path release/SniperValley-win32-x64/* -DestinationPath SniperValley-windows-x64.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: SniperValley-windows-x64.zip
+          archive: false
+
+      - name: Publish a release for a new version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if gh release view "v$version" > /dev/null 2>&1; then
+            echo "v$version is already released. Raise the version in package.json to publish a new release."
+            exit 0
+          fi
+          printf '%s\n' \
+            "**Windows:** download \`SniperValley-windows-x64.zip\` below, unzip it and start \`SniperValley.exe\`." \
+            "" \
+            "The program is not code-signed, so the first time Windows shows *Windows protected your PC*: click **More info**, then **Run anyway**." \
+            "" \
+            "LAN games: one player clicks HOST GAME, the others type the IP address it shows and click JOIN GAME." > notes.md
+          gh release create "v$version" SniperValley-windows-x64.zip --target "$GITHUB_SHA" --title "SniperValley $version" --notes-file notes.md

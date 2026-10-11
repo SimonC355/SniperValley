@@ -1,4 +1,4 @@
-// LAN relay for SniperYard. Browsers connect to ws://<host>/net. The server keeps a small
+// LAN relay for SniperValley. Browsers connect to ws://<host>/net. The server keeps a small
 // lobby (names, teams, who hosts) and forwards game messages between the hosting browser
 // and the joined browsers. All game logic runs in the hosting browser.
 import { WebSocketServer } from 'ws';

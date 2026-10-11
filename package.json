@@ -1,20 +1,28 @@
 {
-  "name": "sniperyard-prototype",
+  "name": "sniper-valley",
+  "productName": "SniperValley",
+  "description": "Stealth sniper game in a procedural forest valley",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "assets": "node scripts/fetch-assets.mjs",
-    "host": "vite build && node server/lan.mjs"
+    "host": "vite build && node server/lan.mjs",
+    "app": "vite build && electron .",
+    "exe": "vite build && node scripts/package-exe.mjs"
   },
   "dependencies": {
-    "three": "^0.186.1",
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@fontsource/rajdhani": "^5.3.0",
+    "electron": "44.7.0",
+    "three": "^0.186.1",
     "vite": "^8.3.2"
   }
 }

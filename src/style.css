@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap');
-
 :root {
   --fg: #e9eee8;
   --dim: rgba(233, 238, 232, 0.6);
@@ -182,3 +180,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 #scoreboard .r.dead { opacity: 0.4; text-decoration: line-through; }
 #scoreboard .r.me { color: var(--accent); }
 #scoreboard i { color: var(--dim); font-style: normal; font-size: 12px; }
+
+/* only in the SniperValley program (body.desktop, see desktop.js) */
+body:not(.desktop) .desk { display: none !important; }
+#lan-ip { font-family: inherit; font-size: 16px; font-weight: 600; letter-spacing: 0.08em; width: 210px; padding: 8px 10px; background: #1a201c; color: var(--fg); border: 1px solid #3a443d; border-radius: 3px; user-select: text; }
+#lan-ip::placeholder { color: var(--dim); }
+#lan-ip:disabled { opacity: 0.45; }
+.btnrow button.quit { margin-left: auto; }
+.mappick + button.quit { margin-left: 0; }

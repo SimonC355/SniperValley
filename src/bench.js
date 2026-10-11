@@ -99,7 +99,7 @@ export class Benchmark {
     console.log('[bench]', JSON.stringify(summary));
     window.__benchResult = summary;
     const text = [
-      `SniperYard benchmark`,
+      `SniperValley benchmark`,
       `GPU: ${summary.gpu}`,
       `Resolution: ${summary.resolution}`,
       `Settings: ${summary.settings}`,

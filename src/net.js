@@ -28,15 +28,17 @@ export class NetSession {
     this.onLeft = null;
     this.onError = null;
     this.onAvailable = null;
+    this.onFail = null;         // the relay could not be reached
   }
 
   get isHost() { return this.joined && this.myId === this.hostId; }
 
-  connect() {
+  // url: the relay; by default the server this page came from (`npm run host`)
+  connect(url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/net`) {
     let ws;
     try {
-      ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/net`);
-    } catch { return; }
+      ws = new WebSocket(url);
+    } catch { if (this.onFail) this.onFail(); return; }
     this.ws = ws;
     ws.onmessage = (e) => {
       let m;
@@ -52,9 +54,20 @@ export class NetSession {
       const was = this.available;
       this.available = false;
       if (was && this.onAvailable) this.onAvailable(false);
+      if (!was && this.onFail) this.onFail();
       if (this.joined && this.onHostGone) this.onHostGone();
       this.joined = false;
     };
+  }
+
+  // Give up a connection (no callbacks).
+  close() {
+    if (!this.ws) return;
+    this.ws.onclose = null;
+    this.ws.onmessage = null;
+    try { this.ws.close(); } catch { /* ignore */ }
+    this.ws = null;
+    this.available = false;
   }
 
   _raw(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }

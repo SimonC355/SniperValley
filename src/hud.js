@@ -125,6 +125,7 @@ export class HUD {
       </div>
       <div class="tabpage" data-page="graphics">
         <div class="settings">
+          <label class="desk">Fullscreen (F11)</label><select id="set-fullscreen" class="desk">${onoff}</select>
           <label>Render scale</label><div class="rng"><input id="set-scale" type="range" min="0.5" max="1" step="0.05"><span id="set-scale-v"></span></div>
           <label>Auto resolution</label><select id="set-autores">${opt([['1', 'on (keeps ~60 fps)'], ['0', 'off']])}</select>
           <label>Shadows</label><select id="set-shadow"><option>off</option><option>low</option><option>medium</option><option>high</option></select>
@@ -135,7 +136,7 @@ export class HUD {
           <label>MSAA (reload)</label><select id="set-msaa">${opt([['4', '4x'], ['0', 'off']])}</select>
           <label>Grass density (reload)</label><input id="set-grass" type="range" min="0" max="1.5" step="0.1">
         </div>
-        <div class="note">Graphics settings are saved in this browser. <a href="?bench" class="link">Run the benchmark</a> to measure frame rates on this PC.</div>
+        <div class="note">Graphics settings are saved on this computer. <a href="?bench" class="link">Run the benchmark</a> to measure frame rates on this PC.</div>
       </div>
       <div class="tabpage" data-page="audio">
         <div class="settings">
@@ -146,8 +147,8 @@ export class HUD {
         </div>
       </div>`;
     this.startScreen = make('startscreen', `<div class="panel">
-      <h1>SNIPER<span>YARD</span></h1>
-      <div class="sub">PROTOTYPE · TEAM SNIPER ELIMINATION · ONE SHOT, ONE KILL</div>
+      <h1>SNIPER<span>VALLEY</span></h1>
+      <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER ELIMINATION · ONE SHOT, ONE KILL</div>
       <div id="lanbox" class="lan" style="display:none">
         <h2>LAN MULTIPLAYER</h2>
         <div class="settings">
@@ -157,30 +158,31 @@ export class HUD {
         </div>
         <div id="lan-list" class="lanlist"></div>
         <div class="btnrow">
-          <button id="btn-host">HOST GAME</button><button id="btn-join">JOIN GAME</button>
+          <button id="btn-host">HOST GAME</button><input id="lan-ip" class="desk" maxlength="40" placeholder="HOST'S IP ADDRESS" spellcheck="false"><button id="btn-join">JOIN GAME</button>
           <button class="primary" id="btn-mpstart" style="display:none">START MATCH</button><button id="btn-leave" style="display:none">LEAVE</button>
         </div>
         <div class="note" id="lan-note"></div>
       </div>
       ${settings.replace(/id="set-/g, 'id="s0-')}
       <div class="btnrow"><button class="primary" id="btn-play">SINGLE PLAYER</button>
-        <label class="mappick">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label></div>
+        <label class="mappick">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label>
+        <button id="btn-quit" class="desk quit">QUIT</button></div>
     </div>`);
     this.pauseScreen = make('pausescreen', `<div class="panel">
       <h1>PAUSED</h1>
       <div class="sub">CLICK RESUME TO RE-LOCK THE MOUSE</div>
       ${settings.replace(/id="set-/g, 'id="s1-')}
-      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button></div>
+      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button><button id="btn-quit2" class="desk quit">QUIT</button></div>
     </div>`);
     this.endScreen = make('endscreen', `<div class="panel">
       <h1 id="end-title">VICTORY</h1>
       <div class="sub" id="end-sub"></div>
       <div class="stats" id="end-stats"></div>
-      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button></div>
+      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button><button id="btn-quit3" class="desk">QUIT</button></div>
     </div>`);
     this.loading = document.createElement('div');
     this.loading.id = 'loading';
-    this.loading.innerHTML = `<div class="t">SNIPERYARD</div><div class="s" id="loading-s">LOADING</div>`;
+    this.loading.innerHTML = `<div class="t">SNIPERVALLEY</div><div class="s" id="loading-s">LOADING</div>`;
     document.body.appendChild(this.loading);
   }
 

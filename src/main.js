@@ -1,5 +1,9 @@
-// SniperYard prototype: main loop and game state machine.
+// SniperValley: main loop and game state machine.
 import * as THREE from 'three';
+// the game's font, bundled so it also works offline (SIL Open Font License, see CREDITS.md)
+import '@fontsource/rajdhani/500.css';
+import '@fontsource/rajdhani/600.css';
+import '@fontsource/rajdhani/700.css';
 import { CONFIG, MAPS, MAP_ID, saveMapChoice, urlWithoutMap } from './config.js';
 import { installHeightFog, SHARED, gustAt } from './shaders.js';
 import { ForestParticles } from './particles.js';
@@ -31,6 +35,7 @@ import { yawPitchTo } from './entity.js';
 import { Benchmark } from './bench.js';
 import { RemoteCombatant } from './remote.js';
 import { NetSession, LanGame } from './net.js';
+import { desktop, setupDesktop } from './desktop.js';
 
 // Killcam wording for how an AI found its victim (cue from AIBrain.reasons).
 const REVEAL_TEXT = {
@@ -186,6 +191,7 @@ class Game {
 
     this.hud.bindSettings((kind) => this.onSettingsChanged(kind), this.input);
     this.bindUI();
+    setupDesktop();
     this.setupLan();
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -213,7 +219,7 @@ class Game {
     window.__weather = WEATHER;
     window.THREE = THREE;
     this.config = CONFIG;
-    console.log(`[SniperYard] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
+    console.log(`[SniperValley] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
   }
 
   // Ground type under a point, for footstep sounds.
@@ -531,13 +537,36 @@ class Game {
         this.lanNote = auto.role === 'host' ? `HOSTING AGAIN ON ${MAPS[MAP_ID].name}` : `${MAPS[MAP_ID].name} LOADED · JOINING THE HOST`;
       }
     } catch { /* ignore */ }
-    S.onAvailable = (ok) => { $('lanbox').style.display = ok ? 'block' : 'none'; this.renderLobby(); };
+    S.onAvailable = (ok) => {
+      $('lanbox').style.display = ok || desktop ? 'block' : 'none';
+      if (ok) { this.lanConnecting = null; clearTimeout(this.lanTimer); }
+      this.renderLobby();
+    };
+    S.onFail = () => {
+      if (!this.lanConnecting) return;
+      clearTimeout(this.lanTimer);
+      this.lanNote = `COULD NOT REACH ${this.lanConnecting} · CHECK THE ADDRESS AND THAT THE HOST HAS CLICKED HOST GAME`;
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+    };
     S.onLobby = () => { this.renderLobby(); this.tryAutoNet(); };
     S.onError = (msg) => { this.lanNote = msg; this.renderLobby(); };
     S.onHostGone = () => { if (this.net && !this.reloading) this.leaveNet('THE HOST LEFT THE GAME'); };
-    S.connect();
-    $('btn-host').addEventListener('click', () => this.lanJoin(true));
-    $('btn-join').addEventListener('click', () => this.lanJoin(false));
+    if (desktop) {
+      // the program has no relay at the page's own address: HOST starts one on this PC, JOIN
+      // connects to the host's PC by IP address (and the game joins once the host is there)
+      try { $('lan-ip').value = localStorage.getItem('sniperyard.lanip') || ''; } catch { /* ignore */ }
+      $('lanbox').style.display = 'block';
+      $('lan-ip').addEventListener('keydown', (e) => { if (e.key === 'Enter') this.desktopJoin(); });
+      if (this.autoNet === 'host') this.desktopHost();
+      else if (this.autoNet === 'join') this.desktopJoin();
+      this.renderLobby();
+    } else {
+      S.connect();
+    }
+    $('btn-host').addEventListener('click', () => (desktop ? this.desktopHost() : this.lanJoin(true)));
+    $('btn-join').addEventListener('click', () => (desktop ? this.desktopJoin() : this.lanJoin(false)));
     $('lan-team').addEventListener('change', () => { if (S.joined) S.setTeam($('lan-team').value); });
     $('lan-ai').addEventListener('change', () => { CONFIG.lan.fillWithAI = $('lan-ai').value === '1'; });
     $('btn-mpstart').addEventListener('click', () => {
@@ -571,6 +600,55 @@ class Game {
     this.renderLobby();
   }
 
+  // Program: host a LAN game on this PC (the program starts the relay), then join it as host.
+  async desktopHost() {
+    const S = this.lanSession;
+    if (S.joined || S.available || this.lanConnecting || this.reloading) return;
+    this.audio.init();
+    this.lanConnecting = 'THIS PC';
+    this.lanNote = '';
+    this.renderLobby();
+    const r = await desktop.hostLan();
+    if (r.error) {
+      this.lanNote = r.error;
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+      return;
+    }
+    this.lanHostIps = r.ips;
+    this.autoNet = 'host';
+    S.connect(`ws://127.0.0.1:${r.port}/net`);
+  }
+
+  // Program: connect to the host's PC by IP address; we join as soon as it hosts.
+  desktopJoin() {
+    const S = this.lanSession;
+    if (S.joined || S.available || this.lanConnecting || this.reloading) return;
+    const ip = (document.getElementById('lan-ip').value || '').trim();
+    if (!ip) {
+      this.lanNote = 'TYPE THE HOST\'S IP ADDRESS (THE HOST SEES IT AFTER CLICKING HOST GAME)';
+      this.renderLobby();
+      return;
+    }
+    try { localStorage.setItem('sniperyard.lanip', ip); } catch { /* ignore */ }
+    this.audio.init();
+    this.autoNet = 'join';
+    this.lanConnecting = ip;
+    this.lanNote = '';
+    S.connect(`ws://${ip.includes(':') ? ip : `${ip}:${desktop.lanPort}`}/net`);
+    clearTimeout(this.lanTimer);
+    this.lanTimer = setTimeout(() => {
+      if (this.lanConnecting !== ip || S.available) return;
+      S.close();
+      this.lanNote = `COULD NOT REACH ${ip} · CHECK THE ADDRESS AND THAT THE HOST HAS CLICKED HOST GAME`;
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+    }, 6000);
+    this.renderLobby();
+  }
+
   // After a map change: host again, or join once the host is back.
   tryAutoNet() {
     const S = this.lanSession;
@@ -595,17 +673,31 @@ class Game {
     }).join('');
     $('btn-host').style.display = joined ? 'none' : '';
     $('btn-join').style.display = joined ? 'none' : '';
-    $('btn-leave').style.display = joined ? '' : 'none';
     $('btn-mpstart').style.display = joined && S.isHost ? '' : 'none';
-    $('btn-join').disabled = !S.hostId;
-    $('btn-host').disabled = !!S.hostId;
+    if (desktop) {
+      const busy = !!this.lanConnecting || S.available;
+      $('lan-ip').style.display = joined ? 'none' : '';
+      $('lan-ip').disabled = busy;
+      $('btn-leave').style.display = joined || S.available ? '' : 'none';
+      $('btn-join').disabled = busy;
+      $('btn-host').disabled = busy;
+    } else {
+      $('btn-leave').style.display = joined ? '' : 'none';
+      $('btn-join').disabled = !S.hostId;
+      $('btn-host').disabled = !!S.hostId;
+    }
     $('btn-play').disabled = joined;
     // joined players play the host's map
     for (const id of ['map-quick', 's0-map', 's1-map']) $(id).disabled = joined && !S.isHost;
     const hostMap = MAPS[S.hostMap] ? MAPS[S.hostMap].name : '';
-    $('lan-note').textContent = this.lanNote || (!S.available ? '' : !joined ? (S.hostId ? `A GAME IS HOSTED ON THIS NETWORK${hostMap ? ` (${hostMap})` : ''} · CHOOSE A NAME AND JOIN` : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
-      : S.isHost ? `YOU HOST ${MAPS[MAP_ID].name} · ${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`
-        : S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH');
+    const players = `${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'}`;
+    const ips = (this.lanHostIps || []).slice(0, 3).join(' OR ');
+    $('lan-note').textContent = this.lanNote || (desktop && this.lanConnecting ? `CONNECTING TO ${this.lanConnecting} …`
+      : desktop && !S.available ? 'HOST A GAME ON THIS PC, OR TYPE THE HOST\'S IP ADDRESS AND CLICK JOIN GAME'
+        : !S.available ? '' : !joined ? (S.hostId ? `A GAME IS HOSTED ON THIS NETWORK${hostMap ? ` (${hostMap})` : ''} · CHOOSE A NAME AND JOIN`
+          : desktop ? 'CONNECTED · NOBODY IS HOSTING THERE YET · YOU JOIN WHEN THEY DO' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
+          : S.isHost ? (desktop && ips ? `YOU HOST ${MAPS[MAP_ID].name} · FRIENDS TYPE ${ips} AND CLICK JOIN GAME · ${players}` : `YOU HOST ${MAPS[MAP_ID].name} · ${players} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`)
+            : S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH');
     this.updateMenuButtons();
   }
 
