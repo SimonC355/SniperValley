@@ -20,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'public', 'assets');
 const CREDITS = path.join(ROOT, 'CREDITS.md');
 const API = (process.env.POLYHAVEN_API || 'https://api.polyhaven.com').replace(/\/$/, '');
-const HEADERS = { 'User-Agent': 'SniperYard-prototype-asset-fetcher/1.0' };
+const HEADERS = { 'User-Agent': 'SniperValley-asset-fetcher/1.0' };
 
 // Game texture slots. `size` caps the packed GPU texture (bark is small on screen).
 const SLOTS = {

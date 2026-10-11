@@ -1,4 +1,4 @@
-# SniperYard prototype: design notes, ambiguities and choices
+# SniperValley: design notes, ambiguities and choices
 
 This prototype lets you feel the core concept before committing to UE5. Gameplay numbers live
 in `src/config.js`. This file explains how the spec was interpreted and where I made choices.
@@ -494,6 +494,55 @@ valley (`MAPS` in `src/config.js`):
   - round end, side swap and next round;
   - match restart, and glints and the aimed-at warning between players.
   - **Not tested** with real people on separate PCs.
+
+## Windows program (Electron)
+
+- **Name.** The public version is called SniperValley (SniperYard was taken). Browser storage
+  keys keep their `sniperyard.` prefix: they are invisible, and renaming them would reset
+  everyone's settings.
+- **Why Electron.**
+  - It ships Chromium, so the program runs the same WebGL2 code as Chrome and Edge, with no
+    changes to the game.
+  - It is also the usual base for web games on Steam (with steamworks.js), if that comes
+    later.
+  - Tauri would make a much smaller download, but it uses the system's web view, and Steam
+    support is harder there.
+- **The game is served from `http://127.0.0.1:47820`**, not loaded from files.
+  - It behaves exactly like `npm run host`: absolute asset paths, `fetch`, and WebSocket to
+    the relay all just work.
+  - Browser storage (the settings) is kept per address, so the port is fixed and the
+    settings survive restarts.
+  - A second copy on the same PC moves to the next free port and gets its own settings. That
+    is handy for testing LAN on one PC.
+- **LAN in the program.**
+  - HOST GAME asks the program to start the relay plus the game files on port 47821 on all
+    network interfaces. The page then joins it like a browser would.
+  - The server lives in the program, not the page, so it survives the reload when the host
+    changes map. It stops when the program closes.
+  - JOIN GAME connects to `<ip>:47821`, and the game joins as soon as that PC hosts. A fixed
+    port means friends only type the IP address.
+  - Browsers can join a program's game at `http://<ip>:47821`, the same as with
+    `npm run host`.
+  - Windows asks the host once whether SniperValley may use the network.
+- **Program-only features** are behind `window.desktop`, which `electron/preload.cjs` exposes:
+  quit, fullscreen, and host LAN. The browser build doesn't have it and is unchanged. The
+  fullscreen choice is saved in `%APPDATA%\SniperValley\window.json`.
+- **Switches.** The program asks for the high-performance GPU
+  (`force_high_performance_gpu`), and lets sound start without a click, for rejoining after a
+  map change.
+- **Packaging** uses `@electron/packager` rather than electron-builder. electron-builder
+  downloads a signing toolkit that needs symlink rights on Windows (Developer Mode or admin).
+  The packager sets the icon with rcedit and has no such step. CI zips the folder with
+  PowerShell.
+- **Not code-signed**, so Windows SmartScreen warns the first time. A certificate costs money
+  every year and is only worth it for a public release; Steam doesn't need it.
+- **Tested** in this environment (Linux, software GL, two program windows):
+  - start-up, menu, fullscreen toggle and QUIT;
+  - one copy hosting, another joining by IP, and a browser joining the same game;
+  - the match starting for all three;
+  - the packed build (app archive), hosting and joining.
+  - **Not tested:** the Windows .exe itself (CI builds it), the firewall question, and the
+    GPU switch on a real two-GPU laptop.
 
 ## Known limitations and ideas
 

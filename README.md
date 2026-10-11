@@ -1,7 +1,7 @@
-# SniperYard — browser prototype
+# SniperValley
 
-A Three.js + Vite prototype of **SniperYard**, a team sniper game in a forested V-shaped valley.
-Play 2v2 (up to 5v5) against AI ghillie snipers, or with friends on your local network.
+A team sniper game in a forested V-shaped valley, built with Three.js. Play 2v2 (up to 5v5)
+against AI ghillie snipers, or with friends on your local network.
 
 - Everyone has one bolt-action rifle, one hit kills, and nobody respawns.
 - Three maps of the same valley: **Valley** (large, 3v3–5v5), **Narrow valley** (2v2–3v3) and
@@ -13,18 +13,68 @@ Play 2v2 (up to 5v5) against AI ghillie snipers, or with friends on your local n
   less under a cloud), gusts roll through the trees, grass and ghillie suits, needles drift
   down, and songbirds fall silent after gunfire.
 
-## Run it
+This is an early test version. Feedback is welcome in the
+[issues](https://github.com/SimonC355/SniperValley/issues).
+
+## Play on Windows
+
+1. Download **SniperValley-windows-x64.zip** from the
+   [latest release](https://github.com/SimonC355/SniperValley/releases/latest).
+2. Unzip it anywhere and double-click **SniperValley.exe**.
+3. The first time, Windows shows *Windows protected your PC*, because the program is not
+   code-signed. Click **More info**, then **Run anyway**.
+
+- **F11** or **Alt+Enter** switches between fullscreen and a window (also under Esc → GRAPHICS).
+  **QUIT** is in the menus.
+- Settings are saved on the PC (`%APPDATA%\SniperValley`).
+- On laptops with two graphics cards the program asks for the fast one. If it still runs
+  slowly, set `SniperValley.exe` to *High performance* in Windows Settings → System →
+  Display → Graphics.
+
+**LAN games with the program:**
+
+1. One player clicks **HOST GAME**. The lobby shows that PC's IP address, for example
+   *FRIENDS TYPE 192.168.1.23*. The first time, Windows asks whether SniperValley may use the
+   network: allow it on **private networks**.
+2. The others type that address in the box next to **JOIN GAME** and click it. They join as
+   soon as the host is ready.
+3. Friends without the program can join from a browser at `http://<host's IP>:47821`.
+4. The host picks teams, map and rounds in the lobby and the MATCH tab, then clicks
+   **START MATCH**.
+
+## Develop
 
 ```bash
 npm install
+npm run dev        # the game in the browser: http://localhost:5173 (reloads on every change)
+npm run app        # the Windows program, run from the source (builds first)
+npm run exe        # builds release/SniperValley-win32-x64/SniperValley.exe
+npm run host       # LAN game in browsers: builds, then serves the game + relay on port 8080
 npm run assets     # optional: download CC0 photoscanned textures from Poly Haven (~70 MB)
-npm run dev        # http://localhost:5173
-npm run host       # LAN game: builds, then serves the game + relay on port 8080
 npm run build      # static build in dist/
 ```
 
-Requires a desktop browser with WebGL2 and a mouse. The first load takes a few seconds while
-textures, the forest and sniper positions are generated.
+You need [Node.js](https://nodejs.org) 22.12 or newer. The game runs in any desktop browser
+with WebGL2; the program is the same game in its own window ([Electron](https://www.electronjs.org)).
+The first load takes a few seconds while textures, the forest and sniper positions are
+generated.
+
+- Day-to-day work happens in the browser (`npm run dev`). Use `npm run app` now and then for
+  what only the program has: QUIT, fullscreen, and hosting or joining LAN games by IP.
+- `npm run exe` makes the folder `release/SniperValley-win32-x64/`. Zip it to share it by
+  hand. Build on Windows to get the program icon on the .exe.
+- On Windows PowerShell, if `npm` is blocked ("running scripts is disabled"), use `npm.cmd`.
+
+### Releases
+
+GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)) builds the
+Windows zip on every pull request and every push to `main`. Each run keeps it under
+*Artifacts* for testing.
+
+When a push to `main` carries a `version` in `package.json` that has no release yet, the
+workflow publishes **SniperValley vX.Y.Z** with the zip under Releases. To give testers a new
+version: raise `version` in `package.json` (for example 0.2.0 → 0.3.0) and merge. The
+version is shown on the start screen.
 
 ### Maps
 
@@ -59,7 +109,9 @@ missing.
 Open the game with `?photo=0` to compare with the procedural textures. The downloads are
 git-ignored because they are large, so every machine runs the command once.
 
-### LAN multiplayer (you host, friends join)
+### LAN multiplayer in browsers (you host, friends join)
+
+With the Windows program you don't need any of this: see *Play on Windows* above.
 
 1. **On the hosting PC**, run `npm install` once, then `npm run host`. The console prints two
    addresses: `http://localhost:8080` for you and `http://<your-ip>:8080` for your friends.
@@ -189,11 +241,21 @@ src/
   net.js         LAN multiplayer: lobby session, host snapshots, shot/kill sync, map sync
   remote.js      network-driven combatants (other players, the host's AI on clients)
   bench.js       ?bench benchmark (always on the Valley map)
+  desktop.js     extras in the Windows program: QUIT, fullscreen setting
+electron/
+  main.cjs       the program: window, serves the game on this PC, hosts LAN games
+  preload.cjs    what the game may ask the program for (window.desktop)
+  icon.png/.ico  program icon (drawn by scripts/make-icon.mjs)
 scripts/
   fetch-assets.mjs   `npm run assets`: CC0 texture downloader (Poly Haven API)
+  package-exe.mjs    `npm run exe`: packs the program with @electron/packager
+  make-icon.mjs      draws the program icon
 server/
   lan.mjs        `npm run host`: serves dist/ and the relay, prints LAN addresses
-  relay.mjs      WebSocket lobby + message relay (also used by the dev server)
+  serve.mjs      serves the built game (used by lan.mjs and the program)
+  relay.mjs      WebSocket lobby + message relay (also used by the dev server and the program)
+.github/workflows/
+  build.yml      builds the Windows zip; publishes a release for each new version
 ```
 
 Design interpretations, numbers and open questions are in [NOTES.md](NOTES.md). Asset credits
@@ -300,3 +362,14 @@ are in [CREDITS.md](CREDITS.md).
   threads and grass tufts on the shoulders and hood, strands that blow in the gusts, trail
   behind when they move and swing out when they turn, and slow breathing when they hold
   still.
+
+**The Windows program**
+- Download the zip from the pull request's build (*Checks* → *Build Windows* → *Artifacts*),
+  unzip it and start `SniperValley.exe`. Click past the SmartScreen warning.
+- The start screen says SNIPERVALLEY and TEST VERSION 0.2.0, the game fills the screen, and
+  QUIT closes it. F11 switches to a window and back; restart the program: it remembers.
+- Single player: play a round. Check that sound, mouse and settings work as in the browser.
+- LAN with two PCs: HOST GAME on one (allow the firewall question), type its IP on the other
+  and JOIN GAME. Also try joining from a browser at `http://<host's IP>:47821`.
+- On a laptop, check the GPU line in `?bench` (Esc → GRAPHICS → Run the benchmark): it should
+  name the NVIDIA/AMD card.
