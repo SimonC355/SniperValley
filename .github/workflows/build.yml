@@ -49,7 +49,7 @@ jobs:
           printf '%s\n' \
             "**Windows:** download \`SniperValley-windows-x64.zip\` below, unzip it and start \`SniperValley.exe\`." \
             "" \
-            "The program is not code-signed, so the first time Windows shows *Windows protected your PC*: click **More info**, then **Run anyway**." \
+            "The program is not code-signed. To start it without a warning: right-click the zip, choose **Properties**, tick **Unblock** and click **OK** before you unzip it. Otherwise Windows shows *Windows protected your PC* the first time: click **More info**, then **Run anyway**." \
             "" \
             "LAN games: one player clicks HOST GAME, the others type the IP address it shows and click JOIN GAME." > notes.md
           gh release create "v$version" SniperValley-windows-x64.zip --target "$GITHUB_SHA" --title "SniperValley $version" --notes-file notes.md

@@ -1,5 +1,11 @@
 # SniperValley
 
+[![Latest version](https://img.shields.io/github/v/release/SimonC355/SniperValley?label=version)](https://github.com/SimonC355/SniperValley/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/SimonC355/SniperValley/total)](https://github.com/SimonC355/SniperValley/releases)
+
+**[Download for Windows](https://github.com/SimonC355/SniperValley/releases/latest/download/SniperValley-windows-x64.zip)**
+(zip, about 150 MB). How to start it is under [Play on Windows](#play-on-windows).
+
 A team sniper game in a forested V-shaped valley, built with Three.js. Play 2v2 (up to 5v5)
 against AI ghillie snipers, or with friends on your local network.
 
@@ -18,11 +24,16 @@ This is an early test version. Feedback is welcome in the
 
 ## Play on Windows
 
-1. Download **SniperValley-windows-x64.zip** from the
-   [latest release](https://github.com/SimonC355/SniperValley/releases/latest).
-2. Unzip it anywhere and double-click **SniperValley.exe**.
-3. The first time, Windows shows *Windows protected your PC*, because the program is not
-   code-signed. Click **More info**, then **Run anyway**.
+1. Download **SniperValley-windows-x64.zip**
+   ([direct link](https://github.com/SimonC355/SniperValley/releases/latest/download/SniperValley-windows-x64.zip),
+   or under *Assets* in the [latest release](https://github.com/SimonC355/SniperValley/releases/latest)).
+   The green **Code** button gives you the source code, not the program.
+2. Optional: right-click the zip → **Properties**, tick **Unblock** at the bottom and click
+   **OK**. Then Windows won't warn you when you start the game.
+3. Right-click the zip → **Extract All…**, open the folder and double-click
+   **SniperValley.exe**.
+4. If you skipped step 2, Windows shows *Windows protected your PC* the first time, because
+   the program is not code-signed. Click **More info**, then **Run anyway**.
 
 - **F11** or **Alt+Enter** switches between fullscreen and a window (also under Esc → GRAPHICS).
   **QUIT** is in the menus.
@@ -72,7 +83,9 @@ Windows zip on every pull request and every push to `main`. Each run keeps it un
 *Artifacts* for testing.
 
 When a push to `main` carries a `version` in `package.json` that has no release yet, the
-workflow publishes **SniperValley vX.Y.Z** with the zip under Releases. To give testers a new
+workflow publishes **SniperValley vX.Y.Z** with the zip under Releases. The download badge at
+the top counts every download of the release zips, across all versions. It counts downloads,
+not people. To give testers a new
 version: raise `version` in `package.json` (for example 0.2.0 → 0.3.0) and merge. The
 version is shown on the start screen.
 
