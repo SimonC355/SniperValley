@@ -458,6 +458,30 @@ export class AudioSystem {
     }
   }
 
+  // The player's own breath while scoped: a short inhale when holding it, a slow exhale when
+  // letting go, and a gasp (exhale + quick inhale) when it ran out.
+  breath(kind) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t0 = ctx.currentTime;
+    const puff = (t, dur, f0, f1, peak) => {
+      const s = this._noiseSrc(t, dur);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4;
+      bp.frequency.setValueAtTime(f0, t);
+      bp.frequency.linearRampToValueAtTime(f1, t + dur);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peak, t + dur * 0.35);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      s.connect(bp).connect(lp).connect(g).connect(this.master);
+    };
+    this._log(`breath ${kind}`, 0);
+    if (this._sample(`breath_${kind}`, this.master, t0, 0.8)) return;
+    if (kind === 'hold') puff(t0, 0.32, 900, 1500, 0.05);
+    else if (kind === 'release') puff(t0, 0.7, 1100, 600, 0.045);
+    else if (kind === 'gasp') { puff(t0, 0.45, 1300, 700, 0.09); puff(t0 + 0.5, 0.3, 900, 1600, 0.08); puff(t0 + 0.9, 0.5, 1200, 700, 0.06); }
+  }
+
   beep(freq = 880, dur = 0.08, vol = 0.12) {
     if (!this.ready) return;
     const ctx = this.ctx, t = ctx.currentTime;

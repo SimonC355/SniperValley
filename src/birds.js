@@ -194,6 +194,7 @@ export class Birds {
       f.calledSlot = -1;
       f.hopSnd = -1;
       f.landSounded = true;
+      f.ignore = new Set();
       for (const b of f.birds) { b.pos.copy(b.perch); b.prev.copy(b.perch); b.from.copy(b.perch); b.bob.length = 0; }
     }
     this.time = time;
@@ -254,6 +255,19 @@ export class Birds {
     }
   }
 
+  // Someone who spawns next to a flock doesn't flush it by being there: only by walking off
+  // and coming back (otherwise every round would start with alarms all over the valley).
+  settleAround(combatants) {
+    const r = CONFIG.birds.flushBase + 1;
+    for (const f of this.flocks) {
+      if (!f.ignore) f.ignore = new Set();
+      for (const c of combatants) {
+        if (c.isDummy) continue;
+        if ((c.pos.x - f.center.x) ** 2 + (c.pos.z - f.center.z) ** 2 < r * r) f.ignore.add(c.id);
+      }
+    }
+  }
+
   // proximity: flushBase + speed * flushSpeedMul
   checkProximity(time, combatants) {
     const B = CONFIG.birds;
@@ -262,6 +276,10 @@ export class Birds {
         if (!c.alive || c.isDummy) continue;
         const r = B.flushBase + c.speed * B.flushSpeedMul;
         const dx = c.pos.x - f.center.x, dz = c.pos.z - f.center.z;
+        if (f.ignore && f.ignore.has(c.id)) {
+          if (dx * dx + dz * dz > (r + 3) * (r + 3)) f.ignore.delete(c.id);
+          continue;
+        }
         if (dx * dx + dz * dz < r * r) {
           if (f.state === STATE.PERCHED) this.flush(f, time, c.team, c.id, 'proximity');
           else if (time > f.resettleAt - 4) { f.resettleAt = time + 10; f.landSounded = false; } // don't land next to someone

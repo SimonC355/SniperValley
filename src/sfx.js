@@ -159,31 +159,43 @@ function bandpass(x, sr, f, Q) {
   return y;
 }
 
-// One crow caw ("kraa"). A crow's voice is harsh: the pulses from its syrinx come at an
-// irregular rate (and sometimes skip one, a croak an octave down), with breath noise, shaped
-// by the throat and beak. A clean, steady tone here sounds like an insect, not a bird.
+// One crow caw ("kraa"): a short "k" of air, then a harsh, open "aa" that rises a little and
+// falls at the end. The voice is a pulse train at ~600-700 Hz with a few per cent of jitter
+// and shimmer and a rough stretch where every other pulse is weak (a croak), shaped by the
+// throat and beak into a bright vowel at 1.2-3 kHz. Most of the sound sits above 1 kHz, so it
+// reads as a big bird, not a buzzing insect (an insect's steady drone lives below ~700 Hz).
 export function crowCaw(sr, seed = 1) {
   const r = rng(seed);
-  const dur = 0.26 + r() * 0.14;
-  const n = Math.floor(sr * (dur + 0.06));
-  const exc = new Float32Array(n);
-  const f0 = 400 + r() * 120;
-  const env = (u) => (u < 0 || u > 1 ? 0 : Math.min(1, u / 0.06) * (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3));
-  let t = 0;
+  const pre = 0.016;                        // the "k"
+  const dur = 0.3 + r() * 0.12;             // the "aa"
+  const n = Math.floor(sr * (pre + dur + 0.06));
+  const src = new Float32Array(n);
+  const f0 = 600 + r() * 110;
+  const pitch = (u) => f0 * (0.94 + 0.1 * Math.min(1, u / 0.25) - 0.24 * Math.max(0, (u - 0.55) / 0.45) ** 1.3);
+  const env = (u) => (u < 0 || u > 1 ? 0 : Math.min(1, u / 0.06) * (u < 0.72 ? 1 : (1 - (u - 0.72) / 0.28) ** 1.4));
+  const roughA = 0.12 + r() * 0.2, roughB = roughA + 0.28 + r() * 0.2;
+  // glottal pulses: a short raised-cosine dip per period (closure), jittered and shimmered
+  const w = Math.max(3, Math.round(sr * 0.00035));
+  let t = 0, k = 0;
   while (t < dur) {
     const u = t / dur;
-    let period = (1 / (f0 * (1.05 - 0.15 * u))) * (0.72 + r() * 0.56);
-    if (r() < 0.35) period *= 2;
-    const i0 = Math.floor(t * sr);
-    const a = env(u) * (0.6 + 0.4 * r());
-    if (i0 + 2 < n) { exc[i0] += a; exc[i0 + 1] += a * 0.6; exc[i0 + 2] -= a * 0.3; }
-    t += period;
+    const rough = u > roughA && u < roughB;
+    // shimmer, a throaty flutter (~45 Hz) and the croak stretch
+    const amp = env(u) * (0.8 + r() * 0.4) * (1 - 0.3 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 45 * t))) * (rough && (k & 1) ? 0.4 : 1);
+    const i0 = Math.floor((pre + t) * sr);
+    for (let j = 0; j < w && i0 + j < n; j++) src[i0 + j] -= amp * 0.5 * (1 - Math.cos((2 * Math.PI * j) / w));
+    t += (1 / pitch(u)) * (1 + (r() - 0.5) * 0.11);
+    k++;
   }
-  for (let i = 0; i < n; i++) exc[i] += (r() * 2 - 1) * 0.4 * env(i / sr / dur);
-  const A = bandpass(exc, sr, 1000 + r() * 200, 3);
-  const B = bandpass(exc, sr, 1950 + r() * 350, 4);
-  const C = bandpass(exc, sr, 3100 + r() * 450, 4);
+  // breath noise through the same throat, and the "k" burst
+  for (let i = 0; i < n; i++) src[i] += (r() * 2 - 1) * 0.17 * env((i / sr - pre) / dur);
+  const kN = Math.floor(pre * sr * 0.7);
+  for (let i = 0; i < kN; i++) src[i] += (r() * 2 - 1) * 0.6 * Math.sin((Math.PI * i) / kN);
+  const F1 = bandpass(src, sr, 1180 + r() * 160, 4.5);
+  const F2 = bandpass(src, sr, 1800 + r() * 220, 5.5);
+  const F3 = bandpass(src, sr, 2750 + r() * 300, 6.5);
   const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = A[i] + B[i] * 0.8 + C[i] * 0.35;
+  for (let i = 0; i < n; i++) out[i] = F1[i] + F2[i] * 0.8 + F3[i] * 0.32;
+  highpass(out, sr, 500);
   return normalize(out, 0.9);
 }

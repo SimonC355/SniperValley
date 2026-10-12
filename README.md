@@ -6,14 +6,17 @@
 **[Download for Windows](https://github.com/SimonC355/SniperValley/releases/latest/download/SniperValley-windows-x64.zip)**
 (zip, about 150 MB). How to start it is under [Play on Windows](#play-on-windows).
 
-A team sniper game in a forested V-shaped valley, built with Three.js. Play 2v2 (up to 5v5)
-against AI ghillie snipers, or with friends on your local network.
+A team sniper game in a forested V-shaped valley, built with Three.js. Play anything from 1v1
+to 20v20 against AI ghillie snipers, or with friends on your local network.
 
-- Everyone has one bolt-action rifle, one hit kills, and nobody respawns.
-- Three maps of the same valley: **Valley** (large, 3v3–5v5), **Narrow valley** (2v2–3v3) and
-  **Ravine** (small, 1v1–2v2).
-- The play area shrinks every minute or so.
-- A match is best of three rounds, and teams swap slopes (and sun side) between rounds.
+- Everyone has one bolt-action rifle with a 2–12× scope, and one hit kills. Hold your breath
+  to steady the aim.
+- Two modes:
+  - **Elimination**: nobody respawns, the play area shrinks every 40–50 s, a match is best of
+    three rounds, and teams swap slopes (and sun side) between rounds.
+  - **Team deathmatch**: you respawn on your team's slope; the first team to 30 kills wins.
+- Three maps of the same valley: **Valley** (5v5–20v20), **Narrow valley** (2v2–10v10) and
+  **Ravine** (small, 1v1–5v5).
 - Detection comes from scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 - The forest is alive: clouds drift over and their shadows sweep the slopes (a scope glints
   less under a cloud), gusts roll through the trees, grass and ghillie suits, needles drift
@@ -50,8 +53,8 @@ This is an early test version. Feedback is welcome in the
 2. The others type that address in the box next to **JOIN GAME** and click it. They join as
    soon as the host is ready.
 3. Friends without the program can join from a browser at `http://<host's IP>:47821`.
-4. The host picks teams, map and rounds in the lobby and the MATCH tab, then clicks
-   **START MATCH**.
+4. The host picks teams, map, mode, team size and rounds in the lobby and the MATCH tab, then
+   clicks **START MATCH**.
 
 ## Develop
 
@@ -87,7 +90,9 @@ workflow publishes **SniperValley vX.Y.Z** with the zip under Releases. The down
 the top counts every download of the release zips, across all versions. It counts downloads,
 not people. To give testers a new
 version: raise `version` in `package.json` (for example 0.2.0 → 0.3.0) and merge. The
-version is shown on the start screen.
+version is shown on the start screen. If [`CHANGELOG.md`](CHANGELOG.md) has a section for the
+version (`## 0.3.1 – First game experience fixes`), the release takes its title from that line
+and lists the section in its notes.
 
 ### Maps
 
@@ -97,9 +102,9 @@ settings stay.
 
 | Map | Size | Players | Typical shots |
 |---|---|---|---|
-| Valley | 440 × 380 m | 3v3 – 5v5 | 150 – 350 m |
-| Narrow valley | 340 × 270 m | 2v2 – 3v3 | 100 – 250 m |
-| Ravine | 260 × 200 m | 1v1 – 2v2 | 60 – 180 m |
+| Valley | 340 × 290 m | 5v5 – 20v20 | 110 – 270 m |
+| Narrow valley | 260 × 210 m | 2v2 – 10v10 | 80 – 190 m |
+| Ravine | 200 × 150 m | 1v1 – 5v5 | 45 – 140 m |
 
 All three are the same forested river valley at different sizes: narrower slopes, a smaller
 river and lower ridges, with the same mountains behind. The zone also closes faster on the
@@ -132,8 +137,8 @@ With the Windows program you don't need any of this: see *Play on Windows* above
 3. **Friends** on the same network: open the address with your IP, type a name and click
    **JOIN GAME**. They don't need to install anything; the browser is enough.
 4. **Pick teams** in the lobby, or leave them on auto-balance. In the **MATCH** tab, the host
-   sets the map, team size, rounds and zone mode. With *Fill empty slots with AI* on, AI snipers fill
-   the teams up to the team size.
+   sets the map, mode, team size, friendly fire, rounds and zone mode. With *Fill empty slots
+   with AI* on, AI snipers fill the teams up to the team size.
 5. **Host:** click **START MATCH**. Friends click once in the game window to capture the
    mouse.
 
@@ -150,17 +155,18 @@ Notes:
 ## Controls
 
 All keys can be rebound under Esc → **CONTROLS**. That tab also has mouse and scope
-sensitivity, field of view and invert Y.
+sensitivity, field of view, invert Y, and whether the scope opens at 2× or at the last zoom.
 
 | Key | Action |
 |---|---|
 | WASD | move |
 | Mouse | look (arrow keys if pointer lock is unavailable) |
-| Shift | sprint · while scoped: hold breath |
+| Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s) |
 | Space | jump / stand up |
 | C or Ctrl | crouch |
 | Z | prone |
-| Right mouse (hold) | scope (FOV 70 → 7, slower sensitivity) |
+| Right mouse (hold) | scope: opens at 2×, slower sensitivity |
+| Mouse wheel | while scoped: zoom 2–12× (forward in, back out) |
 | Left mouse | fire (1.5 s bolt cycle) · while dead: switch spectated teammate |
 | Tab (hold) | scoreboard |
 | R | new match (single player / LAN host) |
@@ -207,7 +213,8 @@ CREDITS.md.
 
 ## URL options
 
-`?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–5) · `?ballistics=1` · `?tracers=off|faint|bright` ·
+`?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–20) · `?game=tdm` (team deathmatch) ·
+`?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` ·
 `?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
@@ -379,10 +386,38 @@ are in [CREDITS.md](CREDITS.md).
 **The Windows program**
 - Download the zip from the pull request's build (*Checks* → *Build Windows* → *Artifacts*),
   unzip it and start `SniperValley.exe`. Click past the SmartScreen warning.
-- The start screen says SNIPERVALLEY and TEST VERSION 0.2.0, the game fills the screen, and
+- The start screen says SNIPERVALLEY and TEST VERSION 0.3.1, the game fills the screen, and
   QUIT closes it. F11 switches to a window and back; restart the program: it remembers.
 - Single player: play a round. Check that sound, mouse and settings work as in the browser.
 - LAN with two PCs: HOST GAME on one (allow the firewall question), type its IP on the other
   and JOIN GAME. Also try joining from a browser at `http://<host's IP>:47821`.
 - On a laptop, check the GPU line in `?bench` (Esc → GRAPHICS → Run the benchmark): it should
   name the NVIDIA/AMD card.
+
+**v0.3.1: first game experience fixes**
+- **Sprint.** Crouch (C) or go prone (Z), then hold Shift and W: you get up and run. Press C
+  while running: you stay crouched until you press Shift again.
+- **Zoom and breath.** Scope in: it opens at 2×. Roll the wheel forward to zoom in to 12×,
+  back to zoom out. Standing still, the aim drifts and rises and falls with your breathing;
+  hold Shift to steady it for 4 s (the bar under BOLT READY empties). Hold it to the end and
+  you gasp, and the aim shakes harder for a few seconds. Prone sways least.
+- **Range and drop.** The scope shows the zoom and the range to what the crosshair is on. In
+  MATCH → Ballistics, pick *travel time + drop + wind*: drop marks (2–8 = 200–800 m) appear
+  under the centre and a HOLD line tells you how far to aim high and into the wind. Hit
+  something at 300 m with it.
+- **Long shots.** Shoot past tree trunks at range: a shot that clears the trunk on screen
+  should clear it in the game.
+- **AI.** Watch an enemy that stops walking to look at something (F2 + F1): its legs stop.
+- **Glints.** Under the trees with the sun ahead, the falling needles shouldn't flash like
+  scopes any more. A real glint is a white star that stays while they aim at or near you, and
+  it is still there when you scope in. F1 lists recent glints and muzzle flashes with who made
+  them.
+- **Crows.** Flush a flock: the alarm should sound like crows ("kraa"), not static.
+- **Maps.** All three are about a quarter smaller. Rounds should reach contact sooner.
+- **Big teams.** MATCH → Team size 10v10 or 20v20. The round shouldn't open with a burst of
+  kills; after a few seconds it gets busy. Hold Tab for the scoreboard.
+- **Team deathmatch.** MATCH → Mode → *team deathmatch*. Die and you see the killcam, then
+  "RESPAWN IN …", and you come back on your slope. The top bar shows team kills and the time
+  left; the first team to 30 kills wins. Try it on LAN too.
+- **Friendly fire.** MATCH → Friendly fire. On: shooting a teammate kills them (TEAM KILL in
+  the feed, −1 in deathmatch). Off: the bullet passes through them.

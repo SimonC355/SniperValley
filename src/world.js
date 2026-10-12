@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { rayCapsule } from './hitbox.js';
+import { trunkProfile } from './trees.js';
 
 const CELL = 8;
 
@@ -20,10 +21,14 @@ export class World {
     this.colliders = [];
     for (const t of forest.trees) {
       if (t.x < this.minX || t.z < this.minZ || t.x > -this.minX || t.z > -this.minZ) continue;
+      // trunk: the drawn shape (bent, tapered) for bullets and sight; r: for walking into it
+      const trunk = trunkProfile(t);
+      let br = 0;
+      for (const q of trunk) br = Math.max(br, Math.hypot(q.x - t.x, q.z - t.z) + q.r);
       this._add({
-        kind: 'tree', x: t.x, z: t.z, y0: t.y, top: t.y + t.height, r: t.trunkR,
+        kind: 'tree', x: t.x, z: t.z, y0: t.y, top: t.y + t.height, r: t.trunkR, trunk, br,
         cb: t.crownBase, ct: t.crownTop, cr: t.coreR, round: t.variant === 'pine', tree: t,
-      }, Math.max(t.trunkR, t.coreR));
+      }, Math.max(br, t.coreR));
     }
     for (const r of rocks.items) {
       this._add({ kind: 'rock', x: r.x, z: r.z, y: r.y + r.s * 0.12, r: r.s * 0.78 }, r.s * 0.8);
@@ -123,8 +128,15 @@ export class World {
   _testCollider(c, o, d, maxDist, opts) {
     if (c.kind === 'tree') {
       let best = Infinity;
-      const hit = World._cyl(o, d, c.x, c.z, c.r, c.y0 - 1, c.top);
-      if (hit && hit[1] > 0 && hit[0] < maxDist) best = Math.max(0, hit[0]);
+      // trunk: a quick test against a cylinder around it, then its capsules
+      const hit = World._cyl(o, d, c.x, c.z, c.br, c.y0 - 0.5, c.top);
+      if (hit && hit[1] > 0 && hit[0] < maxDist) {
+        const tr = c.trunk;
+        for (let j = 0; j < tr.length - 1; j++) {
+          const t = rayCapsule(o, d, tr[j], tr[j + 1], (tr[j].r + tr[j + 1].r) * 0.5);
+          if (t >= 0 && t < best && t < maxDist) best = t;
+        }
+      }
       if (c.cr > 0 && opts.crowns !== false) {
         const ch = World._cyl(o, d, c.x, c.z, c.cr, c.cb, c.ct);
         if (ch && ch[1] > 0 && ch[0] < Math.min(best, maxDist)) {

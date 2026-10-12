@@ -31,6 +31,8 @@ html, body {
 .team { display: flex; gap: 5px; align-items: center; }
 .pip { width: 14px; height: 20px; border-radius: 2px; background: currentColor; opacity: 0.95; clip-path: polygon(50% 0, 100% 25%, 100% 100%, 0 100%, 0 25%); }
 .pip.dead { opacity: 0.18; }
+.team.many { gap: 2px; }
+.team.many .pip { width: 6px; height: 14px; }
 .team.friend { color: var(--friend); }
 .team.enemy { color: var(--danger); }
 #zonebox { min-width: 170px; text-align: center; padding: 3px 12px; background: var(--panel); border-radius: 3px; font-size: 15px; }
@@ -62,6 +64,19 @@ html, body {
 #glint.on { color: #fff2c4; }
 #glint.on .dot { background: #fff6d0; box-shadow: 0 0 10px 3px rgba(255, 240, 180, 0.8); border-color: #fff; }
 #breath { margin-top: 4px; font-size: 12px; color: var(--dim); letter-spacing: 0.1em; }
+#breath.out { color: var(--danger); }
+#breathbar { width: 160px; height: 3px; background: rgba(255,255,255,0.15); margin: 4px 0 0 auto; display: none; }
+#breathbar > div { height: 100%; width: 100%; background: #9fd0ff; }
+#breathbar.out > div { background: var(--danger); }
+
+/* scope: zoom + rangefinder under the reticle, bullet-drop marks (ballistics on) */
+#scopeinfo { left: 50%; top: 50%; margin-top: 30vh; transform: translateX(-50%); display: none; gap: 18px; font-size: 14px; font-weight: 600; letter-spacing: 0.12em; color: rgba(255, 250, 235, 0.9); white-space: nowrap; }
+#holdtext { color: #ffe08a; }
+#holdtext:empty { display: none; }
+#bdc { left: 50%; top: 50%; width: 0; height: 0; display: none; }
+#bdc .mk { position: absolute; left: 3px; height: 0; }
+#bdc .mk i { position: absolute; left: -6px; top: -1px; width: 13px; height: 2px; background: rgba(8, 8, 8, 0.95); box-shadow: 0 0 0 1px rgba(255, 240, 200, 0.45); }
+#bdc .mk b { position: absolute; left: 12px; top: -8px; font-size: 12px; font-weight: 700; color: #ffe08a; text-shadow: 0 0 2px #000, 0 0 3px #000; }
 
 /* warnings */
 #aimed { left: 50%; top: 92px; transform: translateX(-50%); color: var(--danger); font-weight: 700; font-size: 18px; letter-spacing: 0.22em; opacity: 0; transition: opacity 0.15s; }
@@ -180,6 +195,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 #scoreboard .r.dead { opacity: 0.4; text-decoration: line-through; }
 #scoreboard .r.me { color: var(--accent); }
 #scoreboard i { color: var(--dim); font-style: normal; font-size: 12px; }
+#scoreboard.big { top: 12%; }
+#scoreboard.big .r { font-size: 13px; padding: 0; }
 
 /* only in the SniperValley program (body.desktop, see desktop.js) */
 body:not(.desktop) .desk { display: none !important; }

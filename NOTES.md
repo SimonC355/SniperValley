@@ -82,13 +82,14 @@ impostors from them, and keep our wind and collision setup.
 ### Three map sizes
 
 The feedback was that the valley is huge for 2v2, so there are two smaller cuts of the same
-valley (`MAPS` in `src/config.js`):
+valley (`MAPS` in `src/config.js`). After the first longer play test ("even smaller"), v0.3.1
+made all three about a quarter smaller again:
 
 | Map | Play area | Ridge distance / height | River (deep / waterline half-width) | Zone step |
 |---|---|---|---|---|
-| Valley | 440 × 380 m | 178 m / 64 m | 9 / 17 m | 60 s |
-| Narrow valley | 340 × 270 m | 126 m / 48 m | 7 / 14 m | 50 s |
-| Ravine | 260 × 200 m | 94 m / 38 m | 5.5 / 11.5 m | 42 s |
+| Valley | 340 × 290 m (was 440 × 380) | 136 m / 52 m | 8 / 15 m | 50 s |
+| Narrow valley | 260 × 210 m (was 340 × 270) | 98 m / 40 m | 6.5 / 12.5 m | 42 s |
+| Ravine | 200 × 150 m (was 260 × 200) | 70 m / 31 m | 5 / 10 m | 36 s |
 
 - **Same style:** the same terrain recipe, scaled. The smaller maps also have a gentler river
   meander and less relief on the slopes, so the slopes stay walkable and the AI still finds
@@ -253,8 +254,8 @@ valley (`MAPS` in `src/config.js`):
 - Controls from the brief, plus two additions:
   - **C/Ctrl crouch** and **Z prone**. Camouflage and spotting depend on stance, so this felt
     essential.
-  - **Shift while scoped holds your breath** for 3 s (sway ×0.12), followed by a short
-    out-of-breath penalty.
+  - **Shift while scoped holds your breath** for 4 s (sway ×0.1), followed by a 3 s
+    out-of-breath penalty (see v0.3.1 below).
 - Hip-fire has 2.5° random spread (`weapon.hipSpread`), so you need to scope.
 - Scope sway grows with movement and lingers after sprinting. Recoil kicks about 3° and
   recovers 55%.
@@ -271,7 +272,7 @@ valley (`MAPS` in `src/config.js`):
 | | Bullets | Line of sight (AI, glint, flash) |
 |---|---|---|
 | Terrain | yes | yes |
-| Tree trunks | yes | yes |
+| Tree trunks (the drawn shape: tapered, bent, flared at the base) | yes | yes |
 | Tree crown *core* (inner ~40% radius, where foliage is drawn dense) | yes | yes |
 | Outer needle cards | no | no (gaps you can see through are real) |
 | Rocks | yes | yes |
@@ -396,9 +397,9 @@ valley (`MAPS` in `src/config.js`):
   | Everything now: gunshots, cracks, caws, wing beats, woodpecker, songbirds, gusts, river, wind | 0–3 % | ≤ 0.70 |
 
   So the bee was the creak both times (a creak is a tone in that range, however it is
-  built), and the old caw was close. The creak is gone. The caw is rendered at start
-  (`src/sfx.js`) as a harsh voice: pulses at an irregular rate, sometimes skipping one (a
-  croak an octave down), with breath noise, through throat and beak resonances. The
+  built), and the old caw was close. The creak is gone. The caw was then rendered as
+  pulses at a very irregular rate through throat resonances; in v0.3.1 it became a
+  "kraa" again (see below). The
   woodpecker knocks are now dry and countable (11–14 per second, no ringing resonance), the
   wren's fast trill is out, and a flushed flock caws at most nine times.
 - **What was that noise?** The F1 debug panel lists the sounds of the last 10 s with their
@@ -543,6 +544,87 @@ valley (`MAPS` in `src/config.js`):
   - the packed build (app archive), hosting and joining.
   - **Not tested:** the Windows .exe itself (CI builds it), the firewall question, and the
     GPU switch on a real two-GPU laptop.
+
+## v0.3.1: first game experience fixes
+
+From an hour of play testing. Each point, what I found and what changed.
+
+- **Sprint cancels crouch and prone.** Sprinting needed the standing stance, so Shift did
+  nothing when crouched or prone. Now sprint (moving forward, not scoped) stands you up. A
+  crouch or prone pressed *while* sprint is held keeps that stance until sprint is pressed
+  again, so you can still drop to the ground from a run.
+- **Crow sounds.** The caw from the "bee" round was noise through throat resonances: a
+  spectrogram showed no pitch at all, a hiss, not a bird. The new caw (`crowCaw` in
+  `src/sfx.js`) is a source–filter "kraa": a short "k", then glottal pulses at ~600–700 Hz
+  with 5 % jitter, shimmer, a 45 Hz flutter and a croaky stretch (every other pulse weak),
+  through an open "aa" (1.2 / 1.8 / 2.8 kHz). The pitch rises a little and falls at the end.
+  Measured: median pitch 640 Hz, spectral centroid 1.6 kHz, 3 % of the energy below 900 Hz,
+  and 0 % on the buzz meter (an insect drone is a steady pitch below ~700 Hz with its energy
+  there). Untested by ear here.
+- **Smaller maps.** All three about 25 % smaller (table above), zone steps shorter. The forest
+  density, rocks, bushes, logs and flocks follow the area as before.
+- **Long shots that don't hit.** Two causes:
+  - *Trunks.* Bullets and sight lines tested each trunk as a straight cylinder of 1.15× its
+    base radius all the way to the top, while the drawn trunk tapers to a point, is bent up
+    to 25 cm and has a wide flared foot. A test rendered 300 random sight lines of 120–480 m
+    (is the aim point visible on screen, through the alpha-tested needles?) and fired along
+    the same lines. Before, 3 of 13 clearly visible aim points were "hit" by a trunk that
+    wasn't there. After, no trunk blocked any of 22 (one crown core did). Trunks are now a
+    chain of capsules along the drawn centre line
+    (`trunkProfile` in `src/trees.js`), with the flare near the ground. AI sight lines use
+    the same shapes.
+  - *Ballistics (if switched on).* With drop and wind the bullet falls 0.3 m at 200 m, 0.7 m
+    at 300 m and 1.2 m at 400 m, and there was nothing to aim with. The scope now has a
+    rangefinder (ranges terrain, trees, rocks and bushes, never people, so it can't find a
+    hidden sniper), drop marks under the centre for 200–800 m (labelled 2–8, they move with
+    the zoom) and a "HOLD ▲ 0.6 m ◄ 0.1 m" line for the measured range. With the hold-off,
+    25 of 25 test shots at 200–330 m hit (21 of 25 without). The AI holds over too
+    (`Combat.ballisticAim`): it used to aim straight at you with drop on, so it missed long
+    shots.
+- **Ghillie man walking while standing still.** The AI only set its speed while walking.
+  When it stopped walking because it heard or saw something (investigate, aim), the speed
+  stayed, so it kept its walk cycle (and counted as "moving" for spotting). In a 5-minute
+  4v4 simulation 25 % of the time an AI was standing but walking. Now any state other than
+  walking has speed 0: 0 %.
+- **Glints that aren't scopes.** With every scope glint switched off, renders across the
+  valley showed nothing glint-like. What remained were the falling needles that "catch the
+  sun" and the dust motes toward the sun: a bright fleck now and then, and they fade out when
+  you scope in, so there is nothing there to find. They are softer now and only close to you
+  (about 1.4 glint-like specks per frame in sun-facing test views before, 0 after). Other
+  things that flash: a muzzle flash (a short orange burst, then the bang) and a teammate's
+  scope if you stand in front of it. F1 lists recent glints and flashes with who made them.
+- **10v10 and 20v20.** Team sizes 1–5, 8, 10, 15 and 20. Spawns fill the slope in rows
+  (at least 7–10 m apart), off-screen ghillie characters are culled (skinned meshes can't
+  use three.js culling), and the HUD pips and scoreboard compact for big teams. A 20v20 step
+  costs ~0.4–1 ms of simulation here. The first tests were a massacre: 18 of 40 dead 10 s
+  after the start. The cause was birds: everyone spawned next to some flock, the flocks all
+  flushed at the start, every AI turned its scope toward the birds, and the glints did the
+  rest. Now a spawn never flushes birds (only walking away and back does), AI snipers settle
+  into their spawn spot for 5–13 s before scanning through the scope, and in big teams each
+  uses the scope a bit less. 20v20 now: first kill after ~11 s (8 s of play).
+- **Team deathmatch** (MATCH tab → Mode). One long round with respawns 7 s after a death
+  (the killcam runs first) on your team's slope, at a spot away from enemies. The first team
+  to 30 kills wins (10–100), or the team ahead after 15 minutes. The zone stays open. The
+  scoreboard shows kills / deaths, the end screen kills, deaths, hits and longest hit. On LAN
+  the host decides kills and respawns; each player's state carries which "life" it belongs
+  to, so a state from before a respawn can't kill someone again.
+- **Friendly fire.** It was already on (you could shoot teammates) but not visible as a
+  choice. It is now a MATCH setting, on by default: a team kill doesn't count as a kill and
+  costs the team a point in deathmatch. Off, bullets pass through teammates.
+- **Sway and holding the breath.** The scope sway was 0.05° standing still, too small to
+  notice, so holding the breath didn't matter. Now the aim drifts and rises and falls with
+  each breath (about 4 s a breath): ~0.3° standing, ×0.6 crouched, ×0.32 prone, more while
+  moving or after a sprint. Shift steadies it to 10 % for 4 s, with an inhale; letting go
+  exhales; running out gasps and makes the sway 1.8× for 3 s. A breath bar sits under the
+  bolt bar while scoped.
+- **Zoom on the mouse wheel.** The scope opens at 2× and the wheel zooms 2–3–4–6–8–10–12×
+  (forward in, back out). 12× is about the old fixed scope. The magnification is measured
+  against a 70° view, so it is the same on every field-of-view setting. CONTROLS → *Scope
+  opens at* can keep the last zoom instead.
+- The benchmark's scoped scene zooms to 12× (the old scope). The Valley is smaller now, so
+  benchmark results from 0.2.0 and 0.3.1 don't compare.
+- Version 0.3.1 and the branch `v0.3.1`, as asked. The release workflow now takes the
+  release title and notes for a version from `CHANGELOG.md`.
 
 ## Known limitations and ideas
 

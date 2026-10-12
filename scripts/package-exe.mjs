@@ -30,7 +30,7 @@ const [out] = await packager({
   // only the built game, the program files and the relay go into the app
   ignore: [
     /^\/(src|scripts|public|release|\.github)(\/|$)/,
-    /^\/(index\.html|vite\.config\.js|README\.md|NOTES\.md|\.gitignore)$/,
+    /^\/(index\.html|vite\.config\.js|README\.md|NOTES\.md|CHANGELOG\.md|\.gitignore)$/,
     /^\/server\/lan\.mjs$/,
     /^\/electron\/icon\.ico$/,
     /^\/node_modules\/(\.vite-temp|\.package-lock\.json)/,

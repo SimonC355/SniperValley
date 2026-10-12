@@ -141,6 +141,7 @@ class Game {
     this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
     this.combat.listener = this.player;
     this.combat.onKill = (shooter, victim, dist, part, point) => {
+      this.scoreKill(shooter, victim);
       this.onKill(shooter, victim, dist, part, point);
       if (this.net && this.net.isHost) this.net.broadcastKill(shooter, victim, dist, part, point);
     };
@@ -158,6 +159,7 @@ class Game {
       this.audio.footstep(pos, loud, this.surfaceAt(pos.x, pos.z), true);
       this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: this.player.team, sourceId: this.player.id, loudness: loud });
     };
+    this.player.onBreath = (kind) => this.audio.breath(kind);
     this.player.onSplash = (pos, loud) => {
       this.audio.splash(pos, loud, true);
       this.effects.impact(pos.clone().add(new THREE.Vector3(0, 0.05, 0)), 'water');
@@ -358,6 +360,8 @@ class Game {
   sideOf(team) { return (team + (CONFIG.match.swapSides && this.match && this.match.round % 2 === 1 ? 1 : 0)) % 2; }
   sideSign(team) { return this.sideOf(team) === 0 ? 1 : -1; }
 
+  get tdm() { return CONFIG.match.mode === 'tdm'; }
+
   newMatch() {
     this.match = { round: 0, score: [0, 0], over: false, stats: { shots: 0, hits: 0, kills: 0, longest: 0, survived: 0 } };
     this.newRound();
@@ -396,6 +400,9 @@ class Game {
       if (st.map && st.map !== MAP_ID) { this.followHostMap(st.map); return; }
       CONFIG.zone.mode = st.zone; CONFIG.camouflageStrength = st.camo; CONFIG.weapon.ballistics.enabled = st.ball;
       CONFIG.weapon.tracers = st.tracers; CONFIG.match.roundsToWin = st.rounds; CONFIG.match.swapSides = st.swap; CONFIG.teams.size = st.size;
+      if (st.mode) CONFIG.match.mode = st.mode;
+      if (st.kills) CONFIG.match.tdmKills = st.kills;
+      if (st.ff !== undefined) CONFIG.match.friendlyFire = st.ff;
     }
     this.roundId = roundId;
     this.diedReported = false;
@@ -414,7 +421,9 @@ class Game {
     this.killcam = null;
     this.aimHistory = [];
     this.birds.reset(0, this.match.round);
-    this.zone.reset();
+    // deathmatch: the zone stays open (respawns keep everyone in the fight)
+    this.zone.reset(!this.tdm);
+    this.respawnQueue = [];
     this.spectating = null;
     this.damageFlash = 0;
     for (const a of this.ais) a.dispose();
@@ -446,6 +455,7 @@ class Game {
     this.humans = [p, ...this.remotes.filter((r) => r.human)];
     this.combatants = [p, ...this.ais, ...this.remotes, ...this.dummies];
     this.combat.setCombatants(this.combatants);
+    this.birds.settleAround(this.combatants);
     this.envTintT = 0;
     if (net && !net.isHost && this.state !== 'playing') this.enterNetGame();
     this.announceRound();
@@ -455,6 +465,11 @@ class Game {
     const M = this.match, me = this.player.team;
     const names = CONFIG.teams.names;
     const slope = this.sideOf(me) === 0 ? 'NORTH' : 'SOUTH';
+    if (this.tdm) {
+      const n = CONFIG.teams.size;
+      this.hud.centerMessage('TEAM DEATHMATCH', `${n}v${n} · ${MAPS[MAP_ID].name} · FIRST TO ${CONFIG.match.tdmKills} KILLS · YOU HOLD THE ${slope} SLOPE`, Math.max(3, CONFIG.round.freezeTime));
+      return;
+    }
     const score = CONFIG.match.roundsToWin > 1 ? ` · ${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]}` : '';
     const n = CONFIG.teams.size;
     this.hud.centerMessage(CONFIG.match.roundsToWin > 1 ? `ROUND ${M.round + 1}` : 'ROUND START',
@@ -467,14 +482,15 @@ class Game {
     this.roundFinished = true;
     const M = this.match, me = this.player.team, names = CONFIG.teams.names;
     const a = this.aliveCount(0), b = this.aliveCount(1);
-    const winner = a > 0 && b === 0 ? 0 : b > 0 && a === 0 ? 1 : -1;
-    if (winner >= 0) M.score[winner]++;
+    let winner = a > 0 && b === 0 ? 0 : b > 0 && a === 0 ? 1 : -1;
+    if (this.tdm) winner = M.score[0] > M.score[1] ? 0 : M.score[1] > M.score[0] ? 1 : -1;
+    else if (winner >= 0) M.score[winner]++;
     const p = this.player;
     M.stats.shots += p.shotsFired; M.stats.hits += p.hits; M.stats.kills += p.kills;
     M.stats.longest = Math.max(M.stats.longest, p.longestHit);
     if (p.alive) M.stats.survived++;
     this.lastWinner = winner;
-    if (winner >= 0 && M.score[winner] >= CONFIG.match.roundsToWin) {
+    if (this.tdm || (winner >= 0 && M.score[winner] >= CONFIG.match.roundsToWin)) {
       M.over = true;
       if (this.net && this.net.isHost) this.net.broadcastRoundEnd(winner);
       this.showMatchEnd(winner);
@@ -727,36 +743,115 @@ class Game {
     location.href = location.pathname + location.search;
   }
 
-  // Spread a team along its slope (upper half, near the ridge).
+  // Spawn points for a team on its slope: scored sniper spots (open view across the valley),
+  // spread out. Small teams share a stretch of the slope that moves between rounds; big teams
+  // fill the slope in rows.
   teamSpawns(team, n) {
     const T = this.terrain;
     const side = this.sideSign(team);
     const out = [];
-    // map scale along the valley and across it (1 on the valley map)
+    // map scale along the valley and across it (1 on the reference valley, 440 × 380 m)
     const kx = CONFIG.map.length / 440, ks = CONFIG.map.ridgeDist / 178;
-    const span = Math.min(170, 60 * n) * kx;
-    const off = (Math.random() - 0.5) * 120 * kx;
+    const full = 2 * (T.halfX - 12);
+    const span = n <= 5 ? Math.min(170 * kx, 60 * kx * n) : Math.min(full, 26 * (n - 1));
+    const off = (Math.random() - 0.5) * Math.max(0, Math.min(120 * kx, full - span));
     const used = [];
+    const minSep = n > 10 ? 7 : 10;
+    const far = (x, z) => out.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > minSep * minSep);
     for (let i = 0; i < n; i++) {
       const bx = off + (n === 1 ? 0 : -span / 2 + (span * i) / (n - 1));
       // prefer a scored sniper spot (open view across the valley) near this slot
       let best = null, bestS = -1;
       for (const sp of this.spots.spots[this.sideOf(team)]) {
-        if (Math.abs(sp.x - bx) > 35 || used.includes(sp)) continue;
+        if (Math.abs(sp.x - bx) > 35 || used.includes(sp) || !far(sp.x, sp.z)) continue;
         const sc = sp.view + sp.height * 0.3 + Math.random() * 0.7;   // varied, so spawns aren't predictable
         if (sc > bestS) { bestS = sc; best = sp; }
       }
       if (best) { used.push(best); out.push({ x: best.x, z: best.z }); continue; }
-      for (let k = 0; k < 60 && !best; k++) {
-        const x = bx + (Math.random() - 0.5) * 20;
+      for (let k = 0; k < 80 && !best; k++) {
+        const x = bx + (Math.random() - 0.5) * 24;
         const z = T.riverCenter(x) + side * (105 + Math.random() * 45) * ks;
-        if (Math.abs(z) > T.halfZ - 6 || T.waterDepthAt(x, z) > 0) continue;
-        if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump']).length) continue;
+        if (Math.abs(z) > T.halfZ - 6 || Math.abs(x) > T.halfX - 6 || T.waterDepthAt(x, z) > 0) continue;
+        if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump']).length || !far(x, z)) continue;
         best = { x, z };
       }
       out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 * ks });
     }
     return out;
+  }
+
+  // Team deathmatch respawn point: a spot on the team's slope away from enemies (and not on
+  // top of a teammate), varied so it can't be camped.
+  respawnPoint(team) {
+    const T = this.terrain;
+    const enemies = this.combatants.filter((c) => c.alive && !c.isDummy && c.team !== team);
+    const mates = this.combatants.filter((c) => c.alive && !c.isDummy && c.team === team);
+    let best = null, bestS = -1e9;
+    const cands = this.spots.spots[this.sideOf(team)];
+    for (const sp of cands) {
+      let dE = 1e9, dM = 1e9;
+      for (const e of enemies) dE = Math.min(dE, Math.hypot(e.pos.x - sp.x, e.pos.z - sp.z));
+      for (const m of mates) dM = Math.min(dM, Math.hypot(m.pos.x - sp.x, m.pos.z - sp.z));
+      if (dM < 6) continue;
+      const sc = Math.min(dE, 160) / 160 + sp.view * 0.3 + Math.random() * 0.45 - (dE < 45 ? 2 : 0);
+      if (sc > bestS) { bestS = sc; best = sp; }
+    }
+    if (best) return { x: best.x, z: best.z };
+    return this.teamSpawns(team, 1)[0];
+  }
+
+  // Team deathmatch (authority: single player or the LAN host): count the kill and bring the
+  // victim back after the respawn delay. A team kill costs the team a point.
+  scoreKill(shooter, victim) {
+    if (!this.tdm || this.roundOver) return;
+    const sc = this.match.score;
+    if (shooter && shooter.team === victim.team) sc[shooter.team] = Math.max(0, sc[shooter.team] - 1);
+    else if (shooter) sc[shooter.team]++;
+    this.queueRespawn(victim);
+  }
+
+  queueRespawn(victim) {
+    const at = this.time + CONFIG.match.respawnDelay;
+    this.respawnQueue = (this.respawnQueue || []).filter((r) => r.id !== victim.id);
+    this.respawnQueue.push({ id: victim.id, at });
+    victim.respawnAt = at;
+  }
+
+  // Authority: respawn whoever is due (deathmatch).
+  updateRespawns() {
+    if (!this.respawnQueue || !this.respawnQueue.length || this.roundOver) return;
+    for (let i = this.respawnQueue.length - 1; i >= 0; i--) {
+      const r = this.respawnQueue[i];
+      if (this.time < r.at) continue;
+      this.respawnQueue.splice(i, 1);
+      const c = this.combatants.find((x) => x.id === r.id);
+      if (!c || c.alive) continue;
+      const sp = this.respawnPoint(c.team);
+      const yaw = this.sideOf(c.team) === 0 ? 0 : Math.PI;
+      this.applyRespawn(c, sp.x, sp.z, yaw);
+      if (this.net && this.net.isHost) this.net.broadcastRespawn(c, sp.x, sp.z, yaw);
+    }
+  }
+
+  // Bring a combatant back (deathmatch). The player keeps their match statistics.
+  applyRespawn(c, x, z, yaw) {
+    if (c === this.player) {
+      c.spawn(x, z, yaw, true);
+      c.pos.y = this.terrain.heightAt(x, z);
+      this.killcam = null;
+      this.spectating = null;
+      this.deathT = 0;
+      this.diedReported = false;
+      this.hud.clearCenter();
+      this.hud.centerMessage('BACK IN THE FIGHT', 'YOUR TEAM\'S SLOPE · FIND A HIDE', 2);
+    } else {
+      c.spawn(x, z, yaw);
+      c.life = (c.life || 0) + 1;
+      if (c.character) c.character._first = true;   // no getting-up animation across the map
+    }
+    c.respawnAt = null;
+    if (c.hitbox) c.hitbox.update(c, this.terrain);
+    this.birds.settleAround([c]);
   }
 
   // Shooting-range targets on the opposite slope (milestone 2 test aid).
@@ -778,17 +873,18 @@ class Game {
 
   onKill(shooter, victim, dist, part, point) {
     const d = Math.round(dist);
+    const ff = victim.team === shooter.team;
+    victim.deaths = (victim.deaths || 0) + 1;
     if (shooter.isPlayer) {
       this.hud.hitMarker(true);
-      const ff = victim.team === shooter.team;
-      this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, victim.name, 1.8);
+      this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, ff && this.tdm ? `${victim.name} · −1 FOR YOUR TEAM` : victim.name, 1.8);
     }
     if (victim.isPlayer) {
       this.player.killedBy = shooter;
       this.startKillcam(shooter, dist, part, point);
     }
     const cls = (c) => (c.team === this.player.team ? 'f' : 'e');
-    this.hud.killFeed(`<span class="${cls(shooter)}">${shooter.name}</span> ✕ <span class="${cls(victim)}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}`);
+    this.hud.killFeed(`<span class="${cls(shooter)}">${shooter.name}</span> ✕ <span class="${cls(victim)}">${victim.name}</span> · ${d} m${part === 'head' ? ' · HEAD' : ''}${ff ? ' · TEAM KILL' : ''}`);
   }
 
   // ---------------------------------------------------------------- killcam
@@ -943,6 +1039,7 @@ class Game {
       this.updateCharacterTints(dt);
       this.recordAim(dt);
       if (authority) {
+        if (this.tdm) this.updateRespawns();
         this.checkRoundEnd();
         if (this.roundOver && !this.roundFinished && this.time >= this.endAt && this.state === 'playing') this.finishRound();
       }
@@ -974,6 +1071,7 @@ class Game {
   applyZoneDeath(c) {
     c.health = 0;
     c.alive = false;
+    c.deaths = (c.deaths || 0) + 1;
     c.deathTime = this.time;
     c.killedBy = null;
     this.hud.killFeed(`ZONE ✕ <span class="${c.team === this.player.team ? 'f' : 'e'}">${c.name}</span>`);
@@ -998,7 +1096,10 @@ class Game {
     victim.health = 0;
     victim.killedBy = shooter;
     victim.deathTime = this.time;
-    shooter.kills = (shooter.kills || 0) + 1;
+    if (m.sc) this.match.score = m.sc.slice();
+    victim.respawnAt = m.ra ?? null;
+    if (shooter.team !== victim.team) shooter.kills = (shooter.kills || 0) + 1;
+    else shooter.teamKills = (shooter.teamKills || 0) + 1;
     if (shooter === this.player) {
       shooter.hits++;
       shooter.longestHit = Math.max(shooter.longestHit, m.d);
@@ -1014,6 +1115,22 @@ class Game {
     const M = this.match, st = M.stats, me = this.player.team, names = CONFIG.teams.names;
     const won = winner === me;
     const acc = st.shots ? Math.round((st.hits / st.shots) * 100) : 0;
+    if (this.tdm) {
+      const p = this.player, t = Math.floor(this.time);
+      const sub = `${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]} · ${winner < 0 ? 'DRAW' : won ? 'MATCH WON' : 'MATCH LOST'}`;
+      const rows = [
+        ['Match time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`],
+        ['Kills', st.kills],
+        ['Deaths', p.deaths || 0],
+        ['Shots fired', st.shots],
+        ['Hits', `${st.hits} (${acc}%)`],
+        ['Longest hit', st.longest ? `${Math.round(st.longest)} m` : '-'],
+      ];
+      if (p.teamKills) rows.push(['Team kills', p.teamKills]);
+      this.hud.showEnd(true, won, sub, rows, winner < 0 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT');
+      this.endScreenButtons();
+      return;
+    }
     const multi = CONFIG.match.roundsToWin > 1;
     const sub = multi ? `${names[me]} ${M.score[me]} – ${M.score[1 - me]} ${names[1 - me]} · ${won ? 'MATCH WON' : 'MATCH LOST'}`
       : won ? (this.player.alive ? 'YOUR TEAM WINS' : 'YOUR TEAM WINS · YOU DID NOT SURVIVE') : 'YOUR TEAM WAS ELIMINATED';
@@ -1028,6 +1145,10 @@ class Game {
     ];
     if (!multi) rows.splice(1, 1);
     this.hud.showEnd(true, won, sub, rows);
+    this.endScreenButtons();
+  }
+
+  endScreenButtons() {
     const again = document.getElementById('btn-again');
     again.disabled = !!(this.net && !this.net.isHost);
     again.textContent = this.net && !this.net.isHost ? 'WAITING FOR THE HOST' : 'NEW MATCH (R)';
@@ -1052,6 +1173,13 @@ class Game {
 
   checkRoundEnd() {
     if (this.roundOver) return;
+    if (this.tdm) {
+      const K = CONFIG.match.tdmKills, sc = this.match.score;
+      if (sc[0] < K && sc[1] < K && this.time < CONFIG.match.tdmTime) return;
+      this.roundOver = true;
+      this.endAt = this.time + Math.max(2.5, this.killcam ? this.killcam.end - this.realTime + 0.5 : 0);
+      return;
+    }
     const a = this.aliveCount(0), b = this.aliveCount(1);
     if (a > 0 && b > 0) return;
     this.roundOver = true;
@@ -1107,23 +1235,65 @@ class Game {
     this.hud.updateDebugMarks(this.camera, others, w, h, this.reveal);
     const me = p.team;
     this.hud.setTeams(this.combatants.filter((c) => c.team === me && !c.isDummy), this.combatants.filter((c) => c.team !== me && !c.isDummy));
-    this.hud.setScore(this.match.score[me], this.match.score[1 - me], this.match.round, CONFIG.match.roundsToWin);
+    this.hud.setScore(this.match.score[me], this.match.score[1 - me], this.match.round, CONFIG.match.roundsToWin, this.tdm ? CONFIG.match.tdmKills : 0);
     const board = this.state === 'playing' && !this.paused && this.input.act('scores');
     this.hud.setScoreboard(board, board ? this.combatants.filter((c) => !c.isDummy).map((c) => ({
-      name: c.name, team: c.team, alive: c.alive, kills: c.kills || 0, human: c === p || !!c.human, me: c === p,
-    })) : null, me, this.match.score);
+      name: c.name, team: c.team, alive: c.alive, kills: c.kills || 0, deaths: c.deaths || 0, human: c === p || !!c.human, me: c === p,
+    })) : null, me, this.match.score, this.tdm);
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
       inWater: this.player.inWater > 0.05, boltT, glint: this.player.scoped && this.player.alive, aimedAt: this.aimedAt,
       glintDim: glintSun(this.player.scopePos(_eye)) < 0.6,
       outside: p.alive && !this.zone.contains(p.pos.x, p.pos.z), outsideDps: this.zone.damagePerSecond(),
       holdingBreath: this.player.holdingBreath, breathCooldown: this.player.breathCooldown > 0, yaw: this.camera.rotation.y,
+      breath: this.player.breath / CONFIG.weapon.holdBreathTime, scope: p.alive && p.scoped ? this.scopeReadout(dtReal) : null,
     });
-    this.hud.setZone(this.zone.hudState());
+    if (this.tdm) this.hud.setMatchClock(CONFIG.match.tdmTime - this.time);
+    else this.hud.setZone(this.zone.hudState());
     this.damageFlash = Math.max(0, this.damageFlash - dtReal * 1.5);
     this.post.uniforms.uDamage.value = this.damageFlash * 0.6;
     this.post.uniforms.uOutside.value = p.alive && !this.zone.contains(p.pos.x, p.pos.z) ? 1 : 0;
     if (this.debug) this.hud.setDebug(this.debugText(), true); else this.hud.setDebug('', false);
+  }
+
+  // Scope readout for the HUD: magnification and a rangefinder (10 Hz; it ranges terrain,
+  // trees, rocks and bushes but never people, so it can't find a hidden sniper). With
+  // ballistics on also the bullet-drop marks and the hold-off at the measured range.
+  scopeReadout(dt) {
+    const p = this.player;
+    const B = CONFIG.weapon.ballistics;
+    this.rangeT = (this.rangeT || 0) - dt;
+    if (this.rangeT <= 0) {
+      this.rangeT = 0.1;
+      const dir = p.aimDir(new THREE.Vector3());
+      const hit = this.world.raycast(p.eyePos(new THREE.Vector3()), dir, 1500, { bushes: true });
+      this.range = hit ? hit.t : null;
+      this.rangeHold = B.enabled && this.range > 60 ? Combat.holdAt(dir, this.range) : null;
+    }
+    if (B.enabled && !this.dropMarks) {
+      this.dropMarks = [200, 300, 400, 500, 600, 700, 800].map((m) => [m, (Combat.holdAt(new THREE.Vector3(0, 0, -1), m).drop / m) * 1000]);
+    }
+    return { mag: p.magnification, fov: p.fov, range: this.range, drops: B.enabled ? this.dropMarks : null, hold: B.enabled ? this.rangeHold : null };
+  }
+
+  // Skinned characters can't use three.js frustum culling (their bounds don't follow the
+  // pose), so they are culled here by a sphere around the body. With 20v20 most are off screen.
+  cullCharacters(cam) {
+    if (!this._frustum) { this._frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._sph = new THREE.Sphere(); }
+    this._pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(this._pm);
+    for (const c of this.combatants) {
+      if (!c.character) continue;
+      this._sph.center.set(c.pos.x, c.pos.y + 0.9, c.pos.z);
+      this._sph.radius = 2.4;
+      c.character.group.visible = this._frustum.intersectsSphere(this._sph);
+    }
+  }
+
+  // " · RESPAWN IN 4" while the player waits to come back (deathmatch)
+  respawnText() {
+    const at = this.player.respawnAt;
+    return this.tdm && at ? ` · RESPAWN IN ${Math.max(1, Math.ceil(at - this.time))}` : '';
   }
 
   idleInput() {
@@ -1175,7 +1345,7 @@ class Game {
       cam.rotation.set(m.pitch * 0.8 - 0.08, m.yaw, 0, 'YXZ');
       if (cam.fov !== CONFIG.player.fovHip) { cam.fov = CONFIG.player.fovHip; cam.updateProjectionMatrix(); }
       this.post.uniforms.uFade.value = 0;
-      this.hud.el.center.innerHTML = `SPECTATING ${m.name}<small>CLICK TO SWITCH</small>`;
+      this.hud.el.center.innerHTML = `SPECTATING ${m.name}<small>CLICK TO SWITCH${this.respawnText()}</small>`;
       this.hud.el.center.classList.add('on');
       this.hud.centerTimer = 0.1;
     } else if (!p.alive) {
@@ -1187,8 +1357,14 @@ class Game {
       if (cam.fov !== CONFIG.player.fovHip) { cam.fov = CONFIG.player.fovHip; cam.updateProjectionMatrix(); }
       p.scopeT = 0;
       this.post.uniforms.uFade.value = Math.min(0.55, this.deathT * 0.4);
+      if (this.tdm && this.deathT > 1.5 && p.respawnAt) {
+        this.hud.el.center.innerHTML = `YOU WERE KILLED<small>${this.respawnText().slice(3)}</small>`;
+        this.hud.el.center.classList.add('on');
+        this.hud.centerTimer = 0.1;
+      }
     } else this.post.uniforms.uFade.value = 0;
     cam.updateMatrixWorld();
+    this.cullCharacters(cam);
     // shadow / grass focus: aim point when scoped, slightly ahead of the player otherwise
     let focus, extent;
     if (!p.alive && kc) {

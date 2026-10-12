@@ -140,7 +140,7 @@ export const CONFIG = {
     mouseSensitivity: 0.0021,  // radians per pixel at hip FOV
     arrowLookSpeed: 1.6,       // radians per second for the arrow-key fallback
     fovHip: 70,
-    fovScope: 7,
+    zoomLevels: [2, 3, 4, 6, 8, 10, 12],  // scope magnifications on the mouse wheel (12× ≈ the old fixed scope)
     zoomTime: 0.16,
     health: 100,
   },
@@ -152,10 +152,15 @@ export const CONFIG = {
     range: 1500,
     recoilPitch: 3.2,          // degrees of kick
     recoilRecover: 0.55,       // fraction of the kick that recovers automatically
-    swayIdle: 0.05,            // degrees of scope sway when still
+    swayIdle: 0.32,            // degrees of scope sway standing still (breathing + drift)
+    swayCrouch: 0.6,           // sway multiplier crouched
+    swayProne: 0.32,           // sway multiplier prone
     swayMove: 0.9,             // extra degrees at full movement speed
     swaySprintCarry: 0.6,      // extra sway after sprinting, decays over ~3 s
-    holdBreathTime: 3.0,       // Shift while scoped steadies the aim for this long
+    holdBreathTime: 4.0,       // Shift while scoped steadies the aim for this long
+    holdBreathSteady: 0.1,     // sway multiplier while holding the breath
+    breathRecovery: 0.5,       // seconds of breath regained per second
+    outOfBreathTime: 3.0,      // after running out: no breath hold and more sway for this long
     tracers: 'faint',          // 'off' | 'faint' | 'bright'
     tracerOpacity: 0.12,
     ballistics: {
@@ -212,7 +217,8 @@ export const CONFIG = {
 
   // ---------------------------------------------------------------- teams / round
   teams: {
-    size: 2,                   // 2 = 2v2, up to 5
+    size: 2,                   // 2 = 2v2, up to 20 (20v20)
+    sizes: [1, 2, 3, 4, 5, 8, 10, 15, 20],   // choices in the MATCH settings
     names: ['ALPHA', 'BRAVO'],
     colors: [0x5fb3ff, 0xff7a4d],
   },
@@ -221,11 +227,18 @@ export const CONFIG = {
     fillWithAI: true,      // fill empty team slots (up to teams.size) with AI snipers
   },
 
-  // A match is a series of rounds; teams swap slopes (and sun side) between rounds.
+  // Elimination: a match is a series of rounds; teams swap slopes (and sun side) between
+  // rounds. Team deathmatch: one long round with respawns; the first team to tdmKills kills
+  // wins (or the team ahead after tdmTime).
   match: {
+    mode: 'elim',          // 'elim' (elimination rounds) | 'tdm' (team deathmatch)
     roundsToWin: 2,        // 1 = single round, 2 = best of 3, 3 = best of 5
     swapSides: true,
     nextRoundDelay: 6,     // seconds between rounds
+    tdmKills: 30,
+    tdmTime: 900,
+    respawnDelay: 7,       // team deathmatch: seconds from death to respawn (the killcam runs first)
+    friendlyFire: true,    // bullets hit teammates (a team kill costs the team a point in deathmatch)
   },
 
   round: {
@@ -283,6 +296,7 @@ export const CONFIG = {
     sensitivity: 1.0,      // multiplier on player.mouseSensitivity
     scopeSensitivity: 1.0, // extra multiplier while scoped (on top of the FOV scaling)
     invertY: false,
+    scopeZoom: 'reset',    // 'reset': the scope opens at the lowest zoom; 'keep': at the last one
     binds: null,           // filled from DEFAULT_BINDS below
   },
 
@@ -310,7 +324,7 @@ try {
 try {
   const saved = JSON.parse(localStorage.getItem('sniperyard.controls') || 'null');
   if (saved && typeof saved === 'object') {
-    for (const k of ['sensitivity', 'scopeSensitivity', 'invertY']) if (k in saved) CONFIG.controls[k] = saved[k];
+    for (const k of ['sensitivity', 'scopeSensitivity', 'invertY', 'scopeZoom']) if (k in saved) CONFIG.controls[k] = saved[k];
     if (saved.binds) for (const a in DEFAULT_BINDS) if (Array.isArray(saved.binds[a]) && saved.binds[a].length) CONFIG.controls.binds[a] = saved.binds[a];
     if (saved.fov) CONFIG.player.fovHip = saved.fov;
     for (const k of ['master', 'effects', 'ambience']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
@@ -321,8 +335,11 @@ try {
 try {
   const s = JSON.parse(localStorage.getItem('sniperyard.match') || 'null');
   if (s && typeof s === 'object') {
-    if (s.size) CONFIG.teams.size = Math.max(1, Math.min(5, s.size | 0));
+    if (s.size) CONFIG.teams.size = Math.max(1, Math.min(20, s.size | 0));
     if (s.rounds) CONFIG.match.roundsToWin = Math.max(1, Math.min(4, s.rounds | 0));
+    if (s.mode === 'elim' || s.mode === 'tdm') CONFIG.match.mode = s.mode;
+    if (s.tdmKills) CONFIG.match.tdmKills = Math.max(5, Math.min(200, s.tdmKills | 0));
+    if ('ff' in s) CONFIG.match.friendlyFire = !!s.ff;
     if ('swap' in s) CONFIG.match.swapSides = !!s.swap;
     if (s.zone === 'ends' || s.zone === 'radial') CONFIG.zone.mode = s.zone;
     if (typeof s.camo === 'number') CONFIG.camouflageStrength = s.camo;
@@ -337,22 +354,26 @@ export function saveRenderSettings() {
     localStorage.setItem('sniperyard.match', JSON.stringify({
       size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode,
       camo: CONFIG.camouflageStrength, tracers: CONFIG.weapon.tracers, ball: CONFIG.weapon.ballistics.enabled,
+      mode: CONFIG.match.mode, tdmKills: CONFIG.match.tdmKills, ff: CONFIG.match.friendlyFire,
     }));
   } catch (e) { /* ignore */ }
   try {
     const C = CONFIG.controls;
     localStorage.setItem('sniperyard.controls', JSON.stringify({
-      sensitivity: C.sensitivity, scopeSensitivity: C.scopeSensitivity, invertY: C.invertY, binds: C.binds,
+      sensitivity: C.sensitivity, scopeSensitivity: C.scopeSensitivity, invertY: C.invertY, scopeZoom: C.scopeZoom, binds: C.binds,
       fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience },
     }));
   } catch (e) { /* ignore */ }
 }
 
-// URL overrides for quick testing, e.g. ?mode=radial&team=3&ballistics=1
+// URL overrides for quick testing, e.g. ?mode=radial&team=3&ballistics=1&game=tdm&ff=0
 try {
   const q = new URLSearchParams(location.search);
   if (q.get('mode')) CONFIG.zone.mode = q.get('mode');
-  if (q.get('team')) CONFIG.teams.size = Math.max(1, Math.min(5, parseInt(q.get('team'), 10) || 2));
+  if (q.get('team')) CONFIG.teams.size = Math.max(1, Math.min(20, parseInt(q.get('team'), 10) || 2));
+  if (q.get('game') === 'tdm' || q.get('game') === 'elim') CONFIG.match.mode = q.get('game');
+  if (q.get('kills')) CONFIG.match.tdmKills = Math.max(1, parseInt(q.get('kills'), 10) || 30);
+  if (q.get('ff')) CONFIG.match.friendlyFire = q.get('ff') !== '0';
   if (q.get('ballistics')) CONFIG.weapon.ballistics.enabled = q.get('ballistics') === '1';
   if (q.get('tracers')) CONFIG.weapon.tracers = q.get('tracers');
   if (q.get('camo')) CONFIG.camouflageStrength = parseFloat(q.get('camo'));
@@ -367,18 +388,19 @@ try {
 // Three sizes of the same forested river valley. The chosen map's numbers replace CONFIG.map,
 // and the numbers of rocks, bushes, fallen trees and bird flocks follow the play area so the
 // forest is as dense on every map. Trees follow the area by themselves.
+// (v0.3.1: all three about a quarter smaller than before, for more contact.)
 export const MAPS = {
   valley: {
-    name: 'VALLEY', size: '440 × 380 m', players: '3v3 – 5v5', zoneInterval: 60,
-    map: { length: 440, width: 380, ridgeDist: 178, ridgeHeightNorth: 64, ridgeHeightSouth: 58, riverDeepHalfWidth: 9, riverShelfStart: 12.5, riverShelfEnd: 17, riverDepth: 2.8, meander: 1, relief: 1 },
+    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50,
+    map: { length: 340, width: 290, ridgeDist: 136, ridgeHeightNorth: 52, ridgeHeightSouth: 47, riverDeepHalfWidth: 8, riverShelfStart: 11, riverShelfEnd: 15, riverDepth: 2.6, meander: 0.85, relief: 0.9 },
   },
   narrow: {
-    name: 'NARROW VALLEY', size: '340 × 270 m', players: '2v2 – 3v3', zoneInterval: 50,
-    map: { length: 340, width: 270, ridgeDist: 126, ridgeHeightNorth: 48, ridgeHeightSouth: 44, riverDeepHalfWidth: 7, riverShelfStart: 10, riverShelfEnd: 14, riverDepth: 2.5, meander: 0.75, relief: 0.85 },
+    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42,
+    map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '260 × 200 m', players: '1v1 – 2v2', zoneInterval: 42,
-    map: { length: 260, width: 200, ridgeDist: 94, ridgeHeightNorth: 38, ridgeHeightSouth: 35, riverDeepHalfWidth: 5.5, riverShelfStart: 8, riverShelfEnd: 11.5, riverDepth: 2.2, meander: 0.55, relief: 0.7 },
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36,
+    map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
   },
 };
 
