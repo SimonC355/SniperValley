@@ -490,16 +490,19 @@ export class HUD {
     this.el.hold.textContent = h ? `HOLD ▲ ${h.drop.toFixed(1)} m${Math.abs(h.drift) >= 0.05 ? `  ${h.drift >= 0 ? '◄' : '►'} ${Math.abs(h.drift).toFixed(1)} m` : ''}` : '';
     if (!sc.drops) return;
     // marks: where a bullet at that range lands below the centre (lens distortion included)
+    // every 100 m gets a tick when there is room; labels only where they don't overlap
     const H = window.innerHeight, tanHalf = Math.tan((sc.fov * Math.PI) / 360);
-    let html = '', last = -99;
+    let html = '', lastTick = -99, lastLabel = -99;
     for (const [m, mrad] of sc.drops) {
       let y = 0.5 * Math.tan(mrad / 1000) / tanHalf;        // screen heights below the centre
       y /= 1 + 0.085 * (y / 0.47) ** 2;
       const px = y * H;
       if (px > 0.4 * H) break;
-      if (px < 12 || px - last < 14) continue;      // too close to the centre or to the last mark
-      last = px;
-      html += `<div class="mk" style="top:${px.toFixed(1)}px"><i></i><b>${m / 100}</b></div>`;
+      if (px < 8 || px - lastTick < 4) continue;    // too close to the centre or to the last tick
+      lastTick = px;
+      const label = px - lastLabel >= 13;
+      if (label) lastLabel = px;
+      html += `<div class="mk${label ? '' : ' minor'}" style="top:${px.toFixed(1)}px"><i></i>${label ? `<b>${m / 100}</b>` : ''}</div>`;
     }
     if (html !== this._bdcHtml) { this.el.bdc.innerHTML = html; this._bdcHtml = html; }
   }
