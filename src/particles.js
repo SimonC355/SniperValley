@@ -64,14 +64,16 @@ void main() {
     alpha = where * 0.95;
     vAngle = aSeed.x * 6.283 + t * (0.6 + aSeed.y * 1.6);
     vTumble = aSeed.z * 6.283 + t * (1.5 + aSeed.x * 3.0);
-    // tumbling flakes catch the sun now and then
-    float catchLight = pow(abs(sin(vTumble * 0.5 + aSeed.y * 3.0)), 12.0) * uSunVis * (0.5 + 2.0 * toSun);
-    vColor = vec3(0.16, 0.12, 0.075) * (0.55 + 0.45 * uSunVis) + vec3(1.0, 0.82, 0.55) * catchLight * 0.5;
+    // tumbling flakes catch the sun now and then; only close ones, and softly: a far, tiny
+    // bright fleck reads as a scope glint (and it is gone when you scope in to look)
+    float catchLight = pow(abs(sin(vTumble * 0.5 + aSeed.y * 3.0)), 12.0) * uSunVis * (0.5 + 1.2 * toSun) * (1.0 - smoothstep(3.0, 7.0, dist));
+    vColor = vec3(0.16, 0.12, 0.075) * (0.55 + 0.45 * uSunVis) + vec3(1.0, 0.8, 0.5) * catchLight * 0.2;
   } else {
-    // dust shows up against the light, mostly where the sun gets through the crowns
+    // dust shows up against the light, mostly where the sun gets through the crowns (close
+    // to you only, and not bright enough to pass for a glint)
     size = (0.006 + aSeed.z * 0.006) * uPx / max(dist, 0.2);
-    float shine = pow(toSun, 5.0) * 4.0 + 0.04;
-    alpha = shine * uSunVis * (1.0 - 0.5 * smoothstep(0.6, 1.0, canopy)) * (1.0 - smoothstep(4.0, 12.0, dist));
+    float shine = pow(toSun, 5.0) * 1.6 + 0.03;
+    alpha = shine * uSunVis * (1.0 - 0.5 * smoothstep(0.6, 1.0, canopy)) * (1.0 - smoothstep(3.0, 7.0, dist)) * smoothstep(1.2, 2.6, size);
     vAngle = 0.0;
     vTumble = 0.0;
     vColor = vec3(1.0, 0.86, 0.62);

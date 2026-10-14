@@ -95,6 +95,32 @@ function buildTrunk(B, H, r0, radial, hSegs, rng, bendSeed) {
   }
 }
 
+// Geometry seed of a variant (every tree of a variant shares its trunk bend).
+const variantSeed = (name) => 11 + name.length * 7;
+
+// The drawn (LOD0) trunk of a placed tree as world-space points along its bent centre line,
+// each with the trunk radius there (base flare and taper as in buildTrunk). Bullets and sight
+// lines use this, so a shot that passes a trunk on screen also passes it in the game.
+export function trunkProfile(t) {
+  const V = VARIANTS[t.variant];
+  const bend = variantSeed(t.variant) * 0.37;
+  const bx = Math.sin(bend) * 0.25, bz = Math.cos(bend * 1.7) * 0.25;
+  const c = Math.cos(t.rot), s = Math.sin(t.rot);
+  const top = V.H * 0.97;
+  // denser near the ground, where the base flare narrows quickly
+  const heights = [0, 0.3, 0.7, 1.3, 2.2, top * 0.3, top * 0.5, top * 0.7, top * 0.88, top];
+  const out = [];
+  for (const y of heights) {
+    const u = y / top;
+    const r = V.r0 * Math.pow(1 - u * 0.98, 0.9) * (1 + 0.7 * Math.exp(-y * 2.5));
+    const ox = bx * Math.sin(u * 2.5), oz = bz * Math.sin(u * 2.0);
+    const q = new THREE.Vector3(t.x + (ox * c + oz * s) * t.s, t.y + y * t.s, t.z + (-ox * s + oz * c) * t.s);
+    q.r = r * t.s;
+    out.push(q);
+  }
+  return out;
+}
+
 function buildConifer(variantName, lod, seed) {
   const V = VARIANTS[variantName];
   const rng = new RNG(seed);
@@ -313,9 +339,9 @@ export class Forest {
     this.variants = {};
     for (const name of VARIANT_NAMES) {
       const V = VARIANTS[name];
-      const lod0 = buildConifer(name, 0, 11 + name.length * 7);
-      const lod1 = buildConifer(name, 1, 11 + name.length * 7);
-      const lod2 = buildConifer(name, 2, 11 + name.length * 7);
+      const lod0 = buildConifer(name, 0, variantSeed(name));
+      const lod1 = buildConifer(name, 1, variantSeed(name));
+      const lod2 = buildConifer(name, 2, variantSeed(name));
       const barkMat = new THREE.MeshStandardMaterial({
         map: T[V.bark].map, normalMap: T[V.bark].normalMap, roughness: 0.95, vertexColors: true,
       });

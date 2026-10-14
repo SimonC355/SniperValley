@@ -107,9 +107,10 @@ export class Zone {
     return runs;
   }
 
-  reset() {
+  // shrink = false (team deathmatch): the zone stays open all match
+  reset(shrink = true) {
     const Z = CONFIG.zone;
-    this.steps = Z.steps;
+    this.steps = shrink ? Z.steps : [1];
     this.stepIndex = 0;            // index of the current (completed) step
     this.current = this.steps[0];
     this.target = this.steps[Math.min(1, this.steps.length - 1)];

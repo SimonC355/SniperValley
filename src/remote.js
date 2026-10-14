@@ -51,6 +51,8 @@ export class RemoteCombatant extends Combatant {
 
   // s: { p:[x,y,z], y: yaw, pi: pitch, b: bodyYaw, st: stance index, sc: scopeT, sp: speed, al, hp, at: aim target id }
   applyState(s) {
+    // a state from before a deathmatch respawn (it crossed the respawn message) is stale
+    if ((s.li || 0) < (this.life || 0)) return;
     const first = !this.net;
     this.net = s;
     if (first) {

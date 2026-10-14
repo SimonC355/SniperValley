@@ -1,6 +1,7 @@
 # Builds the Windows program (a zip with SniperValley.exe) for every pull request and every
 # push to main; each run keeps the zip under Artifacts. A push to main whose package.json
-# version has no release yet also publishes that release with the zip.
+# version has no release yet also publishes that release with the zip (title and notes from
+# scripts/release-notes.mjs, which reads the version's section of CHANGELOG.md).
 name: Build Windows
 
 on:
@@ -35,6 +36,13 @@ jobs:
           path: SniperValley-windows-x64.zip
           archive: false
 
+      # every run shows the title and notes the release would get (so a pull request checks them)
+      - name: Release notes
+        shell: bash
+        run: |
+          node scripts/release-notes.mjs "$(node -p "require('./package.json').version")"
+          cat notes.md
+
       - name: Publish a release for a new version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
@@ -46,10 +54,6 @@ jobs:
             echo "v$version is already released. Raise the version in package.json to publish a new release."
             exit 0
           fi
-          printf '%s\n' \
-            "**Windows:** download \`SniperValley-windows-x64.zip\` below, unzip it and start \`SniperValley.exe\`." \
-            "" \
-            "The program is not code-signed. To start it without a warning: right-click the zip, choose **Properties**, tick **Unblock** and click **OK** before you unzip it. Otherwise Windows shows *Windows protected your PC* the first time: click **More info**, then **Run anyway**." \
-            "" \
-            "LAN games: one player clicks HOST GAME, the others type the IP address it shows and click JOIN GAME." > notes.md
-          gh release create "v$version" SniperValley-windows-x64.zip --target "$GITHUB_SHA" --title "SniperValley $version" --notes-file notes.md
+          # title and notes (with the version's section of CHANGELOG.md, if there is one)
+          title=$(node scripts/release-notes.mjs "$version")
+          gh release create "v$version" SniperValley-windows-x64.zip --target "$GITHUB_SHA" --title "$title" --notes-file notes.md

@@ -3,6 +3,7 @@
 // Simulation is paused and auto resolution is off, so runs on different PCs compare.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { zoomFov } from './player.js';
 
 const SCENE_TIME = 6;   // seconds per scene (the first second is warm-up, not measured)
 
@@ -28,7 +29,7 @@ export class Benchmark {
     const rock = g.rocks.items.find((r) => r.s > 1.6 && Math.abs(r.x) < 150 && Math.abs(r.z) < 150) || { x: 0, z: 10 };
     this.scenes = [
       { name: 'Valley vista', x: -59.6, z: 119.5, yaw: 0, pitch: -0.08, pan: 0.5 },
-      { name: 'Scoped across the valley', x: -59.6, z: 119.5, yaw: 0.05, pitch: -0.11, pan: 0.06, scope: 1, stance: 'prone' },
+      { name: 'Scoped across the valley', x: -59.6, z: 119.5, yaw: 0.05, pitch: -0.11, pan: 0.06, scope: 1, zoom: 12, stance: 'prone' },
       { name: 'Forest toward the sun', x: sun.x, z: sun.z, yaw: 0.977, pitch: 0.1, pan: 0.4 },
       { name: 'Walking through the forest', x: sun.x - 20, z: sun.z, yaw: -Math.PI / 2, pitch: -0.12, walk: 3 },
       { name: 'River bank', x: rock.x + Math.cos(0.7) * 4.5, z: rock.z + Math.sin(0.7) * 4.5, yaw: Math.atan2(Math.cos(0.7), Math.sin(0.7)), pitch: -0.2, pan: 0.6 },
@@ -56,6 +57,10 @@ export class Benchmark {
     if (this.i >= this.scenes.length) { this._finish(); return; }
     const s = this.scenes[this.i];
     this.game.setView(s.x, s.z, s.yaw, s.pitch, { stance: s.stance || 'stand', scope: s.scope ?? 0 });
+    // the scoped scene uses the strongest zoom (the old fixed scope)
+    const p = this.game.player, L = CONFIG.player.zoomLevels;
+    p.zoomIndex = Math.max(0, L.indexOf(s.zoom || 0));
+    p.zoomFov = zoomFov(L[p.zoomIndex]);
   }
 
   // Called every frame with the real frame time (seconds). Returns true while running.

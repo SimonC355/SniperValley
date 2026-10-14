@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _p = new THREE.Vector3(), _v = new THREE.Vector3();
+const _aim = new THREE.Vector3(), _hit = new THREE.Vector3(), _flat = new THREE.Vector3(), _zero = new THREE.Vector3();
 
 export class Combat {
   constructor({ world, terrain, effects, audio, bus }) {
@@ -24,6 +25,49 @@ export class Combat {
   }
 
   setCombatants(list) { this.combatants = list; }
+
+  // One step of the projectile model (gravity, wind, drag); update() and the aiming helpers
+  // below share it so they agree.
+  static step(pos, vel, h) {
+    const B = CONFIG.weapon.ballistics;
+    vel.y -= B.gravity * h;
+    vel.x += B.wind.x * 0.9 * h;
+    vel.z += B.wind.z * 0.9 * h;
+    vel.multiplyScalar(1 - 0.12 * h);
+    pos.addScaledVector(vel, h);
+  }
+
+  // Where a bullet fired from origin along dir is when it has come `range` metres
+  // (measured along dir). Used to aim with drop and wind.
+  static impactAt(origin, dir, range, out = new THREE.Vector3()) {
+    const vel = _v.copy(dir).multiplyScalar(CONFIG.weapon.ballistics.muzzleVelocity);
+    out.copy(origin);
+    for (let i = 0; i < 400; i++) {
+      Combat.step(out, vel, 1 / 120);
+      if (_p.subVectors(out, origin).dot(dir) >= range) break;
+    }
+    return out;
+  }
+
+  // Direction to fire from origin so the bullet lands on target (drop, drag and wind).
+  static ballisticAim(origin, target, out = new THREE.Vector3()) {
+    const aim = _aim.copy(target);
+    const range = origin.distanceTo(target);
+    for (let k = 0; k < 4; k++) {
+      out.subVectors(aim, origin).normalize();
+      Combat.impactAt(origin, out, range, _hit);
+      aim.add(target).sub(_hit);
+    }
+    return out.subVectors(aim, origin).normalize();
+  }
+
+  // Drop (metres below the line of fire) and crosswind drift (metres, + = to the right) of a
+  // level shot along heading `dir` at `range` metres.
+  static holdAt(dir, range) {
+    const flat = _flat.set(dir.x, 0, dir.z).normalize();
+    const p = Combat.impactAt(_zero, flat, range, _hit);
+    return { drop: -p.y, drift: p.x * -flat.z + p.z * flat.x };
+  }
 
   canFire(shooter, time) { return shooter.alive && time >= shooter.boltReadyTime; }
 
@@ -74,8 +118,10 @@ export class Combat {
       }
     }
     let best = null;
+    const ff = CONFIG.match.friendlyFire;
     for (const c of this.combatants) {
       if (c === shooter || !c.alive || !c.hitbox) continue;
+      if (!ff && c.team === shooter.team && !c.isDummy) continue;   // friendly fire off: through teammates
       const h = c.hitbox.raycast(origin, dir, tWorld);
       if (h && (!best || h.t < best.t)) best = { c, t: h.t, part: h.part };
     }
@@ -120,7 +166,8 @@ export class Combat {
     victim.killedBy = shooter;
     victim.deathTime = time;
     shooter.hits++;
-    shooter.kills++;
+    if (victim.team !== shooter.team || victim.isDummy) shooter.kills++;
+    else shooter.teamKills = (shooter.teamKills || 0) + 1;
     shooter.longestHit = Math.max(shooter.longestHit, dist);
     if (!victim.isPlayer) this.effects.impact(point, 'body');
     this.audio.impact(point, 'ground');
@@ -130,7 +177,6 @@ export class Combat {
 
   update(dt, time) {
     if (!this.projectiles.length) return;
-    const B = CONFIG.weapon.ballistics;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const pr = this.projectiles[i];
       let remaining = dt;
@@ -139,11 +185,7 @@ export class Combat {
         const h = Math.min(remaining, 1 / 60);
         remaining -= h;
         const prev = pr.pos.clone();
-        pr.vel.y -= B.gravity * h;
-        pr.vel.x += B.wind.x * 0.9 * h;
-        pr.vel.z += B.wind.z * 0.9 * h;
-        pr.vel.multiplyScalar(1 - 0.12 * h);
-        pr.pos.addScaledVector(pr.vel, h);
+        Combat.step(pr.pos, pr.vel, h);
         const seg = _d.subVectors(pr.pos, prev);
         const len = seg.length();
         if (len < 1e-6) continue;

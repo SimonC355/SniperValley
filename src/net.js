@@ -140,6 +140,7 @@ export class LanGame {
     return {
       zone: CONFIG.zone.mode, camo: CONFIG.camouflageStrength, ball: CONFIG.weapon.ballistics.enabled,
       tracers: CONFIG.weapon.tracers, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, size: CONFIG.teams.size, map: MAP_ID,
+      mode: CONFIG.match.mode, kills: CONFIG.match.tdmKills, ff: CONFIG.match.friendlyFire,
     };
   }
 
@@ -182,11 +183,12 @@ export class LanGame {
     const ai = c.ai;
     const at = ai && (ai.state === 'aim' || ai.state === 'fire') && ai.target ? ai.target.id : 0;
     return [c.id, r2(c.pos.x), r2(c.pos.y), r2(c.pos.z), r3(c.yaw), r3(c.pitch), r3(c.bodyYaw ?? c.yaw),
-      Math.max(0, STANCES.indexOf(c.stance)), r2(c.scopeT || 0), r2(c.speed || 0), c.alive ? 1 : 0, Math.round(c.health), at];
+      Math.max(0, STANCES.indexOf(c.stance)), r2(c.scopeT || 0), r2(c.speed || 0), c.alive ? 1 : 0, Math.round(c.health), at, c.life || 0];
   }
 
+  // li: which life (deathmatch respawns) the state belongs to; older lives are ignored
   decode(a) {
-    return { id: a[0], p: [a[1], a[2], a[3]], y: a[4], pi: a[5], b: a[6], st: a[7], sc: a[8], sp: a[9], al: a[10], hp: a[11], at: a[12] };
+    return { id: a[0], p: [a[1], a[2], a[3]], y: a[4], pi: a[5], b: a[6], st: a[7], sc: a[8], sp: a[9], al: a[10], hp: a[11], at: a[12], li: a[13] || 0 };
   }
 
   // ---------------------------------------------------------------- outgoing events
@@ -205,7 +207,14 @@ export class LanGame {
   broadcastKill(shooter, victim, dist, part, point, cause) {
     // how an AI shooter found the victim (for the victim's killcam)
     const reason = shooter && shooter.ai ? shooter.ai.reasons.get(victim.id) || null : null;
-    this.s.toAll({ k: 'kill', s: shooter ? shooter.id : 0, v: victim.id, d: r2(dist || 0), part, p: point ? [r2(point.x), r2(point.y), r2(point.z)] : null, cause, r: reason });
+    const g = this.game;
+    this.s.toAll({ k: 'kill', s: shooter ? shooter.id : 0, v: victim.id, d: r2(dist || 0), part, p: point ? [r2(point.x), r2(point.y), r2(point.z)] : null, cause, r: reason,
+      sc: g.tdm ? g.match.score.slice() : undefined, ra: victim.respawnAt ?? undefined });
+  }
+
+  // Host: someone respawned (deathmatch).
+  broadcastRespawn(c, x, z, yaw) {
+    this.s.toAll({ k: 'respawn', id: c.id, x: r2(x), z: r2(z), y: r3(yaw) });
   }
 
   sendDied(victim) { this.s.toHost({ k: 'died', v: victim.id }); }
@@ -282,6 +291,12 @@ export class LanGame {
         if (this.isHost) return;
         g.applyKillMessage(d);
         break;
+      case 'respawn': {
+        if (this.isHost) return;
+        const c = this.byId(d.id);
+        if (c) g.applyRespawn(c, d.x, d.z, d.y);
+        break;
+      }
       case 'roundEnd':
         if (this.isHost) return;
         g.applyRoundEnd(d);

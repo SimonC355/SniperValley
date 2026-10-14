@@ -6,7 +6,7 @@ import { keyLabel } from './input.js';
 
 const ACTION_LABELS = {
   forward: 'Move forward', back: 'Move back', left: 'Strafe left', right: 'Strafe right',
-  sprint: 'Sprint · hold breath while scoped', jump: 'Jump / stand up', crouch: 'Crouch', prone: 'Prone',
+  sprint: 'Sprint (gets up) · hold breath while scoped', jump: 'Jump / stand up', crouch: 'Crouch', prone: 'Prone',
   scope: 'Scope (hold)', fire: 'Fire (bolt cycles 1.5 s)', scores: 'Scoreboard (hold)', restart: 'Restart (single player)',
 };
 
@@ -31,6 +31,8 @@ export class HUD {
       <div id="aimed" class="hud-el">⚠ YOU ARE BEING AIMED AT</div>
       <div id="outside" class="hud-el">OUTSIDE ZONE</div>
       <div id="center-msg" class="hud-el"></div>
+      <div id="bdc" class="hud-el"></div>
+      <div id="scopeinfo" class="hud-el"><span id="zoomtext"></span><span id="rangetext"></span><span id="holdtext"></span></div>
       <div id="kcmark" class="hud-el"><div class="br"></div><span></span></div>
       <div id="killcam" class="hud-el"></div>
       <div id="scoreboard" class="hud-el"></div>
@@ -45,6 +47,7 @@ export class HUD {
         <div id="boltbar"><div></div></div>
         <div id="glint"><span id="glinttext">GLINT OFF</span><span class="dot"></span></div>
         <div id="breath"></div>
+        <div id="breathbar"><div></div></div>
       </div>
       <div id="fps" class="hud-el"></div>
       <div id="debug" class="hud-el"></div>
@@ -54,8 +57,8 @@ export class HUD {
       zonebox: $('zonebox'), zonetext: $('zonetext'), compass: $('compass-strip'), aimed: $('aimed'),
       outside: $('outside'), center: $('center-msg'), killfeed: $('killfeed'), health: $('health'),
       hpnum: $('hpnum'), stance: $('stance'), bolt: $('bolt'), boltbar: $('boltbar').firstElementChild,
-      glint: $('glint'), glinttext: $('glinttext'), breath: $('breath'), fps: $('fps'), debug: $('debug'),
-      markers: $('markers'),
+      glint: $('glint'), glinttext: $('glinttext'), breath: $('breath'), breathbar: $('breathbar'), fps: $('fps'), debug: $('debug'),
+      markers: $('markers'), bdc: $('bdc'), scopeinfo: $('scopeinfo'), zoom: $('zoomtext'), range: $('rangetext'), hold: $('holdtext'),
     };
     this._buildCompass();
     this._buildOverlays();
@@ -101,10 +104,12 @@ export class HUD {
           <label>Scope sensitivity</label><div class="rng"><input id="set-ssens" type="range" min="0.3" max="2" step="0.05"><span id="set-ssens-v"></span></div>
           <label>Field of view</label><div class="rng"><input id="set-fov" type="range" min="60" max="100" step="1"><span id="set-fov-v"></span></div>
           <label>Invert mouse Y</label><select id="set-invy">${opt([['0', 'off'], ['1', 'on']])}</select>
+          <label>Scope opens at</label><select id="set-szoom">${opt([['reset', `${CONFIG.player.zoomLevels[0]}× (lowest zoom)`], ['keep', 'the last zoom']])}</select>
         </div>
         <div class="settings binds" id="set-binds"></div>
         <div class="controls fixed">
           <b>Mouse</b><span>look (arrow keys if pointer lock is unavailable)</span>
+          <b>Mouse wheel</b><span>scoped: zoom ${CONFIG.player.zoomLevels[0]}–${CONFIG.player.zoomLevels[CONFIG.player.zoomLevels.length - 1]}× (forward in, back out)</span>
           <b>Esc</b><span>pause / settings</span>
           <b>T · F1 · F2</b><span>debug: skip zone step · debug info · reveal all characters</span>
         </div>
@@ -113,7 +118,10 @@ export class HUD {
       <div class="tabpage" data-page="match">
         <div class="settings">
           <label>Map (reloads)</label><select id="set-map">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name.toLowerCase()} · ${m.size} · ${m.players}`]))}</select>
-          <label>Team size</label><select id="set-team">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n}v${n}</option>`).join('')}</select>
+          <label>Mode</label><select id="set-gmode">${opt([['elim', 'elimination rounds (no respawn)'], ['tdm', 'team deathmatch (respawns)']])}</select>
+          <label>Team size</label><select id="set-team">${CONFIG.teams.sizes.map((n) => `<option value="${n}">${n}v${n}</option>`).join('')}</select>
+          <label>Kills to win (deathmatch)</label><select id="set-kills">${[10, 20, 30, 50, 75, 100].map((n) => `<option value="${n}">${n}</option>`).join('')}</select>
+          <label>Friendly fire</label><select id="set-ff">${opt([['1', 'on (a team kill costs a point in deathmatch)'], ['0', 'off (bullets pass teammates)']])}</select>
           <label>Rounds to win</label><select id="set-rounds">${opt([['1', '1 (single round)'], ['2', '2 (best of 3)'], ['3', '3 (best of 5)'], ['4', '4 (best of 7)']])}</select>
           <label>Swap sides each round</label><select id="set-swap">${onoff}</select>
           <label>Zone mode</label><select id="set-zone">${opt([['ends', 'ends (closes from valley ends)'], ['radial', 'radial (toward the water)']])}</select>
@@ -121,7 +129,7 @@ export class HUD {
           <label>Tracers</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'faint'], ['bright', 'bright']])}</select>
           <label>Ballistics</label><select id="set-ball">${opt([['0', 'hitscan'], ['1', 'travel time + drop + wind']])}</select>
         </div>
-        <div class="note">Match settings apply when a new match starts. Changing the map reloads the game (in a LAN game the host's map is used).</div>
+        <div class="note">Match settings apply when a new match starts. Rounds, side swap and the zone are for elimination; deathmatch keeps the whole valley open for ${Math.round(CONFIG.match.tdmTime / 60)} minutes. Changing the map reloads the game (in a LAN game the host's map is used).</div>
       </div>
       <div class="tabpage" data-page="graphics">
         <div class="settings">
@@ -148,7 +156,7 @@ export class HUD {
       </div>`;
     this.startScreen = make('startscreen', `<div class="panel">
       <h1>SNIPER<span>VALLEY</span></h1>
-      <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER ELIMINATION · ONE SHOT, ONE KILL</div>
+      <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
       <div id="lanbox" class="lan" style="display:none">
         <h2>LAN MULTIPLAYER</h2>
         <div class="settings">
@@ -228,7 +236,12 @@ export class HUD {
       };
       const sync = () => {
         g('map').value = MAP_ID;
+        if (![...g('team').options].some((o) => o.value === String(C.teams.size))) g('team').add(new Option(`${C.teams.size}v${C.teams.size}`, String(C.teams.size)));
         g('team').value = String(C.teams.size);
+        g('gmode').value = C.match.mode;
+        if (![...g('kills').options].some((o) => o.value === String(C.match.tdmKills))) g('kills').add(new Option(String(C.match.tdmKills), String(C.match.tdmKills)));
+        g('kills').value = String(C.match.tdmKills);
+        g('ff').value = C.match.friendlyFire ? '1' : '0';
         g('rounds').value = String(C.match.roundsToWin);
         g('swap').value = C.match.swapSides ? '1' : '0';
         g('zone').value = C.zone.mode;
@@ -239,6 +252,7 @@ export class HUD {
         g('ssens').value = String(C.controls.scopeSensitivity);
         g('fov').value = String(C.player.fovHip);
         g('invy').value = C.controls.invertY ? '1' : '0';
+        g('szoom').value = C.controls.scopeZoom === 'keep' ? 'keep' : 'reset';
         g('scale').value = String(C.render.renderScale);
         g('autores').value = C.render.autoResolution ? '1' : '0';
         g('shadow').value = C.render.shadowQuality;
@@ -260,6 +274,9 @@ export class HUD {
       // the map is built once per page load: the game saves the choice and reloads
       g('map').addEventListener('change', () => onChange('map', g('map').value));
       on('team', (v) => { C.teams.size = parseInt(v, 10); });
+      on('gmode', (v) => { C.match.mode = v; });
+      on('kills', (v) => { C.match.tdmKills = parseInt(v, 10); });
+      on('ff', (v) => { C.match.friendlyFire = v === '1'; });
       on('rounds', (v) => { C.match.roundsToWin = parseInt(v, 10); });
       on('swap', (v) => { C.match.swapSides = v === '1'; });
       on('zone', (v) => { C.zone.mode = v; });
@@ -270,6 +287,7 @@ export class HUD {
       on('ssens', (v) => { C.controls.scopeSensitivity = parseFloat(v); }, 'input');
       on('fov', (v) => { C.player.fovHip = parseInt(v, 10); }, 'input');
       on('invy', (v) => { C.controls.invertY = v === '1'; });
+      on('szoom', (v) => { C.controls.scopeZoom = v; });
       on('scale', (v) => { C.render.renderScale = parseFloat(v); });
       on('autores', (v) => { C.render.autoResolution = v === '1'; });
       on('shadow', (v) => { C.render.shadowQuality = v; });
@@ -294,11 +312,11 @@ export class HUD {
 
   showStart(on) { this.startScreen.classList.toggle('on', on); }
   showPause(on) { this.pauseScreen.classList.toggle('on', on); }
-  showEnd(on, victory, sub, stats) {
+  showEnd(on, victory, sub, stats, title = null) {
     this.endScreen.classList.toggle('on', on);
     if (!on) return;
     const t = $('end-title');
-    t.textContent = victory ? 'VICTORY' : 'ELIMINATED';
+    t.textContent = title || (victory ? 'VICTORY' : 'ELIMINATED');
     t.className = victory ? 'victory' : 'defeat';
     $('end-sub').textContent = sub;
     $('end-stats').innerHTML = stats.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
@@ -335,8 +353,8 @@ export class HUD {
   setTeams(friends, enemies) {
     const pips = (list) => list.map((c) => `<div class="pip ${c.alive ? '' : 'dead'}" title="${c.name}"></div>`).join('');
     const f = pips(friends), e = pips(enemies);
-    if (f !== this._lastF) { this.el.teamF.innerHTML = f; this._lastF = f; }
-    if (e !== this._lastE) { this.el.teamE.innerHTML = e; this._lastE = e; }
+    if (f !== this._lastF) { this.el.teamF.innerHTML = f; this._lastF = f; this.el.teamF.classList.toggle('many', friends.length > 8); }
+    if (e !== this._lastE) { this.el.teamE.innerHTML = e; this._lastE = e; this.el.teamE.classList.toggle('many', enemies.length > 8); }
   }
 
   // Killcam panel (title + reveal lines) and a bracket around the shooter on screen.
@@ -357,28 +375,43 @@ export class HUD {
     } else m.style.display = 'none';
   }
 
-  // Hold-to-show scoreboard: rows = [{ name, team, alive, kills, human, me }]
-  setScoreboard(on, rows, myTeam, score) {
+  // Hold-to-show scoreboard: rows = [{ name, team, alive, kills, deaths, human, me }].
+  // Deathmatch lists kills / deaths for the match, best first.
+  setScoreboard(on, rows, myTeam, score, tdm = false) {
     const el = $('scoreboard');
     el.classList.toggle('on', on);
     if (!on) return;
     const names = CONFIG.teams.names;
+    el.classList.toggle('big', rows.length > 12);
     const col = (t) => {
       const list = rows.filter((r) => r.team === t);
-      return `<div class="col ${t === myTeam ? 'f' : 'e'}"><div class="h">${names[t]} · ${score[t]}</div>${list.map((r) =>
-        `<div class="r ${r.alive ? '' : 'dead'} ${r.me ? 'me' : ''}"><span>${r.name}${r.human ? '' : ' <i>AI</i>'}</span><span>${r.kills}</span></div>`).join('')}</div>`;
+      if (tdm) list.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+      return `<div class="col ${t === myTeam ? 'f' : 'e'}"><div class="h">${names[t]} · ${score[t]}${tdm ? ' KILLS' : ''}</div>${list.map((r) =>
+        `<div class="r ${r.alive || tdm ? '' : 'dead'} ${r.me ? 'me' : ''}"><span>${r.name}${r.human ? '' : ' <i>AI</i>'}</span><span>${tdm ? `${r.kills} / ${r.deaths}` : r.kills}</span></div>`).join('')}</div>`;
     };
-    el.innerHTML = `<div class="sh"><span>PLAYER</span><span>ROUND KILLS</span></div><div class="cols">${col(myTeam)}${col(1 - myTeam)}</div>`;
+    el.innerHTML = `<div class="sh"><span>PLAYER</span><span>${tdm ? 'KILLS / DEATHS' : 'ROUND KILLS'}</span></div><div class="cols">${col(myTeam)}${col(1 - myTeam)}</div>`;
   }
 
-  setScore(mine, theirs, round, toWin) {
-    const key = `${mine}|${theirs}|${round}|${toWin}`;
+  // tdmKills > 0: team deathmatch (team kills, first to tdmKills)
+  setScore(mine, theirs, round, toWin, tdmKills = 0) {
+    const key = `${mine}|${theirs}|${round}|${toWin}|${tdmKills}`;
     if (key === this._lastScore) return;
     this._lastScore = key;
-    const multi = toWin > 1;
+    const multi = toWin > 1 || tdmKills > 0;
     $('score-f').textContent = multi ? mine : '';
     $('score-e').textContent = multi ? theirs : '';
-    $('roundtext').textContent = multi ? `ROUND ${round + 1} · FIRST TO ${toWin}` : 'ZONE';
+    $('roundtext').textContent = tdmKills ? `DEATHMATCH · FIRST TO ${tdmKills}` : multi ? `ROUND ${round + 1} · FIRST TO ${toWin}` : 'ZONE';
+  }
+
+  // Team deathmatch: time left instead of the zone.
+  setMatchClock(left) {
+    const t = Math.max(0, Math.ceil(left));
+    const txt = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')} LEFT`;
+    if (txt === this._lastClock) return;
+    this._lastClock = txt;
+    this.el.zonebox.classList.toggle('warn', t <= 60);
+    this.el.zonebox.classList.remove('shrink');
+    this.el.zonetext.textContent = txt;
   }
 
   setZone(state) {
@@ -411,7 +444,15 @@ export class HUD {
     this.el.boltbar.style.width = `${Math.min(1, s.boltT) * 100}%`;
     this.el.glint.classList.toggle('on', s.glint);
     this.el.glinttext.textContent = s.glint ? (s.glintDim ? 'GLINT DIMMED · CLOUD' : 'YOUR SCOPE GLINTS') : 'GLINT OFF';
-    this.el.breath.textContent = s.scoped ? (s.holdingBreath ? 'HOLDING BREATH' : s.breathCooldown ? 'OUT OF BREATH' : 'SHIFT: HOLD BREATH') : '';
+    const breathKey = keyLabel(CONFIG.controls.binds.sprint[0]);
+    this.el.breath.textContent = s.scoped ? (s.holdingBreath ? 'HOLDING BREATH' : s.breathCooldown ? 'OUT OF BREATH' : `${breathKey}: HOLD BREATH`) : '';
+    this.el.breath.classList.toggle('out', !!s.breathCooldown);
+    this.el.breathbar.style.display = s.scoped ? 'block' : 'none';
+    if (s.scoped) {
+      this.el.breathbar.firstElementChild.style.width = `${Math.round(Math.max(0, s.breath) * 100)}%`;
+      this.el.breathbar.classList.toggle('out', !!s.breathCooldown);
+    }
+    this.updateScope(s);
     this.el.aimed.classList.toggle('on', !!s.aimedAt && CONFIG.hud.aimedAtWarning);
     this.el.outside.style.display = s.outside ? 'block' : 'none';
     if (s.outside) this.el.outside.textContent = `OUTSIDE ZONE  −${s.outsideDps} HP/s`;
@@ -431,6 +472,39 @@ export class HUD {
       this.fpsAcc = 0; this.fpsFrames = 0;
       if (CONFIG.debug.showFps) this.el.fps.textContent = `${this.fpsShown} FPS${this.fpsExtra || ''}`;
     }
+  }
+
+  // Scope readout: zoom and rangefinder; with ballistics on also bullet-drop marks under the
+  // centre (200, 300 ... 800 m) and how far to hold off for drop and wind at the measured range.
+  // s.scope: { mag, fov, range, drops: [[metres, mrad]], hold: { drop, drift } }
+  updateScope(s) {
+    const on = s.scoped && s.scope;
+    this.el.scopeinfo.style.display = on ? 'flex' : 'none';
+    this.el.bdc.style.display = on && s.scope.drops ? 'block' : 'none';
+    if (!on) return;
+    const sc = s.scope;
+    this.el.zoom.textContent = `${sc.mag}×`;
+    this.el.range.textContent = sc.range ? `${Math.round(sc.range)} m` : '— m';
+    const h = sc.hold;
+    // hold up for the drop, and into the wind (against the drift) when it is worth it
+    this.el.hold.textContent = h ? `HOLD ▲ ${h.drop.toFixed(1)} m${Math.abs(h.drift) >= 0.05 ? `  ${h.drift >= 0 ? '◄' : '►'} ${Math.abs(h.drift).toFixed(1)} m` : ''}` : '';
+    if (!sc.drops) return;
+    // marks: where a bullet at that range lands below the centre (lens distortion included)
+    // every 100 m gets a tick when there is room; labels only where they don't overlap
+    const H = window.innerHeight, tanHalf = Math.tan((sc.fov * Math.PI) / 360);
+    let html = '', lastTick = -99, lastLabel = -99;
+    for (const [m, mrad] of sc.drops) {
+      let y = 0.5 * Math.tan(mrad / 1000) / tanHalf;        // screen heights below the centre
+      y /= 1 + 0.085 * (y / 0.47) ** 2;
+      const px = y * H;
+      if (px > 0.4 * H) break;
+      if (px < 8 || px - lastTick < 4) continue;    // too close to the centre or to the last tick
+      lastTick = px;
+      const label = px - lastLabel >= 13;
+      if (label) lastLabel = px;
+      html += `<div class="mk${label ? '' : ' minor'}" style="top:${px.toFixed(1)}px"><i></i>${label ? `<b>${m / 100}</b>` : ''}</div>`;
+    }
+    if (html !== this._bdcHtml) { this.el.bdc.innerHTML = html; this._bdcHtml = html; }
   }
 
   // Teammate markers: small chevrons above friendly heads (player's team only).

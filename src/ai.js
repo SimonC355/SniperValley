@@ -9,6 +9,7 @@ import { Combatant, eyeHeightFor, angleBetween } from './entity.js';
 import { Hitbox } from './hitbox.js';
 import { GhillieCharacter } from './characters.js';
 import { GlintSprite } from './effects.js';
+import { Combat } from './combat.js';
 import { cloudCoverAt } from './weather.js';
 import { RNG, clamp, lerp } from './noise.js';
 
@@ -99,6 +100,16 @@ export class SpotMap {
     }
   }
 
+  // The spot at (x, z) on a side, if there is one within maxD metres.
+  nearest(side, x, z, maxD = 3) {
+    let best = null, bd = maxD * maxD;
+    for (const s of this.spots[side]) {
+      const d = (s.x - x) ** 2 + (s.z - z) ** 2;
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
   // Pick a spot on a side (0 north, 1 south) near `from`. zoneFn(x,z) -> true if acceptable.
   choose(team, from, { minDist = 0, maxDist = 80, avoid = [], spacing = CONFIG.ai.spotSpacing, zoneFn = null, rng = Math.random } = {}) {
     let best = null, bestS = -1e9;
@@ -146,6 +157,15 @@ export class AICombatant extends Combatant {
     this.scoped = false;
     this.boltReadyTime = 0;
     this.ai.reset();
+    // spawned on a sniper spot: settle into it (kneeling or prone) instead of walking off in
+    // the open, so a round doesn't start with everyone visible on the move
+    const g = this.game;
+    const sp = g.spots && g.spots.nearest(g.sideOf(this.team), x, z, 3);
+    if (sp) {
+      this.ai.spot = sp;
+      this.stance = sp.stance;
+      this.eye = eyeHeightFor(sp.stance);
+    }
   }
 
   update(dt, time) {
@@ -211,6 +231,9 @@ class AIBrain {
     this.underFireUntil = 0;
     this.stepDist = 0;
     this.lastShotTarget = null;
+    // after spawning, a sniper first settles into the hide: no scanning through the scope (no
+    // glint) for a few seconds, staggered, so big teams don't all light up at once
+    this.settleUntil = (this.game.time || 0) + this.rng.float(5, 13);
   }
 
   setState(s, time) {
@@ -311,6 +334,9 @@ class AIBrain {
       this.think(time, ti - this.thinkT);
       this.thinkT += ti;
     }
+    // speed is set while walking; any other state stands still (the walk cycle, footstep
+    // reveals and spotting all read it)
+    if (this.state !== 'move') cb.speed = 0;
     switch (this.state) {
       case 'idle': this.doIdle(dt, time); break;
       case 'scan': this.doScan(dt, time); break;
@@ -456,7 +482,8 @@ class AIBrain {
     if (time > this.scanUntil || !this.scanTarget) {
       this.scanTarget = this.pickScanTarget();
       this.scanUntil = time + this.rng.float(2.5, 6);
-      this.scanScoped = this.rng.chance(0.45);
+      // in big teams each sniper uses the scope a little less (the team covers the valley)
+      this.scanScoped = time > this.settleUntil && this.rng.chance(0.45 * Math.min(1, Math.sqrt(5 / CONFIG.teams.size)));
     }
     this.lookAt(this.scanTarget);
     cb.scoped = this.scanScoped && this.turnedWithin(12 * DEG);
@@ -504,7 +531,8 @@ class AIBrain {
     // slow search sweep around the point
     const wob = Math.sin(this.stateT * 0.9) * 3.5 * DEG;
     this.lookAt(_a, wob, Math.sin(this.stateT * 0.6) * 0.8 * DEG);
-    cb.scoped = this.turnedWithin(15 * DEG);
+    // still settling in: weak cues (birds, sounds) are checked without the scope
+    cb.scoped = this.turnedWithin(15 * DEG) && (time > this.settleUntil || this.invStrength >= 0.9);
   }
 
   doAim(dt, time) {
@@ -570,6 +598,8 @@ class AIBrain {
     const a = this.rng.float(0, Math.PI * 2);
     const target = aimPt.clone().addScaledVector(right, Math.cos(a) * off).addScaledVector(up, Math.sin(a) * off * 0.7);
     dir.subVectors(target, eye).normalize();
+    // with ballistics on, hold over for drop and into the wind like a trained sniper
+    if (CONFIG.weapon.ballistics.enabled) Combat.ballisticAim(eye, target, dir);
     // don't shoot through teammates
     for (const m of g.combatants) {
       if (m === cb || m.team !== cb.team || !m.alive || !m.hitbox) continue;

@@ -1,11 +1,16 @@
 // First-person player controller: movement, stances, collisions, water, mouse look,
-// scope zoom with FOV-scaled sensitivity, scope sway, breath hold and recoil.
+// variable scope zoom (mouse wheel) with FOV-scaled sensitivity, scope sway, breath hold and
+// recoil.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Combatant, eyeHeightFor } from './entity.js';
 import { Simplex, clamp, lerp } from './noise.js';
 
 const DEG = Math.PI / 180;
+
+// Field of view of a scope magnification (relative to a 70° view, so 2× is the same on every
+// field of view setting).
+export function zoomFov(mag) { return 2 * Math.atan(Math.tan(35 * DEG) / mag) / DEG; }
 
 export class Player extends Combatant {
   constructor(camera) {
@@ -21,6 +26,12 @@ export class Player extends Combatant {
     this.breath = CONFIG.weapon.holdBreathTime;
     this.holdingBreath = false;
     this.breathCooldown = 0;
+    this.breathPhase = 0;
+    this.steady = 1;          // sway multiplier, eases toward the breath-hold value
+    this.onBreath = null;     // (kind) 'hold' | 'release' | 'gasp' for sounds
+    this.zoomIndex = 0;       // into CONFIG.player.zoomLevels
+    this.zoomFov = zoomFov(CONFIG.player.zoomLevels[0]);
+    this.sprintBlocked = false;
     this.bobPhase = 0;
     this.stepDist = 0;
     this.inWater = 0;         // water depth at feet
@@ -32,7 +43,8 @@ export class Player extends Combatant {
     this.frozenScope = false; // test hook: hold scopeT at a fixed value
   }
 
-  spawn(x, z, yaw) {
+  // keepStats: a deathmatch respawn (shots, hits, kills and deaths carry on)
+  spawn(x, z, yaw, keepStats = false) {
     this.pos.set(x, 0, z);
     this.vel.set(0, 0, 0);
     this.lookYaw = yaw;
@@ -47,17 +59,28 @@ export class Player extends Combatant {
     this.breath = CONFIG.weapon.holdBreathTime;
     this.breathCooldown = 0;
     this.holdingBreath = false;
+    this.steady = 1;
+    this.zoomIndex = 0;
+    this.zoomFov = zoomFov(CONFIG.player.zoomLevels[0]);
+    this.sprintBlocked = false;
     this.boltReadyTime = 0;
     this.lastShotTime = -100;
-    this.shotsFired = 0;
-    this.hits = 0;
-    this.kills = 0;
-    this.longestHit = 0;
     this.killedBy = null;
+    this.respawnAt = null;
+    this.life = keepStats ? (this.life || 0) + 1 : 0;
+    if (!keepStats) {
+      this.shotsFired = 0;
+      this.hits = 0;
+      this.kills = 0;
+      this.deaths = 0;
+      this.teamKills = 0;
+      this.longestHit = 0;
+    }
     this.speed = 0;
   }
 
   get sensitivityScale() { return this.fov / CONFIG.player.fovHip; }
+  get magnification() { return CONFIG.player.zoomLevels[this.zoomIndex]; }
 
   update(dt, input, world, terrain, time) {
     const P = CONFIG.player;
@@ -76,16 +99,27 @@ export class Player extends Combatant {
     this.lookPitch = clamp(this.lookPitch, -1.45, 1.45);
 
     // ---------------------------------------------------------------- stance
-    if (input.actPressed('crouch')) this.stance = this.stance === 'crouch' ? 'stand' : 'crouch';
-    if (input.actPressed('prone')) this.stance = this.stance === 'prone' ? 'crouch' : 'prone';
+    // Crouch or prone pressed while sprint is held keeps that stance until sprint is pressed
+    // again; otherwise sprinting stands up (below).
+    const sprintKey = input.act('sprint');
+    if (!sprintKey) this.sprintBlocked = false;
+    if (input.actPressed('crouch')) { this.stance = this.stance === 'crouch' ? 'stand' : 'crouch'; this.sprintBlocked = sprintKey; }
+    if (input.actPressed('prone')) { this.stance = this.stance === 'prone' ? 'crouch' : 'prone'; this.sprintBlocked = sprintKey; }
     if (this.inWater > 0.25 && this.stance === 'prone') this.stance = 'crouch';
 
     // ---------------------------------------------------------------- scope
     const wantScope = input.act('scope');
+    // the scope opens at the lowest zoom (or the last one, see settings); the wheel zooms
+    // (forward = in, back = out)
+    const levels = P.zoomLevels;
+    if (wantScope && this.scopeT === 0 && CONFIG.controls.scopeZoom !== 'keep') this.zoomIndex = 0;
+    if (wantScope && input.wheel) this.zoomIndex = clamp(this.zoomIndex - input.wheel, 0, levels.length - 1);
+    const zf = zoomFov(levels[this.zoomIndex]);
+    this.zoomFov = this.scopeT === 0 ? zf : Math.exp(lerp(Math.log(this.zoomFov), Math.log(zf), 1 - Math.exp(-dt * 16)));
     if (!this.frozenScope) this.scopeT = clamp(this.scopeT + (wantScope ? 1 : -1) * dt / P.zoomTime, 0, 1);
     this.scoped = this.scopeT > 0.55;
     const z = this.scopeT * this.scopeT * (3 - 2 * this.scopeT);
-    this.fov = P.fovHip * Math.pow(P.fovScope / P.fovHip, z);
+    this.fov = P.fovHip * Math.pow(this.zoomFov / P.fovHip, z);
 
     // ---------------------------------------------------------------- movement
     let fwd = 0, side = 0;
@@ -96,9 +130,10 @@ export class Player extends Combatant {
       if (input.act('left')) side -= 1;
     }
     const moving = fwd !== 0 || side !== 0;
-    const sprintKey = input.act('sprint');
-    const sprinting = sprintKey && moving && fwd > 0 && !this.scoped && this.stance === 'stand' && this.onGround;
-    if (sprinting && this.stance !== 'stand') this.stance = 'stand';
+    // sprinting gets up from crouch or prone
+    const wantSprint = sprintKey && !this.sprintBlocked && moving && fwd > 0 && !this.scoped && this.onGround;
+    if (wantSprint && this.stance !== 'stand') this.stance = 'stand';
+    const sprinting = wantSprint && this.stance === 'stand';
     let speed = P.walkSpeed;
     if (this.stance === 'crouch') speed = P.crouchSpeed;
     if (this.stance === 'prone') speed = P.proneSpeed;
@@ -174,28 +209,35 @@ export class Player extends Combatant {
     this.eye = lerp(this.eye, targetEye, 1 - Math.exp(-dt * 9));
 
     // ---------------------------------------------------------------- sway
+    // Scoped, the aim drifts and rises and falls with each breath (more standing, after a
+    // sprint or while moving). Holding the breath (sprint key while scoped) steadies it for a
+    // few seconds; running out of breath makes it worse for a while.
     this.fatigue = clamp(this.fatigue + (sprinting ? dt * 0.35 : -dt * 0.3), 0, 1);
     const W = CONFIG.weapon;
-    const breathKey = sprintKey && this.scoped;
+    const breathKey = sprintKey && this.scoped && this.alive;
+    const wasHolding = this.holdingBreath;
     if (breathKey && this.breath > 0 && this.breathCooldown <= 0) {
       this.holdingBreath = true;
       this.breath -= dt;
-      if (this.breath <= 0) { this.holdingBreath = false; this.breathCooldown = 2.5; }
+      if (this.breath <= 0) { this.holdingBreath = false; this.breathCooldown = W.outOfBreathTime; }
     } else {
       this.holdingBreath = false;
       if (this.breathCooldown > 0) this.breathCooldown -= dt;
-      this.breath = Math.min(W.holdBreathTime, this.breath + dt * 0.6);
+      this.breath = Math.min(W.holdBreathTime, this.breath + dt * W.breathRecovery);
     }
+    if (this.onBreath && this.holdingBreath !== wasHolding) this.onBreath(this.holdingBreath ? 'hold' : this.breathCooldown > 0 ? 'gasp' : 'release');
     const moveFactor = clamp(this.speed / P.walkSpeed, 0, 1.5);
-    let amp = W.swayIdle + W.swayMove * moveFactor + W.swaySprintCarry * this.fatigue;
-    amp *= this.stance === 'prone' ? 0.45 : this.stance === 'crouch' ? 0.75 : 1;
-    if (this.holdingBreath) amp *= 0.12;
-    if (this.breathCooldown > 0) amp *= 1.7;
-    amp *= DEG;
+    const stanceK = this.stance === 'prone' ? W.swayProne : this.stance === 'crouch' ? W.swayCrouch : 1;
+    // the breathing part is mostly felt through the scope
+    let amp = (W.swayIdle * lerp(0.2, 1, this.scopeT) + W.swayMove * moveFactor + W.swaySprintCarry * this.fatigue) * stanceK;
+    this.steady = lerp(this.steady, this.holdingBreath ? W.holdBreathSteady : this.breathCooldown > 0 ? 1.8 : 1, 1 - Math.exp(-dt * 5));
+    amp *= this.steady * DEG;
+    // breathing: ~4 s a breath (faster when out of breath); it stops while the breath is held
+    if (!this.holdingBreath) this.breathPhase += dt * Math.PI * 2 / (this.breathCooldown > 0 ? 2.2 : 4 - 1.5 * this.fatigue);
     const t = time;
     const n = this.swayNoise;
-    const targetSY = (n.noise2(t * 0.35, 1.3) * 0.7 + Math.sin(t * 1.1) * 0.3) * amp;
-    const targetSP = (n.noise2(t * 0.35, 7.9) * 0.6 + Math.sin(t * 2.2) * 0.4) * amp * 0.8;
+    const targetSY = (n.noise2(t * 0.3, 1.3) * 0.75 + Math.sin(this.breathPhase * 0.5 + 0.7) * 0.25) * amp;
+    const targetSP = (Math.sin(this.breathPhase) * 0.6 + n.noise2(t * 0.3, 7.9) * 0.45) * amp * 0.85;
     this.swayYaw = lerp(this.swayYaw, targetSY, 1 - Math.exp(-dt * 6));
     this.swayPitch = lerp(this.swayPitch, targetSP, 1 - Math.exp(-dt * 6));
 
