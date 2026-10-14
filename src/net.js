@@ -1,13 +1,17 @@
-// LAN multiplayer. One browser hosts: it runs the round flow, the AI, the zone timeline,
-// the birds and kill decisions, and streams snapshots (20 Hz) to the others. Every browser
-// moves its own player and detects its own hits ("favour the shooter", fine on a LAN), then
-// tells the host, which confirms the kill to everyone. Messages go through the small relay
-// in server/relay.mjs (ws://<server>/net).
+// Multiplayer (LAN, and online over Steam in the program). One game hosts: it runs the round
+// flow, the AI, the zone timeline, the birds and kill decisions, and streams snapshots (20 Hz)
+// to the others. Every game moves its own player and detects its own hits ("favour the
+// shooter"), then tells the host, which confirms the kill to everyone. Messages go through the
+// relay in server/relay.mjs (ws://<server>/net); a game joined over Steam talks to its own
+// program (ws://<this PC>/steamnet), which forwards to the host over Steam (electron/steam.cjs).
+// Positions are sent as "unreliable": over Steam they may be lost or arrive out of order, so
+// each one carries the sender's time, and old ones are dropped.
 import * as THREE from 'three';
 import { CONFIG, MAP_ID } from './config.js';
 import { STANCES } from './remote.js';
 
 const SEND_INTERVAL = 0.05;   // 20 Hz
+const SNAP_BYTES = 900;       // a snapshot is split into messages of about this size (Steam: 1200 per packet)
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
@@ -18,7 +22,9 @@ export class NetSession {
     this.myId = 0;
     this.hostId = 0;
     this.hostMap = '';        // the map the host's game is built with
+    this.hostVersion = '';    // the host's game version (joining needs the same)
     this.players = [];
+    this.pings = {};          // peer id -> ms to the host's relay
     this.inGame = false;
     this.available = false;
     this.joined = false;
@@ -29,6 +35,7 @@ export class NetSession {
     this.onError = null;
     this.onAvailable = null;
     this.onFail = null;         // the relay could not be reached
+    this.onPings = null;
   }
 
   get isHost() { return this.joined && this.myId === this.hostId; }
@@ -44,8 +51,12 @@ export class NetSession {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m.t === 'welcome') { this.myId = m.id; this.available = true; if (this.onAvailable) this.onAvailable(true); }
-      else if (m.t === 'lobby') { this.hostId = m.hostId; this.hostMap = m.map || ''; this.players = m.players; this.inGame = m.inGame; if (this.onLobby) this.onLobby(); }
+      else if (m.t === 'lobby') {
+        this.hostId = m.hostId; this.hostMap = m.map || ''; this.hostVersion = m.v || ''; this.players = m.players; this.inGame = m.inGame;
+        if (this.onLobby) this.onLobby();
+      }
       else if (m.t === 'm') { if (this.onMessage) this.onMessage(m.from, m.d); }
+      else if (m.t === 'pings') { this.pings = m.p || {}; if (this.onPings) this.onPings(); }
       else if (m.t === 'left') { if (this.onLeft) this.onLeft(m.id); }
       else if (m.t === 'hostgone') { if (this.onHostGone) this.onHostGone(); }
       else if (m.t === 'error') { if (this.onError) this.onError(m.msg); }
@@ -71,11 +82,12 @@ export class NetSession {
   }
 
   _raw(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
-  hello(name, team, host) { this.joined = true; this._raw({ t: 'hello', name, team, host, map: MAP_ID }); }
+  hello(name, team, host) { this.joined = true; this._raw({ t: 'hello', name, team, host, map: MAP_ID, v: __APP_VERSION__ }); }
   setTeam(team) { this._raw({ t: 'team', team }); }
   setInGame(v) { this._raw({ t: 'ingame', v }); }
-  toHost(d) { this._raw({ t: 'm', to: 'host', d }); }
-  toAll(d) { this._raw({ t: 'm', to: 'all', d }); }
+  // u: may be lost or arrive late (positions); "u" goes first, so the Steam bridge sees it at a glance
+  toHost(d, u = false) { this._raw(u ? { u: 1, t: 'm', to: 'host', d } : { t: 'm', to: 'host', d }); }
+  toAll(d, u = false) { this._raw(u ? { u: 1, t: 'm', to: 'all', d } : { t: 'm', to: 'all', d }); }
   toPeer(id, d) { this._raw({ t: 'm', to: id, d }); }
 }
 
@@ -87,6 +99,9 @@ export class LanGame {
     this.sendT = 0;
     this.slowT = 0;
     this.lastBirds = '';
+    this.roundSeq = 0;           // host: counts rounds; snapshots carry it (a late one from the last round is dropped)
+    this.hostRs = undefined;     // client: the host's round count of the current round
+    this.lastSnap = -1;          // client: host time of the newest snapshot (for the clock)
     this.teamOf = new Map();     // peer id -> team (kept for the whole match)
     session.onMessage = (from, d) => this.onMessage(from, d);
     session.onLeft = (id) => this.onLeft(id);
@@ -146,7 +161,10 @@ export class LanGame {
 
   hostRound() {
     const g = this.game;
-    const msg = { k: 'round', round: g.match.round, score: g.match.score.slice(), settings: this.settings(), roster: this.buildRoster() };
+    this.roundSeq++;
+    this.lastBirds = '';
+    this.slowT = 0;
+    const msg = { k: 'round', rs: this.roundSeq, round: g.match.round, score: g.match.score.slice(), settings: this.settings(), roster: this.buildRoster() };
     this.s.toAll(msg);
     this.s.setInGame(true);
     return msg;
@@ -161,21 +179,31 @@ export class LanGame {
     if (this.sendT > 0) return;
     this.sendT = SEND_INTERVAL;
     if (this.isHost) {
-      const e = [];
+      // everyone's state, in messages small enough for one network packet each
+      // (time: game clock; n: this PC's real clock, for drawing others smoothly)
+      const time = r3(g.time), n = r3(performance.now() / 1000);
+      let e = [], size = 0;
+      const flush = () => { if (e.length) this.s.toAll({ k: 'snap', rs: this.roundSeq, time, n, e }, true); e = []; size = 0; };
       for (const c of g.combatants) {
         if (c.isDummy) continue;
-        e.push(this.encode(c));
+        const a = this.encode(c);
+        const len = JSON.stringify(a).length + 1;
+        if (size + len > SNAP_BYTES) flush();
+        e.push(a);
+        size += len;
       }
-      const snap = { k: 'snap', time: r3(g.time), e };
+      flush();
+      // zone (every second) and birds (when they change): these must arrive
+      const w = { k: 'world', rs: this.roundSeq };
       if (this.slowT <= 0) {
         this.slowT = 1;
-        snap.zone = g.zone.getState();
+        w.zone = g.zone.getState();
       }
       const birds = JSON.stringify(g.birds.getState());
-      if (birds !== this.lastBirds || snap.zone) { snap.birds = JSON.parse(birds); this.lastBirds = birds; }
-      this.s.toAll(snap);
+      if (birds !== this.lastBirds) { w.birds = JSON.parse(birds); this.lastBirds = birds; }
+      if (w.zone || w.birds) this.s.toAll(w);
     } else if (g.player && g.roundId === this.roundId) {
-      this.s.toHost({ k: 'st', s: this.encode(g.player) });
+      this.s.toHost({ k: 'st', n: r3(performance.now() / 1000), s: this.encode(g.player) }, true);
     }
   }
 
@@ -240,27 +268,35 @@ export class LanGame {
       case 'round':
         if (this.isHost) return;
         this.roundId = (this.roundId || 0) + 1;
+        this.hostRs = d.rs;
+        this.lastSnap = -1;
         g.applyRound(d, this.roundId);
         break;
       case 'snap': {
-        if (this.isHost) return;
-        // time sync (host clock)
-        const err = d.time - g.time;
-        if (Math.abs(err) > 0.5) g.time = d.time; else g.time += err * 0.1;
+        if (this.isHost || d.rs !== this.hostRs) return;
+        // time sync (host clock), from the newest snapshot only
+        if (d.time > this.lastSnap) {
+          this.lastSnap = d.time;
+          const err = d.time - g.time;
+          if (Math.abs(err) > 0.5) g.time = d.time; else g.time += err * 0.1;
+        }
         for (const a of d.e) {
           if (a[0] === g.player.id) continue;
           const c = this.byId(a[0]);
-          if (c && c.applyState) c.applyState(this.decode(a));
+          if (c && c.applyState) c.applyState(this.decode(a), d.n);
         }
+        break;
+      }
+      case 'world':
+        if (this.isHost || d.rs !== this.hostRs) return;
         if (d.zone) g.zone.setState(d.zone);
         if (d.birds) g.birds.applyState(d.birds, g.time);
         break;
-      }
       case 'st': {
         if (!this.isHost) return;
         const st = this.decode(d.s);
         const c = this.byId(st.id);
-        if (c && c.applyState && c.peer === from) c.applyState(st);
+        if (c && c.applyState && c.peer === from) c.applyState(st, d.n);
         break;
       }
       case 'fire': {
