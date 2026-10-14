@@ -7,7 +7,8 @@
 (zip, about 150 MB). How to start it is under [Play on Windows](#play-on-windows).
 
 A team sniper game in a forested V-shaped valley, built with Three.js. Play anything from 1v1
-to 20v20 against AI ghillie snipers, or with friends on your local network.
+to 20v20 against AI ghillie snipers, or with friends: online over Steam, or on your local
+network.
 
 - Everyone has one bolt-action rifle with a 2–12× scope, and one hit kills. Hold your breath
   to steady the aim.
@@ -55,6 +56,35 @@ This is an early test version. Feedback is welcome in the
 3. Friends without the program can join from a browser at `http://<host's IP>:47821`.
 4. The host picks teams, map, mode, team size and rounds in the lobby and the MATCH tab, then
    clicks **START MATCH**.
+
+**Online with friends over Steam (test version):**
+
+Steam finds the game and carries it over Valve's network, so nobody opens ports or types IP
+addresses. The game doesn't have to be on the Steam store for this.
+
+What you need:
+- Steam installed and logged in on every PC, with one Steam account per PC.
+- You and your friends are friends on Steam. A brand-new account can't send friend requests
+  until $5 has been spent on it, but it can accept them, so send the request from the other
+  account.
+- Once on every PC: press **Win+R**, type `steam://install/480` and press Enter. That adds
+  Valve's free test game Spacewar, which SniperValley uses until it has its own Steam App ID.
+  While you play, Steam shows you as *Playing Spacewar*. That's expected.
+- Everyone has the same version of SniperValley.
+
+To play:
+1. Start Steam first, then SniperValley. The multiplayer box says
+   **STEAM ● LOGGED IN AS** *your name*.
+2. The host clicks **HOST GAME**. The lobby shows a 7-character **STEAM CODE** (with a
+   **COPY** button). If Windows asks whether SniperValley may use the network, allow it.
+3. Friends start SniperValley too, then either right-click the host in Steam's friends list
+   and choose **Join Game**, or type the code in the box next to **JOIN GAME** and click it.
+4. The lobby lists everyone with their ping. The host clicks **START MATCH**.
+
+The **Online (Steam)** setting in the multiplayer box decides who can join: Steam friends
+(default), anyone with the code, or nobody (LAN only). Hold **Tab** in a match to see
+everyone's ping. If the host leaves, the game ends for everyone; players who join during a
+match come in at the next round (in deathmatch: the next match).
 
 ## Develop
 
@@ -258,18 +288,21 @@ src/
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
   hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
   input.js       keyboard/mouse, pointer lock, rebindable actions
-  net.js         LAN multiplayer: lobby session, host snapshots, shot/kill sync, map sync
-  remote.js      network-driven combatants (other players, the host's AI on clients)
+  net.js         multiplayer: lobby session, host snapshots, shot/kill sync, map sync
+  remote.js      network-driven combatants (other players, the host's AI on clients), drawn
+                 between received states
   bench.js       ?bench benchmark (always on the Valley map)
   desktop.js     extras in the Windows program: QUIT, fullscreen setting
 electron/
   main.cjs       the program: window, serves the game on this PC, hosts LAN games
+  steam.cjs      online over Steam: lobbies, codes, the game's messages over Steam P2P
   preload.cjs    what the game may ask the program for (window.desktop)
   icon.png/.ico  program icon (drawn by scripts/make-icon.mjs)
 scripts/
   fetch-assets.mjs   `npm run assets`: CC0 texture downloader (Poly Haven API)
   package-exe.mjs    `npm run exe`: packs the program with @electron/packager
   make-icon.mjs      draws the program icon
+  fake-steam/        a stand-in for Steam (lobbies, P2P, simulated internet) for testing
 server/
   lan.mjs        `npm run host`: serves dist/ and the relay, prints LAN addresses
   serve.mjs      serves the built game (used by lan.mjs and the program)
@@ -421,3 +454,25 @@ are in [CREDITS.md](CREDITS.md).
   left; the first team to 30 kills wins. Try it on LAN too.
 - **Friendly fire.** MATCH → Friendly fire. On: shooting a teammate kills them (TEAM KILL in
   the feed, −1 in deathmatch). Off: the bullet passes through them.
+
+**v0.4.0: online with friends over Steam**
+- **Before you start:** Steam running and logged in on both PCs (two accounts, Steam
+  friends), and once on each PC Win+R → `steam://install/480` (Spacewar). Start Steam before
+  SniperValley.
+- **Status.** The multiplayer box says *STEAM ● LOGGED IN AS* your Steam name, and your name
+  is filled in. Close Steam and start the game: it says Steam isn't running, and LAN still
+  works.
+- **Host.** Click HOST GAME: a 7-character STEAM CODE appears, with COPY. Your friend's Steam
+  shows you *Playing Spacewar*.
+- **Join by code.** Your friend types the code next to JOIN GAME. They appear in your lobby
+  list with a ping, and see *PING … MS* themselves.
+- **Join from Steam.** With SniperValley running on both PCs, your friend right-clicks you in
+  Steam's friends list → Join Game.
+- **Play.** START MATCH. Watch each other move: no stutter or jumps, also when you run.
+  Shoot each other and the AI; kills, the score and respawns agree on both PCs. Hold Tab to
+  see pings.
+- **Map change.** Change the map in MATCH while your friend is in the lobby: both games reload,
+  and your friend joins again by themselves.
+- **Leaving.** You leave: your friend is told and goes back to the menu. Your friend quits:
+  you see *LEFT THE GAME*.
+- **If something fails,** send `steam-log.txt` from `%APPDATA%\SniperValley` (from both PCs).

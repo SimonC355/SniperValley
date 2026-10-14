@@ -53,6 +53,9 @@ import { Zone } from './zone.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 const _eye = new THREE.Vector3();
+const esc = (t) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+// a Steam name as a player name (the relay keeps these characters, 12 at most)
+const steamName = (n) => String(n || '').toUpperCase().replace(/[^A-Z0-9ÆØÅÄÖÜ _-]/g, '').trim().slice(0, 12);
 
 class Game {
   constructor() {
@@ -310,7 +313,8 @@ class Game {
   setAutoNet(role) {
     const $ = (id) => document.getElementById(id);
     const tries = (this.autoNetTries || 0) + 1;
-    try { sessionStorage.setItem('sniperyard.autonet', JSON.stringify({ role, name: $('lan-name').value, team: $('lan-team').value, ai: $('lan-ai').value, tries })); } catch { /* ignore */ }
+    const steam = role === 'join' && this.lanVia === 'steam' ? { via: 'steam', code: this.steamJoinCode } : {};
+    try { sessionStorage.setItem('sniperyard.autonet', JSON.stringify({ role, name: $('lan-name').value, team: $('lan-team').value, ai: $('lan-ai').value, tries, ...steam })); } catch { /* ignore */ }
   }
 
   reloadPage(text) {
@@ -547,6 +551,7 @@ class Game {
       if (auto && (auto.role === 'host' || auto.role === 'join')) {
         this.autoNet = auto.role;
         this.autoNetTries = auto.tries || 1;
+        if (auto.via === 'steam' && auto.code) this.autoSteam = auto.code;
         if (auto.name) $('lan-name').value = auto.name;
         if (auto.team) $('lan-team').value = auto.team;
         if (auto.ai) { $('lan-ai').value = auto.ai; CONFIG.lan.fillWithAI = auto.ai === '1'; }
@@ -557,17 +562,21 @@ class Game {
       $('lanbox').style.display = ok || desktop ? 'block' : 'none';
       if (ok) { this.lanConnecting = null; clearTimeout(this.lanTimer); }
       this.renderLobby();
+      if (ok) this.tryAutoNet();
     };
     S.onFail = () => {
       if (!this.lanConnecting) return;
       clearTimeout(this.lanTimer);
-      this.lanNote = `COULD NOT REACH ${this.lanConnecting} · CHECK THE ADDRESS AND THAT THE HOST HAS CLICKED HOST GAME`;
+      this.lanNote = this.lanError || (this.lanVia === 'steam' ? 'COULD NOT REACH THE HOST OVER STEAM · CHECK THAT THEY ARE STILL HOSTING'
+        : `COULD NOT REACH ${this.lanConnecting} · CHECK THE ADDRESS AND THAT THE HOST HAS CLICKED HOST GAME`);
       this.lanConnecting = null;
       this.autoNet = null;
+      if (this.lanVia === 'steam') desktop.steam.leave();
       this.renderLobby();
     };
     S.onLobby = () => { this.renderLobby(); this.tryAutoNet(); };
-    S.onError = (msg) => { this.lanNote = msg; this.renderLobby(); };
+    S.onError = (msg) => { this.lanNote = msg; this.lanError = msg; this.renderLobby(); };
+    S.onPings = () => { if (this.state === 'menu' && !S.inGame) this.renderLobby(); };
     S.onHostGone = () => { if (this.net && !this.reloading) this.leaveNet('THE HOST LEFT THE GAME'); };
     if (desktop) {
       // the program has no relay at the page's own address: HOST starts one on this PC, JOIN
@@ -575,8 +584,9 @@ class Game {
       try { $('lan-ip').value = localStorage.getItem('sniperyard.lanip') || ''; } catch { /* ignore */ }
       $('lanbox').style.display = 'block';
       $('lan-ip').addEventListener('keydown', (e) => { if (e.key === 'Enter') this.desktopJoin(); });
+      if (desktop.steam) this.setupSteam();
       if (this.autoNet === 'host') this.desktopHost();
-      else if (this.autoNet === 'join') this.desktopJoin();
+      else if (this.autoNet === 'join') { if (this.autoSteam) this.steamJoin(this.autoSteam); else this.desktopJoin(); }
       this.renderLobby();
     } else {
       S.connect();
@@ -604,6 +614,13 @@ class Game {
     if (!host && MAPS[S.hostMap] && S.hostMap !== MAP_ID) {
       if ((this.autoNetTries || 0) >= 3) { this.lanNote = 'COULD NOT LOAD THE HOST\'S MAP · RELOAD THE PAGE'; this.renderLobby(); return; }
       this.followHostMap(S.hostMap);
+      return;
+    }
+    // joining needs the host's version (older hosts don't say theirs)
+    if (!host && S.hostVersion !== __APP_VERSION__) {
+      this.lanNote = `THE HOST HAS ${S.hostVersion ? `VERSION ${S.hostVersion}` : 'AN OLDER VERSION'} AND YOU HAVE ${__APP_VERSION__} · YOU BOTH NEED THE SAME VERSION`;
+      this.autoNet = null;
+      this.renderLobby();
       return;
     }
     this.audio.init();
@@ -634,7 +651,10 @@ class Game {
     }
     this.lanHostIps = r.ips;
     this.autoNet = 'host';
+    this.lanVia = 'lan';
+    this.lanError = '';
     S.connect(`ws://127.0.0.1:${r.port}/net`);
+    if (this.steamOn()) this.steamHost();
   }
 
   // Program: connect to the host's PC by IP address; we join as soon as it hosts.
@@ -643,13 +663,18 @@ class Game {
     if (S.joined || S.available || this.lanConnecting || this.reloading) return;
     const ip = (document.getElementById('lan-ip').value || '').trim();
     if (!ip) {
-      this.lanNote = 'TYPE THE HOST\'S IP ADDRESS (THE HOST SEES IT AFTER CLICKING HOST GAME)';
+      this.lanNote = desktop.steam ? 'TYPE THE HOST\'S STEAM CODE OR IP ADDRESS (THE HOST SEES THEM AFTER CLICKING HOST GAME)'
+        : 'TYPE THE HOST\'S IP ADDRESS (THE HOST SEES IT AFTER CLICKING HOST GAME)';
       this.renderLobby();
       return;
     }
     try { localStorage.setItem('sniperyard.lanip', ip); } catch { /* ignore */ }
+    // an IP address (or host name with a dot) is a LAN game; anything else a Steam code
+    if (desktop.steam && !/[.:]/.test(ip)) { this.steamJoin(ip); return; }
     this.audio.init();
     this.autoNet = 'join';
+    this.lanVia = 'lan';
+    this.lanError = '';
     this.lanConnecting = ip;
     this.lanNote = '';
     S.connect(`ws://${ip.includes(':') ? ip : `${ip}:${desktop.lanPort}`}/net`);
@@ -663,6 +688,111 @@ class Game {
       this.renderLobby();
     }, 6000);
     this.renderLobby();
+  }
+
+  // ---------------------------------------------------------------- online over Steam (program)
+  setupSteam() {
+    const $ = (id) => document.getElementById(id);
+    this.steam = { ok: false, name: '', error: '' };
+    $('lan-h').textContent = 'MULTIPLAYER · LAN AND ONLINE';
+    try { $('lan-steam').value = localStorage.getItem('sniperyard.steam') || 'friends'; } catch { /* ignore */ }
+    if (!$('lan-steam').value) $('lan-steam').value = 'friends';
+    $('lan-steam').addEventListener('change', () => {
+      try { localStorage.setItem('sniperyard.steam', $('lan-steam').value); } catch { /* ignore */ }
+      this.renderLobby();
+    });
+    $('steam-copy').addEventListener('click', () => {
+      if (!this.steamCode || !navigator.clipboard) return;
+      navigator.clipboard.writeText(this.steamCode).then(() => {
+        $('steam-copy').textContent = 'COPIED';
+        setTimeout(() => { $('steam-copy').textContent = 'COPY'; }, 1500);
+      }, () => {});
+    });
+    desktop.steam.onEvent((ev) => this.onSteamEvent(ev));
+    // Steam may be started after the game: ask again now and then while on the menu
+    const poll = async () => {
+      if (this.state === 'menu' || !this.steam.ok) {
+        const st = await desktop.steam.status();
+        const was = this.steam.ok;
+        this.steam = st;
+        if (st.ok && !$('lan-name').value) $('lan-name').value = steamName(st.name);
+        if (st.pendingJoin) this.onSteamEvent({ type: 'join', code: st.pendingJoin });
+        if (st.ok !== was || !st.ok) this.renderLobby();
+      }
+      if (!this.steam.ok) setTimeout(poll, 5000);
+    };
+    poll();
+  }
+
+  steamOn() { return !!(desktop && desktop.steam && this.steam && this.steam.ok && document.getElementById('lan-steam').value !== 'off'); }
+
+  // Host: open the game (already hosted on this PC) to Steam friends.
+  async steamHost() {
+    const r = await desktop.steam.host({ open: document.getElementById('lan-steam').value === 'open' });
+    if (r.error) this.steamNote = `ONLINE: ${r.error}`;
+    else { this.steamCode = r.code; this.steamNote = ''; }
+    this.renderLobby();
+  }
+
+  // Join a friend's game by its Steam code; then talk to the host through this program.
+  async steamJoin(code) {
+    const S = this.lanSession;
+    if (S.joined || S.available || this.lanConnecting || this.reloading) return;
+    this.audio.init();
+    this.autoNet = 'join';
+    this.lanVia = 'steam';
+    this.lanError = '';
+    this.steamJoinCode = String(code).trim().toUpperCase();
+    this.lanConnecting = 'STEAM';
+    this.lanNote = '';
+    this.renderLobby();
+    const r = await desktop.steam.join(this.steamJoinCode);
+    if (r.error) {
+      this.lanNote = r.error;
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+      return;
+    }
+    this.steamJoinCode = r.code;
+    this.lanConnecting = `${r.hostName} OVER STEAM`;
+    S.connect(`ws://${location.host}/steamnet`);
+    clearTimeout(this.lanTimer);
+    this.lanTimer = setTimeout(() => {
+      if (S.available || this.lanVia !== 'steam' || !this.lanConnecting) return;
+      S.close();
+      desktop.steam.leave();
+      this.lanNote = 'COULD NOT REACH THE HOST OVER STEAM · CHECK THAT THEY ARE STILL HOSTING';
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+    }, 25000);
+    this.renderLobby();
+  }
+
+  // From Steam: a friend's "Join game" (or an invite), or the host went away.
+  onSteamEvent(ev) {
+    const S = this.lanSession;
+    if (ev.type === 'join') {
+      if (S.joined || S.available || this.lanConnecting || this.reloading) {
+        this.hud.centerMessage('LEAVE THIS GAME FIRST', 'THEN USE JOIN GAME IN STEAM AGAIN', 3);
+        return;
+      }
+      document.getElementById('lan-ip').value = ev.code;
+      if (this.state === 'menu') { this.steamJoin(ev.code); return; }
+      // in single player: reload into the menu and join from there
+      this.lanVia = 'steam';
+      this.steamJoinCode = ev.code;
+      this.setAutoNet('join');
+      this.reloadPage('JOINING YOUR FRIEND');
+    } else if (ev.type === 'gone' && !S.joined && !this.reloading && this.lanVia === 'steam') {
+      clearTimeout(this.lanTimer);
+      S.close();
+      this.lanNote = ev.note;
+      this.lanConnecting = null;
+      this.autoNet = null;
+      this.renderLobby();
+    }
   }
 
   // After a map change: host again, or join once the host is back.
@@ -685,7 +815,8 @@ class Game {
     const names = CONFIG.teams.names;
     $('lan-list').innerHTML = S.players.map((p) => {
       const team = p.team === '0' ? `<span class="t0">${names[0]}</span>` : p.team === '1' ? `<span class="t1">${names[1]}</span>` : '<span class="dim">AUTO</span>';
-      return `<span>${p.name}${p.id === S.myId ? ' (you)' : ''}</span>${team}<span class="dim">${p.id === S.hostId ? 'HOST' : ''}</span>`;
+      const ping = S.pings[p.id];
+      return `<span>${p.name}${p.id === S.myId ? ' (you)' : ''}</span>${team}<span class="dim">${p.id === S.hostId ? 'HOST' : ping !== undefined ? `${ping} MS` : ''}</span>`;
     }).join('');
     $('btn-host').style.display = joined ? 'none' : '';
     $('btn-join').style.display = joined ? 'none' : '';
@@ -697,6 +828,8 @@ class Game {
       $('btn-leave').style.display = joined || S.available ? '' : 'none';
       $('btn-join').disabled = busy;
       $('btn-host').disabled = busy;
+      $('lan-steam').disabled = busy;
+      this.renderSteam();
     } else {
       $('btn-leave').style.display = joined ? '' : 'none';
       $('btn-join').disabled = !S.hostId;
@@ -708,13 +841,36 @@ class Game {
     const hostMap = MAPS[S.hostMap] ? MAPS[S.hostMap].name : '';
     const players = `${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'}`;
     const ips = (this.lanHostIps || []).slice(0, 3).join(' OR ');
+    const steam = desktop && desktop.steam;
+    const ping = joined && !S.isHost && S.pings[S.myId] !== undefined && this.lanVia === 'steam' ? ` · PING ${S.pings[S.myId]} MS` : '';
     $('lan-note').textContent = this.lanNote || (desktop && this.lanConnecting ? `CONNECTING TO ${this.lanConnecting} …`
-      : desktop && !S.available ? 'HOST A GAME ON THIS PC, OR TYPE THE HOST\'S IP ADDRESS AND CLICK JOIN GAME'
+      : desktop && !S.available ? (steam ? 'HOST A GAME, OR TYPE YOUR FRIEND\'S STEAM CODE (OR THE HOST\'S IP ADDRESS ON YOUR NETWORK) AND CLICK JOIN GAME'
+        : 'HOST A GAME ON THIS PC, OR TYPE THE HOST\'S IP ADDRESS AND CLICK JOIN GAME')
         : !S.available ? '' : !joined ? (S.hostId ? `A GAME IS HOSTED ON THIS NETWORK${hostMap ? ` (${hostMap})` : ''} · CHOOSE A NAME AND JOIN`
           : desktop ? 'CONNECTED · NOBODY IS HOSTING THERE YET · YOU JOIN WHEN THEY DO' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
-          : S.isHost ? (desktop && ips ? `YOU HOST ${MAPS[MAP_ID].name} · FRIENDS TYPE ${ips} AND CLICK JOIN GAME · ${players}` : `YOU HOST ${MAPS[MAP_ID].name} · ${players} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`)
-            : S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH');
+          : S.isHost ? (desktop ? this.hostNote(players, ips) : `YOU HOST ${MAPS[MAP_ID].name} · ${players} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`)
+            : (S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH') + ping);
     this.updateMenuButtons();
+  }
+
+  hostNote(players, ips) {
+    const parts = [`YOU HOST ${MAPS[MAP_ID].name} · ${players}`];
+    if (this.steamCode) parts.push('STEAM FRIENDS: RIGHT-CLICK YOU IN STEAM\'S FRIENDS LIST AND CHOOSE JOIN GAME, OR TYPE YOUR STEAM CODE');
+    else if (this.steamNote) parts.push(this.steamNote);
+    if (ips) parts.push(`SAME NETWORK: TYPE ${ips}`);
+    return parts.join(' · ');
+  }
+
+  renderSteam() {
+    const $ = (id) => document.getElementById(id);
+    if (!desktop || !desktop.steam) return;
+    const st = this.steam || {};
+    $('steam-status').innerHTML = st.ok
+      ? `STEAM <b>● LOGGED IN AS ${esc(String(st.name || '').toUpperCase())}</b>${st.testApp ? ' · ONLINE GAMES RUN AS VALVE\'S TEST APP SPACEWAR, SO STEAM SHOWS "PLAYING SPACEWAR"' : ''}`
+      : `STEAM <b class="off">○ ${esc((st.error || 'CHECKING …').replace(/^STEAM /, ''))}</b> · ONLINE PLAY NEEDS STEAM · LAN GAMES WORK WITHOUT IT`;
+    const code = this.lanSession.isHost && this.steamCode;
+    $('steam-code').style.display = code ? '' : 'none';
+    if (code) $('steam-code-v').textContent = this.steamCode;
   }
 
   updateMenuButtons() {
@@ -739,6 +895,7 @@ class Game {
 
   leaveNet(note) {
     if (this.reloading) return;
+    if (desktop && desktop.steam) desktop.steam.leave();
     try { if (note) sessionStorage.setItem('sniperyard.note', note); } catch { /* ignore */ }
     location.href = location.pathname + location.search;
   }
@@ -1239,6 +1396,8 @@ class Game {
     const board = this.state === 'playing' && !this.paused && this.input.act('scores');
     this.hud.setScoreboard(board, board ? this.combatants.filter((c) => !c.isDummy).map((c) => ({
       name: c.name, team: c.team, alive: c.alive, kills: c.kills || 0, deaths: c.deaths || 0, human: c === p || !!c.human, me: c === p,
+      // ping to the host (none for the host's own player)
+      ping: this.net && (c === p || c.human) && (c === p ? this.net.myPeer : c.peer) !== this.net.s.hostId ? this.net.s.pings[c === p ? this.net.myPeer : c.peer] : undefined,
     })) : null, me, this.match.score, this.tdm);
     this.hud.update(dtReal, {
       alive: this.player.alive, scoped: this.player.scoped, health: this.player.health, stance: this.player.stance,
