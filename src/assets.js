@@ -80,7 +80,8 @@ function packTarget(size, srgb, aniso) {
 }
 
 // Replaces entries of `textures` (from createTextures) in place. Returns the slots replaced.
-export async function loadPhotoTextures(renderer, textures) {
+// skip: slots to keep procedural (a biome's own ground, e.g. the beech forest's leaf carpet).
+export async function loadPhotoTextures(renderer, textures, skip = []) {
   const A = CONFIG.assets;
   if (!A.photo) return [];
   let manifest;
@@ -111,7 +112,7 @@ export async function loadPhotoTextures(renderer, textures) {
 
   const replaced = [];
   for (const [slot, entry] of Object.entries(manifest.textures)) {
-    if (!textures[slot] || !entry.files || !entry.files.albedo || !entry.files.normal) continue;
+    if (!textures[slot] || skip.includes(slot) || !entry.files || !entry.files.albedo || !entry.files.normal) continue;
     const f = entry.files;
     try {
       const [alb, nor, rough, height] = await Promise.all([

@@ -66,53 +66,99 @@ function nWave(sr, T) {
   return out;
 }
 
-// Muzzle blast as heard close to the rifle (the shooter, or anyone within a few metres).
-// Distance is applied at playback (filter, level, playback rate, reverb send).
+// Muzzle report of a full-power sniper rifle as heard by the shooter (or anyone within a few
+// metres). Distance is applied at playback (filter, level, playback rate, reverb send).
+//
+// v5, after "it sounds like a puff from an air rifle": the old blast was a 1.3 ms click with a
+// small sine body, so almost all of its peak was in a click and there was little energy behind
+// it. A real .308/.338 is a whip-crack *and* a heavy boom that rolls down the valley:
+//   1. the bullet's own supersonic crack leaving the muzzle (a short N-wave: the "pisk"),
+//   2. a long blast wave (~3 ms positive phase) and a dense, saturated burst of hot gas,
+//   3. a deep chest thump (filtered noise, not a tone, so it never "buzzes"),
+//   4. ground and tree reflections (the crackle), then the far slope answering ~0.4-0.9 s later
+//      and a low rumble rolling away for ~2.5 s.
+// Everything is driven into a soft saturator so the loudness (RMS) is many times the old one at
+// the same peak. Still no pitch sweeps anywhere (they read as an insect flying past).
 export function muzzleBlast(sr, seed = 1) {
   const r = rng(seed);
-  const len = 1.6;
+  const len = 3.2;
   const out = new Float32Array(Math.floor(sr * len));
-  // primary blast wave
+  // 1. supersonic crack at the muzzle: the whip
+  const crack = nWave(sr, 0.0011 + r() * 0.0003);
+  mixInto(out, crack, 0, 1.15);
+  mixInto(out, lowpass(Float32Array.from(crack), sr, 6000), Math.round(sr * 0.0021), 0.55);
+  // 2. blast wave: long positive phase, deep negative phase
+  const Td = 0.0028 + r() * 0.0008;
+  const blast = friedlander(sr, Td, 1.1, 0.06);
+  mixInto(out, blast, Math.round(sr * 0.0004), 1.2);
+  const refl = lowpass(Float32Array.from(blast), sr, 3500);
+  mixInto(out, refl, Math.round(sr * (0.0045 + r() * 0.0015)), 0.75);
+  // hot-gas burst: dense broadband noise, 4 ms attack body then ~25 ms decay, saturated
+  const gas = new Float32Array(Math.floor(sr * 0.14));
+  for (let i = 0; i < gas.length; i++) {
+    const t = i / sr;
+    gas[i] = (r() * 2 - 1) * (Math.exp(-t / 0.011) * 0.85 + Math.exp(-t / 0.045) * 0.3);
+  }
+  highpass(gas, sr, 160);
+  const gasLo = lowpass(Float32Array.from(gas), sr, 1400);
+  for (let i = 0; i < gas.length; i++) gas[i] = Math.tanh((gas[i] * 0.6 + gasLo[i] * 1.2) * 2.0) * 0.8;
+  mixInto(out, gas, 0, 1.0);
+  // 3. chest thump: low-passed noise burst (no tone) with a fast attack
+  const th = new Float32Array(Math.floor(sr * 0.45));
+  for (let i = 0; i < th.length; i++) {
+    const t = i / sr;
+    th[i] = (r() * 2 - 1) * Math.min(1, t / 0.0015) * (Math.exp(-t / 0.05) + 0.25 * Math.exp(-t / 0.16));
+  }
+  lowpass(th, sr, 180); lowpass(th, sr, 220);
+  normalize(th, 1);
+  mixInto(out, th, 0, 0.95);
+  // 4. reflections: trunks and the ground nearby (crackle), then the far slope and the rumble
+  const tapSrc = lowpass(Float32Array.from(blast), sr, 3000);
+  for (let k = 0; k < 34; k++) {
+    const t = 0.009 + Math.pow(r(), 1.5) * 0.3;
+    mixInto(out, tapSrc, Math.round(sr * t), (0.18 + r() * 0.25) * Math.exp(-t / 0.12));
+  }
+  const slap = lowpass(Float32Array.from(gas), sr, 1800);
+  for (let k = 0; k < 5; k++) {
+    const t = 0.38 + k * (0.11 + r() * 0.09) + r() * 0.05;
+    mixInto(out, slap, Math.round(sr * t), 0.32 * Math.exp(-(t - 0.38) / 0.45));
+  }
+  const rum = new Float32Array(Math.floor(sr * 3.0));
+  let b = 0;
+  for (let i = 0; i < rum.length; i++) {
+    b = 0.99 * b + 0.01 * (r() * 2 - 1);
+    const t = i / sr;
+    // swells as the valley answers, then rolls away
+    rum[i] = b * Math.min(1, t / 0.05) * (Math.exp(-t / 0.7) * 0.8 + 0.35 * Math.exp(-((t - 0.6) ** 2) / 0.12));
+  }
+  lowpass(rum, sr, 380);
+  normalize(rum, 1);
+  mixInto(out, rum, Math.round(sr * 0.006), 0.42);
+  // soft saturation: loud and dense, peaks rounded (the master bus clips softly as well)
+  for (let i = 0; i < out.length; i++) out[i] = Math.tanh(out[i] * 1.25);
+  return normalize(out, 0.97);
+}
+
+// The old (0.2–0.4) blast, kept for comparison in tests (`muzzleBlastOld`).
+export function muzzleBlastOld(sr, seed = 1) {
+  const r = rng(seed);
+  const out = new Float32Array(Math.floor(sr * 1.6));
   const Td = 0.0013 + r() * 0.0005;
   const blast = friedlander(sr, Td, 0.9, 0.03);
   mixInto(out, blast, 0, 1.0);
-  // ground reflection (softer: the ground absorbs the top end)
-  const refl = lowpass(Float32Array.from(blast), sr, 5000);
-  mixInto(out, refl, Math.round(sr * (0.0042 + r() * 0.0015)), 0.6);
-  // hot-gas turbulence: a bright burst that decays in ~8 ms
+  mixInto(out, lowpass(Float32Array.from(blast), sr, 5000), Math.round(sr * (0.0042 + r() * 0.0015)), 0.6);
   const nz = new Float32Array(Math.floor(sr * 0.06));
   for (let i = 0; i < nz.length; i++) nz[i] = (r() * 2 - 1) * Math.exp(-(i / sr) / 0.008);
   highpass(nz, sr, 700);
   mixInto(out, nz, 0, 0.55);
-  // body: a damped low thump (no pitch glide)
   const body = new Float32Array(Math.floor(sr * 0.35));
   const f1 = 62 + r() * 10, f2 = 140 + r() * 30;
   for (let i = 0; i < body.length; i++) {
     const t = i / sr;
     body[i] = Math.sin(2 * Math.PI * f1 * t) * Math.exp(-t / 0.07) * 0.6 + Math.sin(2 * Math.PI * f2 * t) * Math.exp(-t / 0.03) * 0.3;
   }
-  // soften the attack of the sine so it doesn't click on its own
   for (let i = 0; i < Math.min(body.length, sr * 0.002); i++) body[i] *= i / (sr * 0.002);
   mixInto(out, body, 0, 0.5);
-  // early reflections from trunks and the ground nearby: the "crackle" after a shot in a forest
-  const tapSrc = lowpass(Float32Array.from(blast), sr, 3500);
-  const taps = 26;
-  for (let k = 0; k < taps; k++) {
-    const t = 0.012 + Math.pow(r(), 1.6) * 0.32;
-    const a = (0.12 + r() * 0.22) * Math.exp(-t / 0.11);
-    mixInto(out, tapSrc, Math.round(sr * t), a);
-  }
-  // rolling rumble: low noise that swells and dies over ~1.2 s
-  const rum = new Float32Array(Math.floor(sr * 1.5));
-  let b = 0;
-  for (let i = 0; i < rum.length; i++) {
-    b = 0.985 * b + 0.015 * (r() * 2 - 1);
-    const t = i / sr;
-    rum[i] = b * Math.min(1, t / 0.03) * Math.exp(-t / 0.45);
-  }
-  lowpass(rum, sr, 320);
-  normalize(rum, 1);
-  mixInto(out, rum, Math.round(sr * 0.004), 0.16);
   return normalize(out, 0.95);
 }
 

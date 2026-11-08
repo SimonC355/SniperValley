@@ -137,8 +137,9 @@ export class RemoteCombatant extends Combatant {
     this.speed = dt > 0 ? lerp(this.speed, moved / dt, 1 - Math.exp(-dt * 8)) : this.speed;
     this._prev.copy(this.pos);
     this.eye = lerp(this.eye, eyeHeightFor(this.stance), 1 - Math.exp(-dt * 6));
-    if (this.alive) this.hitbox.update(this, this.game.terrain);
-    this.character.update(dt, this, time, this.game.terrain);
+    // (ground: the terrain or a rock/wall top, so a player lying on a rock lies on it)
+    if (this.alive) this.hitbox.update(this, this.game.ground);
+    this.character.update(dt, this, time, this.game.ground);
     if (this.alive && moved > 0 && moved < 3) this._footsteps(moved, time);
   }
 

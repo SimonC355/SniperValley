@@ -40,6 +40,23 @@ export class Terrain {
       }
     }
     this.splatData = new Uint8Array(this.gW * this.gH * 4);
+    // areas kept clear of trees, rocks, bushes and debris (buildings; see reserve())
+    this.reserved = [];
+  }
+
+  // Keep a circle clear of trees, rocks, bushes and debris (buildings call this).
+  reserve(x, z, r) { this.reserved.push({ x, z, r }); }
+
+  // Is (x, z) free of buildings (with margin) and away from the edge wall?
+  isFree(x, z, margin = 0) {
+    for (const c of this.reserved) {
+      const rr = c.r + margin;
+      if ((x - c.x) ** 2 + (z - c.z) ** 2 < rr * rr) return false;
+    }
+    // a clear strip inside the stone wall at the edge, so the wall is seen from a distance
+    const ex = this.halfX - Math.abs(x), ez = this.halfZ - Math.abs(z);
+    if ((ex > -3 && ex < 2.5 + margin && Math.abs(z) < this.halfZ + 3) || (ez > -3 && ez < 2.5 + margin && Math.abs(x) < this.halfX + 3)) return false;
+    return true;
   }
 
   riverCenter(x) {
@@ -59,6 +76,8 @@ export class Terrain {
     else if (ad < M.riverShelfStart) h = lerp(-D, -0.75, smoothstep(M.riverDeepHalfWidth, M.riverShelfStart, ad));
     else if (ad < M.riverShelfEnd) h = lerp(-0.75, 0.05, (ad - M.riverShelfStart) / (M.riverShelfEnd - M.riverShelfStart));
     else h = lerp(0.05, M.bankTop, smoothstep(M.riverShelfEnd, M.riverShelfEnd + 7, ad));
+    // lowland rivers cut a clear bank into the flat ground
+    if (M.terrain === 'lowland' && ad >= M.riverShelfEnd) h += 1.6 * smoothstep(M.riverShelfEnd + 1, M.riverShelfEnd + 5, ad);
 
     // optional fords: shallow crossings
     for (const fx of M.fords) {
@@ -90,10 +109,12 @@ export class Terrain {
     h += n.noise2(x * 0.17, z * 0.17) * 0.22 * smoothstep(0.0, 0.05, t);
     // distant mountains, at the same distance from the river on every map (on the smaller
     // maps a forested plateau lies between the ridge and the mountains)
+    // (lowland: low wooded hills instead of mountains; Tuscany: softer, rounder hills)
+    const [farA, farB] = M.farHills || [90, 70];
     const far = smoothstep(232.6, 521.2, ad);
-    if (far > 0) h += far * (90 + 70 * this.noise2.fbm2(x * 0.0022, z * 0.0022, 4));
+    if (far > 0) h += far * (farA + farB * this.noise2.fbm2(x * 0.0022, z * 0.0022, 4));
     const farX = smoothstep(CONFIG.map.length * 0.9, CONFIG.map.length * 1.7, Math.abs(x));
-    if (farX > 0) h += farX * 45 * (0.6 + 0.4 * n.noise2(z * 0.004, x * 0.002)) * smoothstep(0.2, 0.5, t + 0.15);
+    if (farX > 0) h += farX * 45 * (farA / 90) * (0.6 + 0.4 * n.noise2(z * 0.004, x * 0.002)) * smoothstep(0.2, 0.5, t + 0.15);
     return h;
   }
 
@@ -157,7 +178,8 @@ export class Terrain {
         const slope = 1 - nrm.y;
         const rock = smoothstep(0.16, 0.3, slope);
         const dry = smoothstep(0.1, 1.2, hgt);
-        const grass = clamp((1 - canopy * 1.25) * (1 - rock) * dry, 0, 1);
+        // (the beech forest floor is leaves, with grass only in the clearings)
+        const grass = clamp((1 - canopy * 1.25) * (1 - rock) * dry, 0, 1) * (CONFIG.map.biome === 'beech' ? 0.35 : 1);
         d[k] = clamp(canopy, 0, 1) * 255;
         d[k + 1] = grass * 255;
         d[k + 2] = rock * 255;

@@ -59,10 +59,11 @@ const WaterShader = {
       vec2 p = vWPos.xz;
       float bed = texture2D(tHeight, (p - uHB.xy) / uHB.zw).r;
       float depth = max(0.0, -bed);
+      // v5: a strong current (about 2 m/s at the surface pattern), flowing toward -X
       vec2 flow = vec2(0.45, 0.04);
-      vec3 n1 = texture2D(tNormal, p / 9.0 + flow * uTime * 0.11).xyz * 2.0 - 1.0;
-      vec3 n2 = texture2D(tNormal, p / 3.7 - vec2(0.03, 0.06) * uTime + flow * uTime * 0.17).xyz * 2.0 - 1.0;
-      vec3 n3 = texture2D(tNormal, p / 23.0 + flow * uTime * 0.05).xyz * 2.0 - 1.0;
+      vec3 n1 = texture2D(tNormal, p / 9.0 + flow * uTime * 0.45).xyz * 2.0 - 1.0;
+      vec3 n2 = texture2D(tNormal, p / 3.7 - vec2(0.03, 0.06) * uTime + flow * uTime * 0.55).xyz * 2.0 - 1.0;
+      vec3 n3 = texture2D(tNormal, p / 23.0 + flow * uTime * 0.16).xyz * 2.0 - 1.0;
       vec3 tn = normalize(n1 * 0.5 + n2 * 0.35 + n3 * 0.4 + vec3(0.0, 0.0, 2.2));
       vec3 N = normalize(vec3(tn.x, tn.z, tn.y));
       vec3 V = normalize(cameraPosition - vWPos);
@@ -81,6 +82,10 @@ const WaterShader = {
       float foamN = texture2D(tNormal, p / 1.7 + uTime * 0.05).a;
       float foam = smoothstep(0.12, 0.0, depth) * smoothstep(0.45, 0.65, foamN);
       col = mix(col, vec3(0.55, 0.57, 0.55), foam * 0.35);
+      // streaks of white water racing down the deep channel: the current is dangerous
+      float streak = smoothstep(0.6, 0.78, texture2D(tNormal, vec2(p.x / 7.0 + uTime * 0.32, p.y / 1.1 + n3.x * 0.15)).a)
+                   * smoothstep(0.8, 2.0, depth);
+      col = mix(col, vec3(0.62, 0.66, 0.64), streak * 0.28);
       float alpha = clamp(1.0 - exp(-depth * 2.2), 0.0, 1.0);
       alpha = max(alpha, fres * 0.9);
       alpha = clamp(alpha + foam * 0.3, 0.0, 1.0);

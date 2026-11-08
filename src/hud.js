@@ -6,17 +6,21 @@ import { keyLabel } from './input.js';
 
 const ACTION_LABELS = {
   forward: 'Move forward', back: 'Move back', left: 'Strafe left', right: 'Strafe right',
-  sprint: 'Sprint (gets up) · hold breath while scoped', jump: 'Jump / stand up', crouch: 'Crouch', prone: 'Prone',
+  sprint: 'Sprint (gets up) · hold breath while scoped', jump: 'Jump / stand up · climb onto a rock or low wall', crouch: 'Crouch · while sprinting: slide', prone: 'Prone',
   scope: 'Scope (hold)', fire: 'Fire (bolt cycles 1.5 s)', scores: 'Scoreboard (hold)', restart: 'Restart (single player)',
 };
 
 const $ = (id) => document.getElementById(id);
+
+// small skull icon for the kill markers
+const SKULL_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2c-5 0-8.6 3.6-8.6 8.2 0 2.6 1.2 4.7 3.1 6v2.4c0 .7.5 1.2 1.2 1.2h1.4v-2.2h1.6V20h2.6v-2.2h1.6V20h1.4c.7 0 1.2-.5 1.2-1.2v-2.4c1.9-1.3 3.1-3.4 3.1-6 0-4.6-3.6-8.2-8.6-8.2zM8.4 14.1a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zm7.2 0a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zM12 14.6l1.3 2.4h-2.6l1.3-2.4z"/></svg>';
 
 export class HUD {
   constructor() {
     const hud = $('hud');
     hud.innerHTML = `
       <div id="markers" class="hud-el"></div>
+      <div id="skulls" class="hud-el"></div>
       <div id="crosshair" class="hud-el"></div>
       <div id="hitmarker" class="hud-el"></div>
       <div id="topbar" class="hud-el">
@@ -110,6 +114,7 @@ export class HUD {
         <div class="controls fixed">
           <b>Mouse</b><span>look (arrow keys if pointer lock is unavailable)</span>
           <b>Mouse wheel</b><span>scoped: zoom ${CONFIG.player.zoomLevels[0]}–${CONFIG.player.zoomLevels[CONFIG.player.zoomLevels.length - 1]}× (forward in, back out)</span>
+          <b>Hold forward</b><span>against a rock or a low wall: climb onto it (or press jump)</span>
           <b>Esc</b><span>pause / settings</span>
           <b>T · F1 · F2</b><span>debug: skip zone step · debug info · reveal all characters</span>
         </div>
@@ -124,7 +129,7 @@ export class HUD {
           <label>Friendly fire</label><select id="set-ff">${opt([['1', 'on (a team kill costs a point in deathmatch)'], ['0', 'off (bullets pass teammates)']])}</select>
           <label>Rounds to win</label><select id="set-rounds">${opt([['1', '1 (single round)'], ['2', '2 (best of 3)'], ['3', '3 (best of 5)'], ['4', '4 (best of 7)']])}</select>
           <label>Swap sides each round</label><select id="set-swap">${onoff}</select>
-          <label>Zone mode</label><select id="set-zone">${opt([['ends', 'ends (closes from valley ends)'], ['radial', 'radial (toward the water)']])}</select>
+          <label>Zone mode</label><select id="set-zone">${opt([['radial', 'circle (closes toward the water)'], ['ends', 'ends (closes from the valley ends)']])}</select>
           <label>Camouflage</label><input id="set-camo" type="range" min="0" max="1" step="0.05">
           <label>Tracers</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'faint'], ['bright', 'bright']])}</select>
           <label>Ballistics</label><select id="set-ball">${opt([['0', 'hitscan'], ['1', 'travel time + drop + wind']])}</select>
@@ -156,7 +161,7 @@ export class HUD {
       </div>`;
     this.startScreen = make('startscreen', `<div class="panel">
       <h1>SNIPER<span>VALLEY</span></h1>
-      <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
+      <div class="sub"><span class="ver">VERSION ${__APP_VERSION__.replace(/\.0$/, '')}</span> · PLAYER-REQUESTED UPDATES · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
       <div id="lanbox" class="lan" style="display:none">
         <h2 id="lan-h">LAN MULTIPLAYER</h2>
         <div class="settings">
@@ -539,6 +544,48 @@ export class HUD {
     for (const [id, el] of this.markerEls) {
       if (!seen.has(id)) { el.remove(); this.markerEls.delete(id); }
     }
+  }
+
+  // Kill markers (v5): a small skull where someone you shot went down, with the distance. Off
+  // screen it sits at the edge of the screen in that direction, with an arrow.
+  // list: [{ id, pos: Vector3, name, t: seconds left, life: seconds total }]
+  updateSkulls(camera, list, width, height) {
+    if (!this.skullEls) this.skullEls = new Map();
+    const box = document.getElementById('skulls');
+    const seen = new Set();
+    const m = 46;
+    for (const k of list) {
+      seen.add(k.id);
+      let el = this.skullEls.get(k.id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'skull';
+        el.innerHTML = `<i class="arrow"></i>${SKULL_SVG}<span></span>`;
+        box.appendChild(el);
+        this.skullEls.set(k.id, el);
+      }
+      const p = this._v.copy(k.pos).project(camera);
+      const behind = p.z > 1;
+      let x = (p.x * 0.5 + 0.5) * width, y = (-p.y * 0.5 + 0.5) * height;
+      if (behind) { x = width - x; y = height - y; }
+      const off = behind || x < m || x > width - m || y < m || y > height - m;
+      if (off) {
+        // push to the screen edge along the direction from the centre
+        const cx = width / 2, cy = height / 2;
+        let dx = x - cx, dy = y - cy;
+        if (behind && Math.abs(dx) < 1 && Math.abs(dy) < 1) dy = 1;
+        const sx = (width / 2 - m) / Math.max(1e-3, Math.abs(dx)), sy = (height / 2 - m) / Math.max(1e-3, Math.abs(dy));
+        const sc = Math.min(sx, sy);
+        x = cx + dx * sc; y = cy + dy * sc;
+        el.style.setProperty('--ang', `${Math.atan2(dy, dx)}rad`);
+      }
+      el.classList.toggle('off', off);
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.style.opacity = String(Math.min(1, k.t / 1.5, (k.life - k.t) / 0.25 + 0.2));
+      el.lastElementChild.textContent = `${Math.round(camera.position.distanceTo(k.pos))} m`;
+    }
+    for (const [id, el] of this.skullEls) if (!seen.has(id)) { el.remove(); this.skullEls.delete(id); }
   }
 
   // Debug reveal (F2): circles on every character.

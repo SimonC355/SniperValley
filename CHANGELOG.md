@@ -3,6 +3,46 @@
 Each version's section becomes the notes of its release on GitHub (see
 `scripts/release-notes.mjs`); the text after the version is the release's name.
 
+## 5.0.0 – Player-requested updates
+
+Everything in this version was asked for by players and testers.
+
+- **Two new maps, same concept** (two banks facing each other across a river you can't cross):
+  - **Tuscan Hills** (300 × 240 m, 2v2–10v10): old stone hamlets on the slopes, built of rough
+    limestone or ochre plaster with terracotta roofs and green shutters, a few towers, and
+    roofless ruins whose low walls you can climb and hide behind. Cypresses around the
+    hamlets, olive groves on the benches, umbrella pines, dry golden grass and warm, hazy light.
+  - **Beech River** (320 × 260 m, 2v2–10v10): a Nordic beech forest on low, rolling ground,
+    tall grey beeches over a thick carpet of last year's leaves, a few dark patches of planted
+    spruce, and a broad river in the middle that splits the two sides.
+  - The three valley maps are still there.
+- **More rocks, and you can climb them.** About twice as many rocks, many in outcrops. Walk
+  straight up onto low rocks; hold forward against a higher one (up to about 2.4 m, or press
+  jump) to climb onto it. The same goes for low walls in the Tuscan ruins. Bullets and sight
+  lines now hit the rock as it is drawn.
+- **Slide.** Press crouch while sprinting: you slide about 9 m on your hip and end up
+  crouched. Downhill you slide further; jump ends the slide with a hop. It makes a scraping
+  sound the enemy can hear.
+- **You can see where the map ends.** A tall dry-stone wall runs along the whole edge of every
+  map (higher on the big maps), with a clear strip in front of it, so you see it long before
+  you get there. Across the river it becomes a low weir.
+- **The circle is now the default zone**: it closes toward the water. Settings saved before
+  5.0 switch to it once; you can still choose *ends* in MATCH.
+- **The river is deadly.** The deep channel has a strong current: it sweeps you downstream and
+  drowns you in a few seconds (in deathmatch you respawn). White water streaks show the
+  current, and even the shallows pull at you.
+- **Gunshots sound like a real sniper rifle**: a sharp supersonic whip-crack and a heavy boom
+  that rolls down the valley for almost three seconds, about four times louder (RMS) than the
+  old "puff". Passing bullets crack within 50 m (was 30 m).
+- **Kill markers.** A small skull marks where the person you shot went down, with the distance,
+  for eight seconds; off screen it sits at the edge in that direction.
+- **Graphics.** A new, detailed first-person rifle (chassis with M-LOK slots, fluted barrel,
+  muzzle brake, rail, knurled scope turrets, folded bipod), sharper image, more contrast and
+  clearer air, fuller grass. The Windows build now includes the CC0 photoscanned ground, rock
+  and bark textures (downloaded when the program is built).
+- **New look for menus and HUD**: rounded, glassy panels in dark olive and khaki, a segmented
+  tab bar, pill-shaped HUD elements and a cleaner scoreboard, kill feed and killcam.
+
 ## 0.4.0 – Online with friends over Steam
 
 - **Play online with friends.** Host a game and friends join from anywhere: they right-click

@@ -16,8 +16,12 @@ network.
   - **Elimination**: nobody respawns, the play area shrinks every 40–50 s, a match is best of
     three rounds, and teams swap slopes (and sun side) between rounds.
   - **Team deathmatch**: you respawn on your team's slope; the first team to 30 kills wins.
-- Three maps of the same valley: **Valley** (5v5–20v20), **Narrow valley** (2v2–10v10) and
-  **Ravine** (small, 1v1–5v5).
+- Five maps: three sizes of the same forested valley, **Valley** (5v5–20v20), **Narrow
+  valley** (2v2–10v10) and **Ravine** (small, 1v1–5v5), plus **Tuscan Hills** (old stone
+  hamlets, cypresses and olive groves) and **Beech River** (a Nordic beech forest split by a
+  broad river).
+- Climb onto rocks and low walls, slide when you sprint, and stay out of the river: its current
+  is deadly.
 - Detection comes from scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 - The forest is alive: clouds drift over and their shadows sweep the slopes (a scope glints
   less under a cloud), gusts roll through the trees, grass and ghillie suits, needles drift
@@ -135,10 +139,14 @@ settings stay.
 | Valley | 340 × 290 m | 5v5 – 20v20 | 110 – 270 m |
 | Narrow valley | 260 × 210 m | 2v2 – 10v10 | 80 – 190 m |
 | Ravine | 200 × 150 m | 1v1 – 5v5 | 45 – 140 m |
+| Tuscan Hills | 300 × 240 m | 2v2 – 10v10 | not measured yet |
+| Beech River | 320 × 260 m | 2v2 – 10v10 | not measured yet |
 
-All three are the same forested river valley at different sizes: narrower slopes, a smaller
-river and lower ridges, with the same mountains behind. The zone also closes faster on the
-smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+The first three are the same forested river valley at different sizes: narrower slopes, a
+smaller river and lower ridges, with the same mountains behind. Tuscan Hills is a valley of old
+stone hamlets (houses and ruins block bullets; you can climb the low ruin walls), and Beech
+River a flat, rolling beech forest with a broad river between the teams. A stone wall marks the
+edge of every map. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
@@ -192,8 +200,9 @@ sensitivity, field of view, invert Y, and whether the scope opens at 2× or at t
 | WASD | move |
 | Mouse | look (arrow keys if pointer lock is unavailable) |
 | Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s) |
-| Space | jump / stand up |
-| C or Ctrl | crouch |
+| Space | jump / stand up · climb onto a rock or low wall you are facing |
+| W (hold) against a rock or low wall | climb onto it (up to about 2.4 m) |
+| C or Ctrl | crouch · while sprinting: slide |
 | Z | prone |
 | Right mouse (hold) | scope: opens at 2×, slower sensitivity |
 | Mouse wheel | while scoped: zoom 2–12× (forward in, back out) |
@@ -476,3 +485,20 @@ are in [CREDITS.md](CREDITS.md).
 - **Leaving.** You leave: your friend is told and goes back to the menu. Your friend quits:
   you see *LEFT THE GAME*.
 - **If something fails,** send `steam-log.txt` from `%APPDATA%\SniperValley` (from both PCs).
+
+**5.0: player-requested updates**
+
+- **Maps.** Try *Tuscan Hills* and *Beech River* next to SINGLE PLAYER. Hide in a Tuscan ruin
+  and shoot from behind its walls; houses stop bullets.
+- **Rocks.** Walk onto a low rock; hold W against a higher one (or press Space) to climb it.
+  Lie prone on top. Shots that clear a rock on screen should not hit it.
+- **Slide.** Sprint, then press C: you slide and end up crouched. Try it downhill.
+- **Edge of the map.** Walk toward the side: the stone wall is visible from far away.
+- **Zone.** A new match uses the circle (toward the water) unless you choose *ends*.
+- **River.** Walk into the deep water: the current takes you downstream and you drown in a
+  few seconds (in deathmatch you respawn).
+- **Gunshot.** Fire, and let a friend (or the AI) shoot past you: a whip-crack and a long boom,
+  not a puff. Tell me if it is too loud or distorted.
+- **Kill marker.** Shoot someone: a skull marks where they fell, with the distance.
+- **Looks.** The new rifle, menus and HUD. If anything looks off (textures too bright or too
+  dark), a screenshot helps.

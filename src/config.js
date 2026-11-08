@@ -22,11 +22,18 @@ export const CONFIG = {
     ridgeHeightSouth: 58,
     meander: 1,            // scale of the river's side-to-side bends
     relief: 1,             // scale of the bumps, spurs and terraces on the slopes
-    deepWaterDepth: 0.85,  // water deeper than this is impassable
+    deepWaterDepth: 0.85,  // in water deeper than this the current takes you (v5; it used to be a wall)
     shallowSpeedMul: 0.55, // movement multiplier in shallow water
+    current: 5.0,          // m/s: the river's current in the deep channel (it sweeps you downstream)
+    shallowDrift: 0.6,     // m/s: the pull of the current on the shallow shelf
+    drownTime: 3.5,        // seconds in the deep current before it kills you
     fords: [],             // optional x positions of shallow crossings, e.g. [-120, 140]
     terrainExtent: 1500,   // full rendered terrain size (outer area is scenery)
     terrainSpacing: 2.0,   // mesh vertex spacing inside the play area (heights come from a 1 m grid)
+    biome: 'conifer',      // set from MAPS below
+    terrain: 'valley',
+    farHills: [90, 70],
+    wallHeight: 2.9,
   },
 
   // ---------------------------------------------------------------- rendering
@@ -42,17 +49,18 @@ export const CONFIG = {
     autoResolution: true,  // lower the resolution (down to 60%) when frames take longer than ~17 ms
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
-    grain: 0.035,
+    grain: 0.03,
+    sharpen: 0.6,          // v5: sharpening in the final pass (0 = off)
     vignette: 0.32,
     farClip: 2600,
   },
 
   // Colour grading in the final pass (applied to linear HDR colour before tone mapping).
   grade: {
-    saturation: 1.12,
-    contrast: 1.1,         // around mid grey, in log space
+    saturation: 1.15,
+    contrast: 1.16,        // around mid grey, in log space (v5: a little punchier)
     warmth: 0.05,          // warm highlights / cool shadows split toning
-    shafts: 0.45,          // light-shaft strength
+    shafts: 0.36,          // light-shaft strength
   },
 
   // Photoscanned textures downloaded with `npm run assets` (CC0, Poly Haven) into
@@ -80,7 +88,7 @@ export const CONFIG = {
   },
 
   fog: {
-    density: 0.002,        // exponential density at height 0
+    density: 0.0017,       // exponential density at height 0 (v5: clearer air)
     heightFalloff: 0.028,  // per metre
     color: 0xb9c3c9,
     sunScatter: 0.6,
@@ -120,7 +128,7 @@ export const CONFIG = {
     windStrength: 1.0,
   },
   bushes: { count: 5200, lod0Distance: 45, maxDistance: 240 },
-  rocks: { count: 340 },
+  rocks: { count: 640 },   // v5: about twice as many, and you can climb onto them
   grass: { radius: 30, spacing: 0.42 },
 
   // ---------------------------------------------------------------- player
@@ -137,6 +145,13 @@ export const CONFIG = {
     accel: 22,
     jumpVelocity: 4.6,
     gravity: 15,
+    stepHeight: 0.55,      // walk straight up onto rocks and ledges this high
+    climbHeight: 2.4,      // hold forward (or press jump) against a rock or a low wall this high to climb onto it
+    climbTime: 0.55,       // seconds a climb takes (a bit longer for a high one)
+    slideSpeed: 9.2,       // sprint + crouch: a slide that starts at this speed
+    slideFriction: 6.0,    // m/s² of slowing on level ground (a downhill slide goes further)
+    slideMinSpeed: 2.4,    // the slide ends, crouched, below this speed
+    slideEye: 0.78,        // eye height while sliding
     mouseSensitivity: 0.0021,  // radians per pixel at hip FOV
     arrowLookSpeed: 1.6,       // radians per second for the arrow-key fallback
     fovHip: 70,
@@ -211,7 +226,7 @@ export const CONFIG = {
     interval: 60,              // a new step starts every interval seconds
     warning: 10,
     shrink: 20,
-    mode: 'ends',              // 'ends' (closes from the valley ends) | 'radial' (circle toward the water)
+    mode: 'radial',            // 'radial' (circle closing toward the water, default since v5) | 'ends' (closes from the valley ends)
     damage: [2, 4, 7, 11, 16, 24, 30],  // hp per second outside, indexed by current step
   },
 
@@ -288,7 +303,7 @@ export const CONFIG = {
     effects: 1.0,          // gunshots, impacts, footsteps, birds
     ambience: 1.0,         // wind and river
     echo: true,
-    crackRadius: 30,       // a passing bullet's supersonic crack is heard this far from its path
+    crackRadius: 50,       // a passing bullet's supersonic crack is heard this far from its path
   },
 
   // Player controls (saved per browser from the settings menu).
@@ -341,7 +356,8 @@ try {
     if (s.tdmKills) CONFIG.match.tdmKills = Math.max(5, Math.min(200, s.tdmKills | 0));
     if ('ff' in s) CONFIG.match.friendlyFire = !!s.ff;
     if ('swap' in s) CONFIG.match.swapSides = !!s.swap;
-    if (s.zone === 'ends' || s.zone === 'radial') CONFIG.zone.mode = s.zone;
+    // v5 made the circle (radial) the default: zone choices saved before v5 are not kept
+    if ((s.zone === 'ends' || s.zone === 'radial') && s.zv === 5) CONFIG.zone.mode = s.zone;
     if (typeof s.camo === 'number') CONFIG.camouflageStrength = s.camo;
     if (['off', 'faint', 'bright'].includes(s.tracers)) CONFIG.weapon.tracers = s.tracers;
     if ('ball' in s) CONFIG.weapon.ballistics.enabled = !!s.ball;
@@ -352,7 +368,7 @@ export function saveRenderSettings() {
   try { localStorage.setItem('sniperyard.render', JSON.stringify(CONFIG.render)); } catch (e) { /* ignore */ }
   try {
     localStorage.setItem('sniperyard.match', JSON.stringify({
-      size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode,
+      size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode, zv: 5,
       camo: CONFIG.camouflageStrength, tracers: CONFIG.weapon.tracers, ball: CONFIG.weapon.ballistics.enabled,
       mode: CONFIG.match.mode, tdmKills: CONFIG.match.tdmKills, ff: CONFIG.match.friendlyFire,
     }));
@@ -385,22 +401,36 @@ try {
 } catch (e) { /* ignore */ }
 
 // ---------------------------------------------------------------- maps
-// Three sizes of the same forested river valley. The chosen map's numbers replace CONFIG.map,
-// and the numbers of rocks, bushes, fallen trees and bird flocks follow the play area so the
-// forest is as dense on every map. Trees follow the area by themselves.
-// (v0.3.1: all three about a quarter smaller than before, for more contact.)
+// Forested river valleys in three sizes (VALLEY, NARROW VALLEY, RAVINE), plus two maps added in
+// v5 with the same concept (two banks facing each other across a river nobody can cross):
+// TUSCAN HILLS (a valley of old stone hamlets, cypresses and olive groves) and BEECH RIVER (a
+// Nordic beech forest on low, rolling ground with a broad river in the middle).
+// The chosen map's numbers replace CONFIG.map, and the numbers of rocks, bushes, fallen trees
+// and bird flocks follow the play area so the forest is as dense on every map.
+//   biome:   'conifer' | 'tuscany' | 'beech' (trees, ground textures, buildings, colours)
+//   terrain: 'valley' (two slopes up to ridges) | 'lowland' (gentle, rolling banks)
+//   farHills: height of the scenery hills/mountains around the play area
+//   wall:    height of the stone wall that marks the edge of the play area
 export const MAPS = {
   valley: {
-    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50,
+    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.9,
     map: { length: 340, width: 290, ridgeDist: 136, ridgeHeightNorth: 52, ridgeHeightSouth: 47, riverDeepHalfWidth: 8, riverShelfStart: 11, riverShelfEnd: 15, riverDepth: 2.6, meander: 0.85, relief: 0.9 },
   },
   narrow: {
-    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42,
+    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.6,
     map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36,
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.3,
     map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
+  },
+  tuscany: {
+    name: 'TUSCAN HILLS', size: '300 × 240 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'tuscany', terrain: 'valley', farHills: [55, 40], wall: 2.7,
+    map: { length: 300, width: 240, ridgeDist: 112, ridgeHeightNorth: 38, ridgeHeightSouth: 34, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.7, relief: 0.7 },
+  },
+  beech: {
+    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14], wall: 2.7,
+    map: { length: 320, width: 260, ridgeDist: 122, ridgeHeightNorth: 9, ridgeHeightSouth: 8, riverDeepHalfWidth: 12, riverShelfStart: 15, riverShelfEnd: 19, riverDepth: 3.0, meander: 0.9, relief: 0.55 },
   },
 };
 
@@ -419,14 +449,30 @@ export const MAP_ID = (() => {
 {
   const P = MAPS[MAP_ID];
   Object.assign(CONFIG.map, P.map);
+  CONFIG.map.biome = P.biome;
+  CONFIG.map.terrain = P.terrain;
+  CONFIG.map.farHills = P.farHills;
+  CONFIG.map.wallHeight = P.wall;
   const k = (P.map.length * P.map.width) / (440 * 380);
-  CONFIG.rocks.count = Math.round(340 * k);
-  CONFIG.bushes.count = Math.round(5200 * k);
+  CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
+  // beech forests are open underneath; Tuscany's hillsides are drier and more open
+  CONFIG.bushes.count = Math.round(5200 * k * (P.biome === 'beech' ? 0.35 : P.biome === 'tuscany' ? 0.6 : 1));
   CONFIG.debris.logs = Math.round(240 * k);
   CONFIG.debris.stumps = Math.round(320 * k);
   CONFIG.debris.branches = Math.round(2000 * k);
   CONFIG.birds.flocks = Math.max(10, Math.round(CONFIG.birds.flocks * k));
   CONFIG.zone.interval = P.zoneInterval;
+  // light and air of the biome: warm, hazy late sun over Tuscany; soft light in the beech forest
+  if (P.biome === 'tuscany') {
+    Object.assign(CONFIG.sun, { elevation: 17, azimuth: 242, intensity: 3.7, color: 0xffd39a });
+    Object.assign(CONFIG.fog, { color: 0xd3cab4, density: 0.0017 });
+    Object.assign(CONFIG.grade, { warmth: 0.09, saturation: 1.06 });
+    CONFIG.sky.turbidity = 6;
+  } else if (P.biome === 'beech') {
+    Object.assign(CONFIG.sun, { elevation: 21, azimuth: 230, intensity: 3.5, color: 0xffe9cc });
+    Object.assign(CONFIG.fog, { color: 0xb8c5c1, density: 0.0021 });
+    CONFIG.grade.saturation = 1.1;
+  }
 }
 
 // Choose the map for the next page load (the world is built once per load).
