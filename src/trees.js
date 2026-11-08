@@ -656,18 +656,25 @@ export class Forest {
       this.colors.set(t.tint, i * 3);
     }
     this.buckets = {};
+    // Near trees are drawn in full detail, which the water's mirror image skips for speed; these
+    // lighter copies of the same instances stand in for them in the reflection only (otherwise
+    // the river mirrors a bare bank and the sky, and looks milky).
+    this.reflectionProxies = [];
     for (const name of VARIANT_NAMES) {
       const v = this.variants[name];
       const c = counts[name];
       const l0 = [makeInstanced(v.lod0.trunk, v.barkMat, c)];
       if (v.lod0.leaves) l0.push(makeInstanced(v.lod0.leaves, v.leafMat, c));
+      const rp = [makeInstanced(v.lod1.trunk, v.barkMat, c)];
+      if (v.lod1.leaves) rp.push(makeInstanced(v.lod1.leaves, v.leafMat, c));
+      for (const m of rp) { m.visible = false; m.castShadow = false; this.reflectionProxies.push(m); }
       const l1 = [makeInstanced(v.lod1.trunk, v.barkMat, c)];
       if (v.lod1.leaves) l1.push(makeInstanced(v.lod1.leaves, v.leafMat, c));
       const imp = [makeInstanced(v.impGeo, v.impMat, c)];
       const sh = [makeInstanced(v.lod2.trunk, v.shadowBark, c, { castShadow: true, receiveShadow: false })];
       if (v.lod2.leaves) sh.push(makeInstanced(v.lod2.leaves, v.shadowLeaf, c, { castShadow: true, receiveShadow: false }));
-      for (const mm of [...l0, ...l1, ...imp, ...sh]) this.group.add(mm);
-      this.buckets[name] = { l0: new Bucket(l0), l1: new Bucket(l1), imp: new Bucket(imp), sh: new Bucket(sh) };
+      for (const mm of [...l0, ...l1, ...imp, ...sh, ...rp]) this.group.add(mm);
+      this.buckets[name] = { l0: new Bucket([...l0, ...rp]), l1: new Bucket(l1), imp: new Bucket(imp), sh: new Bucket(sh) };
     }
   }
 

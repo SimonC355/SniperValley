@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, smoothstep } from './noise.js';
+import { fitParts } from './models.js';
 
 function buildRockGeometry(seed, shape = 0) {
   const g = new THREE.IcosahedronGeometry(1, 3);
@@ -133,12 +134,29 @@ export function rockTopAt(it, x, z) {
 }
 
 export class Rocks {
-  constructor(scene, terrain, forest, textures, seed) {
+  // models: Higgsfield boulder models (models.js loadRockModels) or null for procedural rocks
+  constructor(scene, terrain, forest, textures, seed, models = null) {
     this.terrain = terrain;
     this.rng = new RNG(seed + 51);
     const noise = new Simplex(seed + 53);
     const shapes = [0, 0, 1, 2, 0, 1];
     const variants = shapes.map((sh, i) => buildRockGeometry(seed + i * 13 + 3, sh));
+    // v5: photoreal scanned-style boulders where the models are there (round boulder, flat slab,
+    // tall block), each fitted to the unit size of the procedural rock it replaces
+    const modelMats = [];
+    if (models) {
+      const byShape = ['boulder', 'slab', 'block'];
+      const fitted = {};
+      for (const [name, parts] of Object.entries(models)) {
+        const p = parts[0];
+        fitParts([p], 'r', name === 'slab' ? 1.25 : 1.0, -0.3);
+        fitted[name] = p;
+      }
+      shapes.forEach((sh, i) => {
+        const p = fitted[byShape[sh]] || fitted.boulder;
+        if (p) { variants[i] = p.geo; modelMats[i] = p.mat; }
+      });
+    }
     this.local = variants.map((g) => localHeightMap(g));
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
     mat.customProgramCacheKey = () => 'rock';
@@ -263,7 +281,7 @@ float rRough = mix(nx.a * bw.x + ny.a * bw.y + nz.a * bw.z, 0.95, moss);
     }
     this.meshes = variants.map((g, vi) => {
       const list = this.items.filter((it) => it.v === vi);
-      const m = new THREE.InstancedMesh(g, mat, Math.max(1, list.length));
+      const m = new THREE.InstancedMesh(g, modelMats[vi] || mat, Math.max(1, list.length));
       const mm = new THREE.Matrix4();
       list.forEach((it, i) => {
         mm.compose(new THREE.Vector3(it.x, it.y, it.z), it.quat, new THREE.Vector3(it.s, it.s, it.s));

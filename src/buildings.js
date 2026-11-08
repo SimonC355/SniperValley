@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, clamp, lerp, smoothstep } from './noise.js';
+import { fitParts } from './models.js';
 
 // ------------------------------------------------------------------------------- solids
 
@@ -93,6 +94,12 @@ function masonryMaterial(textures) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.tRockA = { value: textures.rock.map };
     shader.uniforms.tMossA = { value: textures.forest.map };
+    // photo stone walls (Higgsfield textures) where they are loaded; else the procedural stones
+    shader.uniforms.tDryA = { value: textures.wallDry ? textures.wallDry.map : textures.rock.map };
+    shader.uniforms.tRubA = { value: textures.wallRubble ? textures.wallRubble.map : textures.rock.map };
+    shader.uniforms.tDryN = { value: textures.wallDry ? textures.wallDry.normalMap : textures.rock.normalMap };
+    shader.uniforms.tRubN = { value: textures.wallRubble ? textures.wallRubble.normalMap : textures.rock.normalMap };
+    shader.uniforms.uPhoto = { value: new THREE.Vector2(textures.wallDry ? 1 : 0, textures.wallRubble ? 1 : 0) };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 attribute vec2 aWall;
@@ -108,7 +115,8 @@ vWN = normalize(mat3(modelMatrix) * objectNormal);
 vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform sampler2D tRockA, tMossA;
+uniform sampler2D tRockA, tMossA, tDryA, tRubA, tDryN, tRubN;
+uniform vec2 uPhoto;
 varying vec2 vWall;
 varying float vKind;
 varying vec3 vWN;
@@ -120,6 +128,14 @@ vec2 w = vWall;
 vec3 alb;
 float hgt = 0.5, rough = 0.9;
 vec3 rockTex = texture2D(tRockA, w / 2.3).rgb;
+// (sampled here, outside the per-face branches: inside them the mip level is undefined)
+vec4 phDry = texture2D(tDryA, w / 2.4);
+vec4 phRub = texture2D(tRubA, w / 2.0);
+vec3 phDryN = texture2D(tDryN, w / 2.4).xyz * 2.0 - 1.0;
+vec3 phRubN = texture2D(tRubN, w / 2.0).xyz * 2.0 - 1.0;
+float bPhoto = 0.0;      // 1: this face uses a photo wall and its normal map
+vec3 bPhotoN = vec3(0.0, 0.0, 1.0);
+vec3 mossTex = texture2D(tMossA, w / 1.3).rgb;
 float grime = bFbm(w * vec2(0.35, 0.9));
 // how many stones fall in a pixel: fade the pattern out where it would only shimmer
 float detail = 1.0 - smoothstep(0.06, 0.22, length(fwidth(w)) * 3.0);
@@ -131,8 +147,13 @@ if (kind < 0.5) {
   vec3 tint = mix(vec3(0.45, 0.44, 0.41), vec3(0.6, 0.58, 0.53), st.z) * mix(1.0, 0.86, step(0.82, st.z));
   alb = rockTex * 1.6 * tint;
   alb = mix(vec3(0.05, 0.05, 0.04), alb, mix(1.0, gap, 0.35 + 0.65 * detail));
+  if (uPhoto.x > 0.5) {
+    alb = phDry.rgb;
+    bPhoto = 1.0;
+    bPhotoN = phDryN;
+  }
   float moss = smoothstep(0.55, 0.85, vWN.y + bFbm(w * 1.7) * 0.6) + smoothstep(0.6, 0.9, bFbm(w * 0.8 + 7.0)) * 0.5 * (1.0 - smoothstep(0.0, 1.2, w.y));
-  alb = mix(alb, texture2D(tMossA, w / 1.3).rgb * vec3(0.75, 1.15, 0.5), clamp(moss, 0.0, 1.0) * 0.8);
+  alb = mix(alb, mossTex * vec3(0.75, 1.15, 0.5), clamp(moss, 0.0, 1.0) * 0.8);
   hgt = bulge;
   rough = 0.92;
 } else if (kind < 2.5 || kind > 3.5 && kind < 4.5) {
@@ -145,8 +166,13 @@ if (kind < 0.5) {
   vec3 stoneCol = rockTex * 1.85 * tint;
   vec3 mortar = vec3(0.5, 0.46, 0.39);
   alb = mix(mortar, stoneCol, mix(0.85, gap, detail));
-  if (kind > 3.5) alb *= 0.68;
   hgt = gap * (0.7 + 0.3 * (1.0 - st.x));
+  if (uPhoto.y > 0.5) {
+    alb = phRub.rgb;
+    bPhoto = 1.0;
+    bPhotoN = phRubN;
+  }
+  if (kind > 3.5) alb *= 0.72;
   if (kind > 1.5 && kind < 2.5) {
     // ochre plaster, fallen off in patches so the stone shows through
     float flake = smoothstep(0.56, 0.6, bFbm(w * 0.55 + 3.1) + (1.0 - smoothstep(0.0, 0.9, w.y)) * 0.25);
@@ -184,14 +210,22 @@ float bH = hgt;`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = bRough;')
       .replace('#include <normal_fragment_maps>', `
 {
-  // bump from the procedural height (three's derivative method)
+  // photo walls: their normal map in a tangent frame built from the wall coordinates
   vec3 pos = -vViewPosition;
   vec3 dpdx = dFdx(pos), dpdy = dFdy(pos);
+  vec2 duvx = dFdx(vWall), duvy = dFdy(vWall);
+  vec3 Nf = normal;
+  vec3 dp2perp = cross(dpdy, Nf), dp1perp = cross(Nf, dpdx);
+  vec3 Tf = dp2perp * duvx.x + dp1perp * duvy.x;
+  vec3 Bf = dp2perp * duvx.y + dp1perp * duvy.y;
+  float invmax = inversesqrt(max(max(dot(Tf, Tf), dot(Bf, Bf)), 1e-12));
+  vec3 photoNormal = normalize(mat3(Tf * invmax, Bf * invmax, Nf) * vec3(bPhotoN.xy * 0.8, bPhotoN.z));
   float dHx = dFdx(bH) * 0.06 * detail, dHy = dFdy(bH) * 0.06 * detail;
   vec3 r1 = cross(dpdy, normal), r2 = cross(normal, dpdx);
   float det = dot(dpdx, r1);
   vec3 grad = sign(det) * (dHx * r1 + dHy * r2);
-  normal = normalize(abs(det) * normal - grad * 7.0);
+  vec3 bumped = normalize(abs(det) * normal - grad * 7.0);
+  normal = mix(bumped, photoNormal, bPhoto);
 }`);
   };
   return mat;
@@ -322,15 +356,23 @@ export class EdgeWall {
 // ------------------------------------------------------------------------------- Tuscan hamlets
 
 export class Buildings {
-  constructor(scene, terrain, textures, seed) {
+  // models: the Higgsfield house models (models.js loadHouseModels), or null for procedural houses
+  constructor(scene, terrain, textures, seed, models = null) {
     this.solids = [];
     this.items = [];
+    this.houses3d = [];
     this.group = new THREE.Group();
     this.group.name = 'buildings';
     scene.add(this.group);
     if (CONFIG.map.biome !== 'tuscany') return;
     this.terrain = terrain;
     this.rng = new RNG(seed + 909);
+    this.models = null;
+    if (models) {
+      // fit each model once to a 10 m long side (each house scales it to its own length)
+      this.models = {};
+      for (const [name, M] of Object.entries(models)) this.models[name] = { ...M, ...fitParts(M.hi, 'l', 10, 0, M.lo) };
+    }
     const B = new MasonryBuilder();
     const D = new DetailBuilder();
     this._placeHamlets(B, D);
@@ -368,6 +410,7 @@ export class Buildings {
         if (Math.abs(z) > T.halfZ - 14 || T.normalAt(x, z).y < 0.9) continue;
         if (!T.isFree(x, z, 9)) continue;
         if (rng.chance(0.6)) this._ruin(B, x, z, rng.float(-0.4, 0.4) + (rng.chance(0.5) ? 0 : Math.PI / 2));
+        else if (this.models) this._modelHouse(B, x, z, rng.float(-0.25, 0.25), this._pickModel(rng.chance(0.5) ? 'cottage' : 'farm'));
         else this._house(B, D, x, z, rng.float(-0.25, 0.25), rng.float(4, 6), rng.float(3, 4), 1);
         made++;
       }
@@ -379,12 +422,16 @@ export class Buildings {
     const T = this.terrain, rng = this.rng;
     let x = x0 - (n * 7) / 2;
     for (let i = 0; i < n; i++) {
-      const hx = rng.float(3.5, 6.5), hz = rng.float(2.8, 4.2);
+      let hx = rng.float(3.5, 6.5), hz = rng.float(2.8, 4.2);
+      // with the 3D house models, the house's size comes from the model it gets
+      const pick = this.models ? this._pickModel(rng.chance(0.2) ? 'tower' : null) : null;
+      if (pick) { hx = pick.hx; hz = pick.hz; }
       x += hx;
       const z = T.riverCenter(x) + (z0 - T.riverCenter(x0)) + rng.float(-3, 3);
       const ang = rng.float(-0.18, 0.18);
       if (Math.abs(z) < T.halfZ - 12 && T.isFree(x, z, 1)) {
         if (rng.chance(0.18)) this._ruin(B, x, z, ang);
+        else if (pick) this._modelHouse(B, x, z, ang, pick);
         else {
           this._house(B, D, x, z, ang, hx, hz, rng.chance(0.45) ? 2 : 1);
           if (rng.chance(0.25)) {
@@ -395,6 +442,63 @@ export class Buildings {
         }
       }
       x += hx + rng.float(0.5, 4.5);
+    }
+  }
+
+  // A house model and its size for one house (a little bigger or smaller than the reference).
+  _pickModel(want = null) {
+    const rng = this.rng, names = Object.keys(this.models);
+    const r = rng.next();
+    let name = want || (r < 0.4 ? 'farm' : r < 0.65 ? 'ochre' : r < 0.9 ? 'cottage' : 'tower');
+    if (!this.models[name]) name = names[Math.floor(rng.next() * names.length)];
+    const len = { farm: 11, cottage: 8.5, ochre: 9.5, tower: 12.5 }[name] || 10;
+    const k = (len / 10) * rng.float(0.92, 1.08);
+    const M = this.models[name];
+    return { name, M, k, hx: M.hx * k, hz: M.hz * k, h: M.h * k };
+  }
+
+  // A 3D house (Higgsfield model) on a stone plinth that levels the slope.
+  _modelHouse(B, cx, cz, ang, pick) {
+    const { M, k, hx, hz, h } = pick;
+    const { lo, hi } = this._footprint(cx, cz, ang, hx, hz);
+    const base = hi + 0.05;
+    // plinth from below the lowest corner up to the house's floor
+    addBox(B, cx, cz, ang, hx + 0.12, hz + 0.12, lo - 0.8, () => base + 0.02, 4, [1, 1, 1], { top: false });
+    const place = (parts) => {
+      const g = new THREE.Group();
+      for (const p of parts) {
+        const m = new THREE.Mesh(p.geo, p.mat);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        g.add(m);
+      }
+      // the model's long side runs along local x; the house frame's x is (cos ang, sin ang)
+      g.position.set(cx, base, cz);
+      g.rotation.y = -ang;
+      g.scale.setScalar(k);
+      g.updateMatrixWorld(true);
+      g.matrixAutoUpdate = false;
+      this.group.add(g);
+      return g;
+    };
+    const item = { x: cx, z: cz, ang, hx, hz, kind: pick.name === 'tower' ? 'tower' : 'house', hi: place(M.hi), lo: M.lo ? place(M.lo) : null, center: new THREE.Vector3(cx, base + h / 2, cz) };
+    if (item.lo) item.lo.visible = false;
+    this.houses3d.push(item);
+    this.items.push(item);
+    this.solids.push(houseSolid(cx, cz, ang, hx, hz, lo - 0.8, base + h * 0.66, base + h));
+    this.terrain.reserve(cx, cz, Math.hypot(hx, hz) + 1.2);
+  }
+
+  // 3D houses switch to their light copy by effective distance (distance × zoom).
+  update(camera) {
+    if (!this.houses3d.length) return;
+    const zoom = camera.fov / CONFIG.player.fovHip;
+    const l2 = (90 / zoom) ** 2;
+    for (const it of this.houses3d) {
+      if (!it.lo) continue;
+      const near = camera.position.distanceToSquared(it.center) < l2;
+      it.hi.visible = near;
+      it.lo.visible = !near;
     }
   }
 

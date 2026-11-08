@@ -11,12 +11,14 @@ import { ForestAmbience } from './forestsound.js';
 import { installWeather, updateWeather, sunlightAt, WEATHER } from './weather.js';
 import { createTextures } from './textures.js';
 import { loadPhotoTextures } from './assets.js';
+import { loadHFTextures } from './hftextures.js';
 import { Debris } from './debris.js';
 import { Terrain } from './terrain.js';
 import { SkySystem } from './sky.js';
 import { Forest, Undergrowth } from './trees.js';
 import { Rocks } from './rocks.js';
 import { EdgeWall, Buildings } from './buildings.js';
+import { loadHouseModels, loadRockModels } from './models.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
 import { World } from './world.js';
@@ -93,6 +95,9 @@ class Game {
     this.hud.setLoading('BAKING TEXTURES');
     await nextFrame();
     this.textures = createTextures(renderer, CONFIG.seed, CONFIG.map.biome);
+    // v5: photoreal textures made with Higgsfield (ground, barks, foliage, ghillie strips)
+    this.hud.setLoading('LOADING TEXTURES');
+    this.hfSlots = await loadHFTextures(renderer, this.textures, CONFIG.map.biome);
     this.hud.setLoading('LOADING PHOTOSCANNED TEXTURES');
     // the beech and Tuscan maps keep their own ground (leaf litter, dry grass) and barks
     this.photoSlots = await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
@@ -109,7 +114,9 @@ class Game {
     this.hud.setLoading(CONFIG.map.biome === 'tuscany' ? 'BUILDING THE HAMLETS' : 'LAYING THE STONE WALLS');
     await nextFrame();
     this.edgeWall = new EdgeWall(scene, terrain, this.textures, CONFIG.seed);
-    this.buildings = new Buildings(scene, terrain, this.textures, CONFIG.seed);
+    // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
+    const [houseModels, rockModels] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels()]);
+    this.buildings = new Buildings(scene, terrain, this.textures, CONFIG.seed, houseModels);
 
     this.hud.setLoading('GROWING THE FOREST');
     await nextFrame();
@@ -117,7 +124,7 @@ class Game {
     terrain.bakeSplat(this.forest.buildCanopyGrid());
     scene.add(terrain.buildMesh(this.textures));
     this.undergrowth = new Undergrowth(scene, terrain, this.forest, this.textures, CONFIG.seed);
-    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed);
+    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed, rockModels);
     this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed);
     this.grass = new Grass(scene, terrain, this.textures);
     this.particles = new ForestParticles(scene, terrain);
@@ -130,7 +137,10 @@ class Game {
     const reflTerrain = terrain.buildReflectionMesh();
     scene.add(reflTerrain);
     this.water.showDuringReflection.push(reflTerrain);
-    for (const name in this.forest.buckets) this.water.hideDuringReflection.push(...this.forest.buckets[name].l0.meshes);
+    for (const name in this.forest.buckets) {
+      for (const m of this.forest.buckets[name].l0.meshes) if (!this.forest.reflectionProxies.includes(m)) this.water.hideDuringReflection.push(m);
+    }
+    this.water.showDuringReflection.push(...this.forest.reflectionProxies);
     this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris, [...this.edgeWall.solids, ...this.buildings.solids]);
     // what feet and bodies rest on: the terrain, or the top of a rock, wall or building
     this.ground = { heightAt: (x, z) => this.world.groundAt(x, z) };
@@ -1603,6 +1613,7 @@ class Game {
     this.sky.updateShadow(focus, extent);
     this.forest.update(cam, focus, CONFIG.trees.shadowDistance * (extent / 120) + 20);
     this.undergrowth.update(cam);
+    this.buildings.update(cam);
     this.grass.update(p.scopeT > 0.5 || (!p.alive && kc) ? focus : cam.position);
     this.water.update(this.realTime);
     // clouds drift with game time (the same for everyone in a LAN game; new clouds each round)
