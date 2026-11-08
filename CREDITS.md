@@ -21,6 +21,11 @@ CC0 1.0, so credit is appreciated but not required.
 _No photoscanned textures downloaded. Run `npm run assets` to fetch CC0 textures from Poly Haven._
 <!-- photo-assets:end -->
 
+## Menu art
+
+The start screen's key art and the five map pictures (`public/ui/`) were generated for this
+project with [Higgsfield](https://higgsfield.ai) (Z Image model) from text prompts, in v5.0.
+
 ## Libraries
 
 - [three.js](https://threejs.org) (MIT), including its `examples/jsm` addons (EffectComposer,

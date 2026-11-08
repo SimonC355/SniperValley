@@ -323,6 +323,7 @@ class Game {
       net.s.toAll({ k: 'mapchange', map: id });
       this.setAutoNet('host');
     }
+    this.hud.setLoadingMap(id);
     this.reloadPage(`LOADING ${MAPS[id].name}`);
   }
 
@@ -331,6 +332,7 @@ class Game {
     if (!MAPS[id] || this.reloading) return;
     saveMapChoice(id);
     this.setAutoNet('join');
+    this.hud.setLoadingMap(id);
     this.reloadPage(`LOADING ${MAPS[id].name}`);
   }
 
@@ -864,6 +866,7 @@ class Game {
     $('btn-play').disabled = joined;
     // joined players play the host's map
     for (const id of ['map-quick', 's0-map', 's1-map']) $(id).disabled = joined && !S.isHost;
+    this.hud.syncMapCards();
     const hostMap = MAPS[S.hostMap] ? MAPS[S.hostMap].name : '';
     const players = `${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'}`;
     const ips = (this.lanHostIps || []).slice(0, 3).join(' OR ');

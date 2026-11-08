@@ -300,3 +300,42 @@ body:not(.desktop) .desk { display: none !important; }
 #lan-ip:disabled { opacity: 0.45; }
 .btnrow button.quit { margin-left: auto; }
 .mappick + button.quit { margin-left: 0; }
+
+/* ---------------------------------------------------------------- start screen with key art (v5)
+   Key art and map pictures were made with Higgsfield (see CREDITS.md). The menu sits on the left,
+   the art shows on the right; the map is chosen with picture cards. */
+#startscreen {
+  justify-content: flex-start;
+  background:
+    linear-gradient(90deg, rgba(6, 9, 6, 0.92) 0%, rgba(6, 9, 6, 0.7) 30%, rgba(6, 9, 6, 0.08) 55%, rgba(6, 9, 6, 0.2) 100%),
+    linear-gradient(0deg, rgba(6, 9, 6, 0.55), transparent 30%),
+    url('/ui/keyart.webp') right center / cover no-repeat, #0a0d0a;
+}
+#startscreen .panel.start { margin-left: max(16px, 3.5vw); width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 40px);
+  background: rgba(12, 16, 12, 0.5); border-color: rgba(205, 216, 178, 0.1); }
+#startscreen .panel.start h1 { font-size: 54px; text-shadow: 0 4px 30px rgba(0, 0, 0, 0.6); }
+.mapcards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 6px 0 4px; }
+.mapcard { position: relative; aspect-ratio: 3 / 4; padding: 0; border-radius: 14px; overflow: hidden; text-align: left; letter-spacing: 0.06em;
+  background: var(--img) center / cover no-repeat, #1a2016; border: 1px solid var(--line-2);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, filter 0.15s; filter: saturate(0.85) brightness(0.85); }
+.mapcard::after { content: ''; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(5, 7, 5, 0.92) 0%, rgba(5, 7, 5, 0.35) 45%, transparent 70%); }
+.mapcard { display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 10px; }
+.mapcard span { position: relative; z-index: 1; display: block; }
+.mapcard .mc-name { font-size: 14px; font-weight: 700; color: var(--fg); line-height: 1.05; }
+.mapcard .mc-meta { font-size: 10.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.03em; line-height: 1.25; }
+.mapcard:hover { transform: translateY(-3px); filter: saturate(1) brightness(1); border-color: rgba(210, 184, 106, 0.6); }
+.mapcard.on { filter: none; border: 2px solid var(--accent); box-shadow: 0 0 0 3px rgba(210, 184, 106, 0.22), 0 12px 28px rgba(0, 0, 0, 0.5); }
+.mapcard.on .mc-name { color: var(--accent-2); }
+.mapcard.on::before { content: '✓'; position: absolute; top: 8px; right: 8px; z-index: 1; width: 22px; height: 22px; line-height: 22px; text-align: center; font-size: 13px; color: #10140c; border-radius: 50%; background: var(--accent); }
+.mapcard:disabled { opacity: 0.35; transform: none; }
+button.big { font-size: 19px; padding: 14px 34px; }
+@media (max-width: 760px) {
+  .mapcards { grid-template-columns: repeat(3, 1fr); }
+  #startscreen { background: linear-gradient(rgba(6, 9, 6, 0.8), rgba(6, 9, 6, 0.8)), url('/ui/keyart.webp') 70% center / cover no-repeat, #0a0d0a; }
+}
+
+/* loading: the map being loaded behind the title */
+#loading { background:
+    linear-gradient(0deg, rgba(6, 9, 6, 0.92), rgba(6, 9, 6, 0.45) 55%, rgba(6, 9, 6, 0.7)),
+    var(--img, none) center / cover no-repeat, radial-gradient(ellipse at 50% 40%, #1d2416, #0a0d0a 70%); }
+#loading .m { margin-top: 10px; font-size: 15px; font-weight: 700; letter-spacing: 0.3em; color: var(--accent-2); }

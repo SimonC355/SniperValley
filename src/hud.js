@@ -11,6 +11,7 @@ const ACTION_LABELS = {
 };
 
 const $ = (id) => document.getElementById(id);
+const UI_BASE = (import.meta.env && import.meta.env.BASE_URL) || '/';
 
 // small skull icon for the kill markers
 const SKULL_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2c-5 0-8.6 3.6-8.6 8.2 0 2.6 1.2 4.7 3.1 6v2.4c0 .7.5 1.2 1.2 1.2h1.4v-2.2h1.6V20h2.6v-2.2h1.6V20h1.4c.7 0 1.2-.5 1.2-1.2v-2.4c1.9-1.3 3.1-3.4 3.1-6 0-4.6-3.6-8.2-8.6-8.2zM8.4 14.1a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zm7.2 0a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zM12 14.6l1.3 2.4h-2.6l1.3-2.4z"/></svg>';
@@ -159,9 +160,17 @@ export class HUD {
           <label>Valley echo</label><select id="set-echo">${onoff}</select>
         </div>
       </div>`;
-    this.startScreen = make('startscreen', `<div class="panel">
+    // map cards: a picture of each map (UI art made with Higgsfield, see CREDITS.md)
+    const mapCards = Object.entries(MAPS).map(([id, m]) => `<button class="mapcard" data-map="${id}" style="--img:url('${UI_BASE}ui/map-${id}.webp')">
+        <span class="mc-name">${m.name}</span><span class="mc-meta">${m.size}<br>${m.players}</span></button>`).join('');
+    this.startScreen = make('startscreen', `<div class="panel start">
       <h1>SNIPER<span>VALLEY</span></h1>
       <div class="sub"><span class="ver">VERSION ${__APP_VERSION__.replace(/\.0$/, '')}</span> · PLAYER-REQUESTED UPDATES · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
+      <h2>CHOOSE YOUR BATTLEFIELD</h2>
+      <div class="mapcards" id="map-cards">${mapCards}</div>
+      <div class="btnrow"><button class="primary big" id="btn-play">SINGLE PLAYER</button>
+        <label class="mappick" style="display:none">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label>
+        <button id="btn-quit" class="desk quit">QUIT</button></div>
       <div id="lanbox" class="lan" style="display:none">
         <h2 id="lan-h">LAN MULTIPLAYER</h2>
         <div class="settings">
@@ -180,9 +189,6 @@ export class HUD {
         <div class="note" id="lan-note"></div>
       </div>
       ${settings.replace(/id="set-/g, 'id="s0-')}
-      <div class="btnrow"><button class="primary" id="btn-play">SINGLE PLAYER</button>
-        <label class="mappick">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label>
-        <button id="btn-quit" class="desk quit">QUIT</button></div>
     </div>`);
     this.pauseScreen = make('pausescreen', `<div class="panel">
       <h1>PAUSED</h1>
@@ -198,8 +204,17 @@ export class HUD {
     </div>`);
     this.loading = document.createElement('div');
     this.loading.id = 'loading';
-    this.loading.innerHTML = `<div class="t">SNIPERVALLEY</div><div class="s" id="loading-s">LOADING</div>`;
+    // the map being loaded, as the loading screen's backdrop
+    this.loading.style.setProperty('--img', `url('${UI_BASE}ui/map-${MAP_ID}.webp')`);
+    this.loading.innerHTML = `<div class="t">SNIPERVALLEY</div><div class="m">${MAPS[MAP_ID].name}</div><div class="s" id="loading-s">LOADING</div>`;
     document.body.appendChild(this.loading);
+  }
+
+  // the loading backdrop for a map about to load (a map change reloads the page)
+  setLoadingMap(id) {
+    if (!MAPS[id]) return;
+    this.loading.style.setProperty('--img', `url('${UI_BASE}ui/map-${id}.webp')`);
+    this.loading.querySelector('.m').textContent = MAPS[id].name;
   }
 
   setLoading(text) {
@@ -213,9 +228,17 @@ export class HUD {
     const C = CONFIG;
     const fmt = { sens: (v) => `${(+v).toFixed(2)}×`, ssens: (v) => `${(+v).toFixed(2)}×`, fov: (v) => `${v}°`, scale: (v) => `${Math.round(v * 100)}%`,
       vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%` };
-    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; };
+    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; this.syncMapCards(); };
     this.syncAll = syncAll;
     $('map-quick').addEventListener('change', () => onChange('map', $('map-quick').value));
+    // the map cards drive the (hidden) quick map select, so LAN rules apply to both
+    document.querySelectorAll('#map-cards .mapcard').forEach((c) => c.addEventListener('click', () => {
+      const sel = $('map-quick');
+      if (sel.disabled || c.dataset.map === MAP_ID) return;
+      sel.value = c.dataset.map;
+      document.querySelectorAll('#map-cards .mapcard').forEach((x) => x.classList.toggle('on', x === c));
+      sel.dispatchEvent(new Event('change'));
+    }));
     for (const p of ['s0', 's1']) {
       const g = (k) => $(`${p}-${k}`);
       const panel = g('team').closest('.panel');
@@ -316,6 +339,15 @@ export class HUD {
       });
     }
     syncAll();
+  }
+
+  // highlight the loaded map; grey the cards out when the LAN host chooses the map
+  syncMapCards() {
+    const locked = $('map-quick').disabled;
+    document.querySelectorAll('#map-cards .mapcard').forEach((c) => {
+      c.classList.toggle('on', c.dataset.map === MAP_ID);
+      c.disabled = locked && c.dataset.map !== MAP_ID;
+    });
   }
 
   showStart(on) { this.startScreen.classList.toggle('on', on); }

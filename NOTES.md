@@ -856,6 +856,13 @@ Asked for (in Danish) as one list. Each point, how I read it and what changed.
   clamped to the screen edge with an arrow when off screen. Only your own kills.
 - **UI.** Rounded, glassy (backdrop blur) panels in olive drab and khaki, a segmented tab bar,
   styled selects and sliders, pill-shaped HUD pieces. Every id and class the code uses is kept.
+- **Start screen with art** (asked for afterwards: "opgradere layout med Higgsfield"). Six
+  pictures generated with Higgsfield's Z Image model (the free plan's model): key art (a second
+  try put the sniper on the right so the menu on the left doesn't cover him) and one picture per
+  map. They are WebP files in `public/ui/` (about 1.1 MB together). The menu moved to the left
+  over the key art, the map dropdown became picture cards (they drive the old, now hidden,
+  select, so the LAN rule "the host chooses the map" still greys them out), and the loading
+  screen shows the map being loaded.
 - **Version 5.0.0** ("kald denne version 5.0"); the start screen shows *VERSION 5.0 ·
   PLAYER-REQUESTED UPDATES*. LAN and Steam players need the same version, as before.
 - **Not done / to check on a real PC:** frame rates with the new rifle, crowns and walls; the
