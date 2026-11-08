@@ -42,6 +42,11 @@ Everything in this version was asked for by players and testers.
   and bark textures (downloaded when the program is built).
 - **New look for menus and HUD**: rounded, glassy panels in dark olive and khaki, a segmented
   tab bar, pill-shaped HUD elements and a cleaner scoreboard, kill feed and killcam.
+- **Photoreal textures and models (made with Higgsfield)**: the forest floor, meadow, beech
+  leaves, dry grass, mud, rock, the barks and the stone walls are photo textures; the spruce,
+  pine, cypress, beech and olive foliage, ferns, shrubs and the ghillie strips are photo cut-outs;
+  the Tuscan houses are textured 3D models and the boulders are 3D rock models (you can still
+  climb them). The river now mirrors the forest instead of looking milky.
 - **New start screen**: key art of a sniper over a misty valley behind the menu, and the map is
   chosen with picture cards of the five maps. The loading screen shows the map being loaded.
   The pictures were made with Higgsfield.

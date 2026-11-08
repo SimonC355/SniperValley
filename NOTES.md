@@ -863,6 +863,30 @@ Asked for (in Danish) as one list. Each point, how I read it and what changed.
   over the key art, the map dropdown became picture cards (they drive the old, now hidden,
   select, so the LAN rule "the host chooses the map" still greys them out), and the loading
   screen shows the map being loaded.
+- **"Closer to 2026 than 2016"** (after upgrading Higgsfield): the user wants the existing world
+  upgraded (trees, houses, water, ghillie suit, rocks, leaves), not new objects. (A first try with
+  new landmark props was removed at once.)
+  - *Textures* (`src/hftextures.js`, files in `public/hf/`): every ground, bark and wall texture
+    and every foliage/ghillie card is a generated photo. Surfaces are made seamless (an offset
+    blend), get a height map from the high-passed luminance and a normal map from that, packed
+    like the procedural bakes (albedo + height, normal + roughness), so the existing terrain,
+    tree and rock shaders use them unchanged. Cards are generated on magenta and keyed to alpha,
+    colour-matched to the old palette (so camouflage still works) and bled into the transparent
+    texels. The photoscans (CI) still win for the conifer ground. `?hf=0` shows the old look.
+  - *Houses* (`src/models.js`, `Buildings._modelHouse`): three textured house models (farmhouse,
+    cottage, ochre village house; a tower house came out grey and was dropped), each on a stone
+    plinth that levels the slope, with a light copy beyond 90 m (effective). The collider is the
+    same convex house solid as before. Ruins stay procedural, now in photo stone.
+  - *Rocks*: three 3D rock models replace the icosphere boulders; the height maps for walking,
+    climbing and bullets are baked from the models exactly as from the old meshes.
+  - *Walls*: the masonry shader uses the photo walls with their normal maps (a derivative bump
+    from the photo's height was pixel noise, and texture reads inside the per-face branches had
+    undefined mip levels).
+  - *Water*: the mirror image skipped every near tree for speed, so the river reflected a bare
+    bank and the sky and looked milky; light copies of the near trees now stand in during the
+    reflection. Foam and white water read a real noise channel (they read a constant before), and
+    there are finer ripples near the camera.
+  - Size: about 14 MB of textures and 2.9 MB of models in the repository.
 - **Version 5.0.0** ("kald denne version 5.0"); the start screen shows *VERSION 5.0 ·
   PLAYER-REQUESTED UPDATES*. LAN and Steam players need the same version, as before.
 - **Not done / to check on a real PC:** frame rates with the new rifle, crowns and walls; the
