@@ -19,6 +19,7 @@ import { Forest, Undergrowth } from './trees.js';
 import { Rocks } from './rocks.js';
 import { EdgeWall, Buildings } from './buildings.js';
 import { loadHouseModels, loadRockModels } from './models.js';
+import { loadGhillieModel } from './ghilliemodel.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
 import { World } from './world.js';
@@ -115,7 +116,8 @@ class Game {
     await nextFrame();
     this.edgeWall = new EdgeWall(scene, terrain, this.textures, CONFIG.seed);
     // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
-    const [houseModels, rockModels] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels()]);
+    // (and the leafy 3D ghillie suit, which every character clones)
+    const [houseModels, rockModels] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadGhillieModel()]);
     this.buildings = new Buildings(scene, terrain, this.textures, CONFIG.seed, houseModels);
 
     this.hud.setLoading('GROWING THE FOREST');
@@ -1516,6 +1518,7 @@ class Game {
       this._sph.center.set(c.pos.x, c.pos.y + 0.9, c.pos.z);
       this._sph.radius = 2.4;
       c.character.group.visible = this._frustum.intersectsSphere(this._sph);
+      if (c.character.group.visible) c.character.syncModel();
     }
   }
 
