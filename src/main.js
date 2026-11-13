@@ -231,7 +231,7 @@ class Game {
     this.params = new URLSearchParams(location.search);
     this.noRender = this.params.has('norender');   // test hook: run the game loop without drawing
 
-    this.hud.bindSettings((kind) => this.onSettingsChanged(kind), this.input);
+    this.hud.bindSettings((kind, value) => this.onSettingsChanged(kind, value), this.input);
     this.bindUI();
     setupDesktop();
     this.setupLan();
