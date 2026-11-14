@@ -33,7 +33,9 @@ export class AudioSystem {
     const curve = new Float32Array(2048);
     for (let i = 0; i < curve.length; i++) {
       const x = (i / (curve.length - 1)) * 2 - 1;
-      curve[i] = Math.tanh(1.2 * x * 1.5) / Math.tanh(1.8);
+      // ceiling 0.82: the 4× oversampling filter overshoots a hard transient by up to ~20 %,
+      // which pushed a full-volume gunshot to +1.5 dBFS (clipped in the sound card)
+      curve[i] = (0.82 * Math.tanh(1.2 * x * 1.5)) / Math.tanh(1.8);
     }
     clip.curve = curve;
     clip.oversample = '4x';
@@ -57,7 +59,7 @@ export class AudioSystem {
       b.getChannelData(0).set(data);
       return b;
     };
-    this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));
+    this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));   // v5: whip-crack + heavy boom
     this.cracks = [[1.5, 5], [6, 17], [16, 29]].map(([miss, sd]) => ({ miss, bufs: [sd, sd + 1].map((k) => toBuffer(supersonicCrack(ctx.sampleRate, k, miss))) }));
     this.cawBufs = [41, 42, 43, 44, 45, 46].map((sd) => toBuffer(crowCaw(ctx.sampleRate, sd)));
     this.samples = {};
@@ -217,7 +219,7 @@ export class AudioSystem {
     this._log(own ? 'shot (yours)' : 'shot', d);
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
     const out = ctx.createGain();
-    out.gain.value = own ? 1.0 : Math.min(1, 40 / (d + 15));
+    out.gain.value = own ? 0.9 : Math.min(1, 55 / (d + 25));
     if (own) out.connect(this.master);
     else out.connect(this._panner(pos)).connect(this.master);
     // send to the valley echo (relatively stronger for distant shots)
@@ -227,7 +229,7 @@ export class AudioSystem {
     const air = ctx.createBiquadFilter();
     air.type = 'lowpass';
     air.Q.value = 0.5;
-    air.frequency.value = own ? 20000 : Math.max(1800, 16000 / (1 + d / 180));
+    air.frequency.value = own ? 20000 : Math.max(2400, 18000 / (1 + d / 250));
     air.connect(out);
     if (this._sample(own || d < 60 ? 'shot' : 'shot_far', air, t, 1) || this._sample('shot', air, t, 1)) return;
     const src = ctx.createBufferSource();
@@ -460,6 +462,70 @@ export class AudioSystem {
 
   // The player's own breath while scoped: a short inhale when holding it, a slow exhale when
   // letting go, and a gasp (exhale + quick inhale) when it ran out.
+  // Sliding over the ground on your knee and hip: a scrape that dies away (v5).
+  slide(surface = 'forest') {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    this._log('slide (yours)', 0);
+    if (this._sample('slide', this.master, t, 0.7)) return;
+    const s = this._noiseSrc(t, 0.9);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 0.9;
+    const f0 = surface === 'rock' ? 2600 : surface === 'mud' ? 700 : surface === 'grass' ? 1500 : 1900;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.8);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.18, t + 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+    s.connect(f).connect(g).connect(this.master);
+    // twigs and leaves pushed along
+    for (let i = 0; i < 6; i++) {
+      const tt = t + 0.05 + Math.random() * 0.55;
+      const c = this._noiseSrc(tt, 0.03);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2500 + Math.random() * 2500; bp.Q.value = 6;
+      const cg = ctx.createGain();
+      this._env(cg, tt, 0.18 * Math.random() + 0.05, 0.002, 0.03);
+      c.connect(bp).connect(cg).connect(this.master);
+    }
+  }
+
+  // Hands and boots on rock: climbing onto a rock or a wall (v5).
+  climb() {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    this._log('climb (yours)', 0);
+    if (this._sample('climb', this.master, t, 0.6)) return;
+    for (const [dt, f, a] of [[0, 1700, 0.35], [0.16, 2300, 0.25], [0.34, 1200, 0.4]]) {
+      const tt = t + dt;
+      const n = this._noiseSrc(tt, 0.14);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.2;
+      const g = ctx.createGain();
+      this._env(g, tt, a, 0.006, 0.12);
+      n.connect(bp).connect(g).connect(this.master);
+    }
+  }
+
+  // Falling into the deep, fast river: a big plunge and the roar of the current.
+  plunge() {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    this._log('plunge (yours)', 0);
+    const s = this._noiseSrc(t, 2.6);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(3500, t);
+    f.frequency.exponentialRampToValueAtTime(700, t + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.5);
+    s.connect(f).connect(g).connect(this.master);
+  }
+
   breath(kind) {
     if (!this.ready) return;
     const ctx = this.ctx, t0 = ctx.currentTime;

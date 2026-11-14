@@ -226,6 +226,130 @@ vec4 bake(vec2 uv) {
 }
 `;
 
+// ----------------------------------------------------------------- v5 biomes
+// Beech forest floor: a deep carpet of last year's leaves (tan, copper, dark wet ones), beech
+// nut husks, twigs and a little moss.
+const LEAFLITTER_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 4.0, vec2(4.0), 4, 3.0);
+  vec3 soil = mix(vec3(0.05, 0.032, 0.02), vec3(0.09, 0.055, 0.03), n1 * 0.5 + 0.5);
+  vec3 col = soil;
+  float h = 0.0;
+  // four layers of leaves, the top layer last (lens-shaped strokes, random directions)
+  for (int L = 0; L < 4; L++) {
+    float fl = float(L);
+    vec3 lf = strokes(uv, 30.0 + fl * 7.0, 1.15, 0.36, 5.0 + fl * 13.0, 0.0, 6.28);
+    float cov = smoothstep(0.02, 0.18, lf.x);
+    float id = lf.y;
+    vec3 c = mix(vec3(0.3, 0.15, 0.06), vec3(0.5, 0.27, 0.1), smoothstep(0.1, 0.7, id));
+    c = mix(c, vec3(0.6, 0.36, 0.14), smoothstep(0.55, 0.75, id) * 0.6);   // copper
+    c = mix(c, vec3(0.16, 0.09, 0.04), step(0.8, id));          // dark, wet
+    c = mix(c, vec3(0.58, 0.44, 0.24), step(0.95, id) * 0.8);   // pale, bleached
+    c *= 0.75 + 0.1 * fl;                                        // deeper layers in shadow
+    float vein = 1.0 - smoothstep(0.0, 0.05, abs(lf.z) * 0.0 + abs(fract(lf.z * 6.0 + 0.5) - 0.5) * 0.2);
+    c *= 0.85 + 0.3 * lf.x - 0.06 * vein;
+    col = mix(col, c, cov);
+    h = max(h * (1.0 - cov * 0.35), cov * (0.45 + fl * 0.14) * (0.7 + 0.3 * lf.x));
+  }
+  // twigs and nut husks
+  vec3 tw = strokes(uv, 6.0, 1.4, 0.03, 61.0, 0.0, 6.28);
+  float twig = tw.x * step(0.55, tw.y);
+  col = mix(col, vec3(0.13, 0.09, 0.06), smoothstep(0.2, 0.5, twig));
+  h = max(h, twig * 1.05);
+  vec3 w = pworley(uv * 13.0, vec2(13.0), 71.0);
+  float husk = smoothstep(0.13, 0.07, w.x) * step(0.86, w.z);
+  col = mix(col, vec3(0.28, 0.17, 0.08), husk);
+  h = max(h, husk * 0.9);
+  float moss = smoothstep(0.35, 0.6, pfbm(uv * 3.0, vec2(3.0), 4, 81.0));
+  col = mix(col, vec3(0.1, 0.13, 0.04), moss * 0.45 * (1.0 - smoothstep(0.4, 0.8, h)));
+  return vec4(col, clamp(h, 0.0, 1.0));
+}
+`;
+
+// Beech glades: short green grass and moss with fallen leaves blown into it.
+const BEECHGRASS_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 3.0, vec2(3.0), 4, 1.0);
+  vec3 soil = vec3(0.06, 0.05, 0.03);
+  vec3 base = mix(vec3(0.07, 0.12, 0.03), vec3(0.15, 0.21, 0.06), smoothstep(-0.35, 0.45, n1));
+  vec3 s1 = strokes(uv, 42.0, 0.9, 0.09, 3.0, 1.2, 2.4);
+  vec3 s2 = strokes(uv, 66.0, 0.8, 0.1, 21.0, 1.6, 2.8);
+  float h = max(s1.x, s2.x * 0.85);
+  float id = s1.x >= s2.x ? s1.y : s2.y;
+  vec3 col = mix(soil, base * (0.75 + 0.6 * id), smoothstep(0.02, 0.25, h));
+  vec3 lf = strokes(uv, 34.0, 1.1, 0.34, 33.0, 0.0, 6.28);
+  float leaf = smoothstep(0.02, 0.18, lf.x) * step(0.4, lf.y);
+  col = mix(col, mix(vec3(0.28, 0.15, 0.06), vec3(0.44, 0.26, 0.1), lf.y), leaf);
+  h = max(h, leaf * 0.7);
+  return vec4(col, h);
+}
+`;
+
+// Tuscan hillsides: dry golden grass over pale, dusty soil, with a few green tufts.
+const DRYGRASS_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 3.0, vec2(3.0), 4, 1.0);
+  float n2 = pfbm(uv * 11.0, vec2(11.0), 3, 9.0);
+  vec3 soil = mix(vec3(0.2, 0.15, 0.09), vec3(0.3, 0.23, 0.14), n2 * 0.5 + 0.5);
+  vec3 straw = mix(vec3(0.42, 0.33, 0.15), vec3(0.6, 0.5, 0.26), smoothstep(-0.4, 0.5, n1));
+  vec3 green = vec3(0.17, 0.19, 0.07);
+  vec3 s1 = strokes(uv, 36.0, 0.95, 0.08, 3.0, 1.3, 2.0);
+  vec3 s2 = strokes(uv, 60.0, 0.85, 0.09, 21.0, 1.7, 2.4);
+  vec3 s3 = strokes(uv, 22.0, 0.7, 0.06, 41.0, 0.6, 6.28);
+  float h = max(max(s1.x, s2.x * 0.85), s3.x * 0.6);
+  float id = s1.x >= s2.x ? s1.y : s2.y;
+  vec3 blade = straw * (0.75 + 0.55 * id);
+  blade = mix(blade, green, step(0.88, id) * 0.8);
+  vec3 col = mix(soil, blade * (1.0 + 0.2 * (s1.z + 0.5)), smoothstep(0.03, 0.3, h));
+  vec3 w = pworley(uv * 18.0, vec2(18.0), 51.0);
+  float peb = smoothstep(0.22, 0.12, w.x) * step(0.8, w.z);
+  col = mix(col, vec3(0.5, 0.45, 0.36) * (0.8 + 0.4 * w.z), peb);
+  h = max(h, peb * 0.7);
+  return vec4(col, h);
+}
+`;
+
+// Under Tuscan trees: dry red-brown earth, fallen olive leaves and pine needles, pebbles.
+const DRYSOIL_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 4.0, vec2(4.0), 5, 6.0);
+  vec3 col = mix(vec3(0.2, 0.12, 0.07), vec3(0.32, 0.21, 0.12), n1 * 0.5 + 0.5);
+  float h = 0.3 + n1 * 0.1;
+  vec3 a = strokes(uv, 40.0, 1.1, 0.06, 5.0, 0.0, 6.28);
+  vec3 b = strokes(uv, 22.0, 1.0, 0.16, 15.0, 0.0, 6.28);
+  col = mix(col, mix(vec3(0.3, 0.2, 0.1), vec3(0.42, 0.31, 0.16), a.y), smoothstep(0.03, 0.3, a.x) * 0.8);
+  col = mix(col, mix(vec3(0.34, 0.34, 0.24), vec3(0.45, 0.43, 0.32), b.y), smoothstep(0.03, 0.2, b.x) * step(0.5, b.y));
+  h = max(h, max(a.x * 0.7, b.x * 0.6 * step(0.5, b.y)));
+  vec3 w = pworley(uv * 24.0, vec2(24.0), 16.0);
+  float peb = smoothstep(0.42, 0.2, w.x) * step(0.55, w.z);
+  col = mix(col, mix(vec3(0.42, 0.37, 0.3), vec3(0.6, 0.55, 0.46), fract(w.z * 17.0)), peb);
+  h = max(h, peb * (1.0 - w.x * w.x * 2.5));
+  return vec4(col, clamp(h, 0.0, 1.0));
+}
+`;
+
+// Beech bark: smooth and grey, with lichen patches and faint horizontal lenticels.
+const BEECHBARK_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n = pfbm(uv * vec2(3.0, 6.0), vec2(3.0, 6.0), 5, 3.0);
+  float fine = pfbm(uv * vec2(24.0, 48.0), vec2(24.0, 48.0), 3, 13.0);
+  vec3 col = mix(vec3(0.24, 0.23, 0.2), vec3(0.38, 0.36, 0.32), n * 0.5 + 0.5);
+  col *= 0.92 + 0.12 * fine;
+  // lenticels: short dark horizontal dashes
+  vec3 st = strokes(uv, 18.0, 0.6, 0.05, 23.0, 0.0, 0.25);
+  col *= 1.0 - smoothstep(0.1, 0.4, st.x) * 0.35;
+  // lichen: pale green-grey and white crusts
+  vec3 lw = pworley(uv * vec2(9.0, 14.0), vec2(9.0, 14.0), 54.0);
+  float lichen = smoothstep(0.5, 0.25, lw.x) * step(0.55, lw.z) * smoothstep(0.0, 0.4, pfbm(uv * 3.0, vec2(3.0), 3, 64.0) + 0.15);
+  col = mix(col, mix(vec3(0.42, 0.47, 0.34), vec3(0.62, 0.64, 0.58), fract(lw.z * 7.0)), lichen * 0.7);
+  // green algae on the weather side
+  float alg = smoothstep(0.2, 0.6, pfbm(uv * vec2(2.0, 4.0), vec2(2.0, 4.0), 3, 74.0));
+  col = mix(col, vec3(0.16, 0.22, 0.08), alg * 0.35);
+  float h = 0.5 + n * 0.08 + fine * 0.04 - smoothstep(0.1, 0.4, st.x) * 0.15 + lichen * 0.08;
+  return vec4(col, clamp(h, 0.0, 1.0));
+}
+`;
+
 const WATER_FRAG = /* glsl */`
 vec4 bake(vec2 uv) {
   float h = pfbm(uv * 6.0, vec2(6.0), 5, 8.0) * 0.6 + pfbm(uv * vec2(16.0, 10.0), vec2(16.0, 10.0), 3, 18.0) * 0.4;
@@ -578,6 +702,86 @@ function drawLeaves(rng, w, h) {
 }
 
 // Ghillie strips atlas: 8 columns. Grey-scale albedo, tinted per strip.
+// A leafy twig for broadleaf crown cards (beech, olive): twigs fan out from the left edge
+// (the card's base, toward the inside of the crown) and carry leaves on both sides.
+// shape: 'beech' (oval, wavy edge, parallel veins) | 'olive' (narrow, grey-green, silver below)
+function drawBroadleaf(rng, w, h, shape) {
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d');
+  ctx.lineCap = 'round';
+  const olive = shape === 'olive';
+  const greens = olive ? [[84, 96, 60], [98, 110, 72], [72, 84, 52], [120, 128, 96]] : [[58, 92, 26], [70, 108, 30], [50, 80, 22], [88, 124, 38]];
+  const under = olive ? [150, 158, 132] : [96, 132, 52];
+  const twigs = [];
+  const fan = 7;
+  for (let i = 0; i < fan; i++) {
+    const a = ((i + 0.5) / fan - 0.5) * 1.6 + rng.float(-0.12, 0.12);
+    const L = w * rng.float(0.62, 0.9);
+    const pts = [];
+    for (let k = 0; k <= 10; k++) {
+      const u = k / 10;
+      pts.push([10 + Math.cos(a) * L * u, h / 2 + Math.sin(a) * L * u * 0.55 + Math.sin(u * 3 + i) * 4]);
+    }
+    twigs.push(pts);
+  }
+  ctx.strokeStyle = rgb(60, 46, 32);
+  for (const P of twigs) {
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); for (const p of P) ctx.lineTo(p[0], p[1]); ctx.stroke();
+  }
+  const leaf = (x, y, a, L, Wd, col, flip) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a);
+    ctx.fillStyle = rgb(col[0], col[1], col[2]);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    if (olive) {
+      ctx.quadraticCurveTo(L * 0.5, -Wd, L, 0);
+      ctx.quadraticCurveTo(L * 0.5, Wd, 0, 0);
+    } else {
+      // oval with a wavy edge
+      const n = 6;
+      for (let k = 0; k <= n; k++) { const u = k / n; ctx.lineTo(u * L, -Math.sin(u * Math.PI) * Wd * (1 + 0.08 * Math.sin(u * 22))); }
+      for (let k = n; k >= 0; k--) { const u = k / n; ctx.lineTo(u * L, Math.sin(u * Math.PI) * Wd * (1 + 0.08 * Math.sin(u * 22 + 1))); }
+    }
+    ctx.fill();
+    // midrib and (beech) parallel veins
+    ctx.strokeStyle = rgb(col[0] * 0.75, col[1] * 0.8, col[2] * 0.7);
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(L * 0.92, 0); ctx.stroke();
+    if (!olive) {
+      ctx.lineWidth = 0.5;
+      for (let k = 1; k < 7; k++) {
+        const u = k / 7.5;
+        ctx.beginPath(); ctx.moveTo(u * L, 0); ctx.lineTo(u * L + Wd * 0.5, (flip ? 1 : -1) * Math.sin(u * Math.PI) * Wd * 0.85); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(u * L, 0); ctx.lineTo(u * L + Wd * 0.5, (flip ? -1 : 1) * Math.sin(u * Math.PI) * Wd * 0.85); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  };
+  for (const P of twigs) {
+    for (let k = 2; k < P.length; k++) {
+      const [x0, y0] = P[k - 1], [x1, y1] = P[k];
+      const dir = Math.atan2(y1 - y0, x1 - x0);
+      for (const side of [-1, 1]) {
+        if (rng.chance(0.12)) continue;
+        const L = (olive ? rng.float(20, 28) : rng.float(24, 34)) * (1 - k * 0.025);
+        const Wd = olive ? L * 0.13 : L * 0.3;
+        const a = dir + side * rng.float(0.5, 1.0);
+        const backside = rng.chance(olive ? 0.35 : 0.12);
+        const g = greens[rng.int(0, greens.length - 1)], kk = rng.float(0.85, 1.15);
+        const col = backside ? under : [g[0] * kk, g[1] * kk, g[2] * kk];
+        leaf(x0 + (x1 - x0) * 0.5, y0 + (y1 - y0) * 0.5, a, L, Wd, col, side > 0);
+      }
+    }
+    // a leaf at the tip
+    const [tx, ty] = P[P.length - 1];
+    leaf(tx, ty, Math.atan2(P[P.length - 1][1] - P[P.length - 2][1], P[P.length - 1][0] - P[P.length - 2][0]), olive ? 24 : 30, olive ? 3.2 : 9, greens[0], false);
+  }
+  return c;
+}
+
 function drawGhillie(rng, w, h) {
   const c = makeCanvas(w, h);
   const ctx = c.getContext('2d');
@@ -637,11 +841,14 @@ function drawGhillie(rng, w, h) {
   return c;
 }
 
-export function createTextures(renderer, seed = 1) {
+// biome: 'conifer' | 'tuscany' | 'beech' (v5): the ground, bark and leaf textures of the map.
+export function createTextures(renderer, seed = 1, biome = 'conifer') {
   const baker = new TextureBaker(renderer);
   const t = {};
-  t.grass = baker.bakeMaterial(GRASS_FRAG, { seed: seed + 1, normalStrength: 2.5, roughBase: 0.9, roughVar: 0.1 });
-  t.forest = baker.bakeMaterial(FOREST_FRAG, { seed: seed + 2, normalStrength: 3.5, roughBase: 0.92, roughVar: 0.1 });
+  const GR = biome === 'beech' ? BEECHGRASS_FRAG : biome === 'tuscany' ? DRYGRASS_FRAG : GRASS_FRAG;
+  const FO = biome === 'beech' ? LEAFLITTER_FRAG : biome === 'tuscany' ? DRYSOIL_FRAG : FOREST_FRAG;
+  t.grass = baker.bakeMaterial(GR, { seed: seed + 1, normalStrength: 2.5, roughBase: 0.9, roughVar: 0.1 });
+  t.forest = baker.bakeMaterial(FO, { seed: seed + 2, normalStrength: biome === 'beech' ? 4.5 : 3.5, roughBase: 0.92, roughVar: 0.1 });
   t.rock = baker.bakeMaterial(ROCK_FRAG, { seed: seed + 3, normalStrength: 3.2, roughBase: 0.82, roughVar: 0.2 });
   t.mud = baker.bakeMaterial(MUD_FRAG, { seed: seed + 4, normalStrength: 2.2, roughBase: 0.74, roughVar: 0.2 });
   t.barkSpruce = baker.bakeMaterial(BARK_FRAG, {
@@ -666,5 +873,24 @@ export function createTextures(renderer, seed = 1) {
   t.fern = dataTextureFromCanvas(drawFern(rng, 256, 512), [60, 98, 34]);
   t.leaves = dataTextureFromCanvas(drawLeaves(rng, 512, 512), [55, 85, 30]);
   t.ghillie = dataTextureFromCanvas(drawGhillie(rng, 512, 512), [190, 190, 180]);
+  // v5 biomes: broadleaf crowns, cypress sprays and their barks
+  if (biome === 'beech') {
+    t.barkBeech = baker.bakeMaterial(BEECHBARK_FRAG, { size: 512, seed: seed + 9, normalStrength: 2.5, roughBase: 0.75, roughVar: 0.15 });
+    t.beechLeaves = dataTextureFromCanvas(drawBroadleaf(rng, 512, 256, 'beech'), [58, 92, 26]);
+    t.leaves = t.beechLeaves;   // saplings in the undergrowth
+  }
+  if (biome === 'tuscany') {
+    t.barkOlive = baker.bakeMaterial(BARK_FRAG, {
+      size: 512, seed: seed + 10, normalStrength: 7, roughBase: 0.9, roughVar: 0.1,
+      uniforms: { uColA: { value: new THREE.Color(0.07, 0.065, 0.055) }, uColB: { value: new THREE.Color(0.3, 0.28, 0.24) }, uPlates: { value: 1 } },
+    });
+    t.oliveLeaves = dataTextureFromCanvas(drawBroadleaf(rng, 512, 256, 'olive'), [84, 96, 60]);
+    t.cypress = dataTextureFromCanvas(drawSpray(rng, 512, 256, {
+      mass: [16, 28, 14],
+      needles: [[22, 40, 20], [28, 48, 22], [20, 34, 18], [32, 54, 26]],
+      young: [52, 74, 30],
+    }), [18, 32, 16]);
+    t.leaves = t.oliveLeaves;   // macchia shrubs
+  }
   return t;
 }

@@ -21,6 +21,16 @@ CC0 1.0, so credit is appreciated but not required.
 _No photoscanned textures downloaded. Run `npm run assets` to fetch CC0 textures from Poly Haven._
 <!-- photo-assets:end -->
 
+## Menu art, textures and models made with Higgsfield
+
+Generated for this project with [Higgsfield](https://higgsfield.ai) in v5.0, from text prompts:
+
+- `public/ui/`: the start screen's key art and the five map pictures (Z Image).
+- `public/hf/`: ground, bark and wall textures and the foliage and ghillie cut-outs (GPT Image
+  2.6), made seamless and given height/normal maps, or keyed to alpha, by a local script.
+- `public/models/`: the Tuscan houses and the boulders (a GPT Image 2.6 picture turned into a
+  textured 3D model with Tripo H3.1), optimised with glTF-Transform (WebP textures, meshopt).
+
 ## Libraries
 
 - [three.js](https://threejs.org) (MIT), including its `examples/jsm` addons (EffectComposer,

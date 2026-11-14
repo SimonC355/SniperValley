@@ -25,6 +25,13 @@ jobs:
 
       - run: npm ci
 
+      # v5: CC0 photoscanned ground, rock and bark textures from Poly Haven go into the program
+      # (public/assets/, git-ignored). If the download fails, the game uses its procedural
+      # textures as before, so the build carries on.
+      - name: Photoscanned textures
+        continue-on-error: true
+        run: npm run assets
+
       - run: npm run exe
 
       # the packed program must load Steam support (Steam itself isn't installed here)

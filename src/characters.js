@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, lerp } from './noise.js';
 import { SHARED, GUST_GLSL } from './shaders.js';
+import { GhillieModel, hasGhillieModel } from './ghilliemodel.js';
 
 const BONES = [
   // name, parent, x, y, z
@@ -61,7 +62,9 @@ const TUFT = [[0.12, 0.16, 0.06], [0.17, 0.19, 0.08], [0.24, 0.21, 0.11], [0.1, 
 // where tufts sit: part bone -> count (shoulders, upper back, hood)
 const TUFTS = { chest: 22, spine: 8, head: 18, upperArmR: 6, upperArmL: 6 };
 
-function buildGeometry(seed) {
+// light: for the 3D suit (ghilliemodel.js) only the loose jute threads and a few leaves,
+// which move in the wind on top of the model; no body, strips, tufts or cape.
+function buildGeometry(seed, light = false) {
   const rng = new RNG(seed);
   const boneIndex = Object.fromEntries(BONES.map((b, i) => [b[0], i]));
   const pos = [], nrm = [], uv = [], col = [], skinI = [], skinW = [], sway = [];
@@ -137,9 +140,9 @@ function buildGeometry(seed) {
       push(v, n, 0.5, 0.5, bodyCol, bi, 0);
     }
     const ci = cap.index.array;
-    for (let i = 0; i < ci.length; i++) idxBody.push(base + ci[i]);
+    if (!light) for (let i = 0; i < ci.length; i++) idxBody.push(base + ci[i]);
     // ---- strips
-    for (let s = 0; s < part.strips; s++) {
+    for (let s = 0; s < (light ? 0 : part.strips); s++) {
       const { root, radial } = surface(part, o, a, b, axis, rng.next(), rng.float(0, Math.PI * 2));
       let L = rng.float(part.len[0], part.len[1]);
       const W = rng.float(0.05, 0.12);
@@ -151,17 +154,18 @@ function buildGeometry(seed) {
       strand(root, dir, radial, L, W, rng.float(0.05, 0.25), [c[0] * cj, c[1] * cj, c[2] * cj], rng.int(0, 7), bi, 1);
     }
     // ---- jute threads: thin, long, loose (they move the most)
-    const threads = Math.round(part.strips * 0.45);
+    const armPart = /Arm/.test(part.bone);
+    const threads = Math.round(part.strips * (light ? (armPart ? 0.25 : 0.55) : 0.45));
     for (let s = 0; s < threads; s++) {
       const { root, radial } = surface(part, o, a, b, axis, rng.next(), rng.float(0, Math.PI * 2));
-      const L = rng.float(part.len[0], part.len[1]) * rng.float(1.1, 1.6) * (part.hood ? 1.2 : 1);
+      const L = rng.float(part.len[0], part.len[1]) * rng.float(1.1, 1.6) * (part.hood ? 1.2 : 1) * (light && armPart ? 0.6 : 1);
       const dir = new THREE.Vector3(0, -0.85, 0).addScaledVector(radial, rng.float(0.15, 0.45)).normalize();
       const c = PALETTE[rng.int(0, PALETTE.length - 1)];
       const cj = rng.float(0.9, 1.3);
-      strand(root, dir, radial, L, rng.float(0.014, 0.028), rng.float(0.1, 0.45), [c[0] * cj, c[1] * cj, c[2] * cj], rng.int(0, 7), bi, 1.5);
+      strand(root, dir, radial, L, rng.float(0.014, 0.028) * (light ? 0.7 : 1), rng.float(0.1, 0.45), [c[0] * cj, c[1] * cj, c[2] * cj], rng.int(0, 7), bi, 1.5);
     }
     // ---- grass tufts sticking up and out on the shoulders, back and hood
-    const tufts = TUFTS[part.bone] || 0;
+    const tufts = light ? 0 : TUFTS[part.bone] || 0;
     for (let s = 0; s < tufts; s++) {
       // upper part of the limb / torso, mostly at the back and the sides
       const t = part.hood ? rng.float(0.0, 0.45) : rng.float(0.55, 1.0);
@@ -176,7 +180,7 @@ function buildGeometry(seed) {
   }
   // back cape: long strips from the shoulders down the back (in chest space)
   const chestI = boneIndex.chest, chestO = rest.chest;
-  for (let s = 0; s < 70; s++) {
+  for (let s = 0; s < (light ? 0 : 70); s++) {
     const x = rng.float(-0.22, 0.22);
     const root = new THREE.Vector3(x, rng.float(0.05, 0.22), 0.13 + rng.float(0, 0.05)).add(chestO);
     const L = rng.float(0.45, 0.75), W = rng.float(0.06, 0.13);
@@ -217,9 +221,9 @@ function buildGeometry(seed) {
 }
 
 const GEO_CACHE = [];
-function getGeometry(i) {
-  const k = i % 3;
-  if (!GEO_CACHE[k]) GEO_CACHE[k] = buildGeometry(101 + k * 17);
+function getGeometry(i, light = false) {
+  const k = (i % 3) + (light ? 3 : 0);
+  if (!GEO_CACHE[k]) GEO_CACHE[k] = buildGeometry(101 + (k % 3) * 17, light);
   return GEO_CACHE[k];
 }
 
@@ -301,11 +305,13 @@ const _e = new THREE.Euler(), _q = new THREE.Quaternion();
 export class GhillieCharacter {
   constructor(scene, textures, { index = 0, armbandColor = null } = {}) {
     this.scene = scene;
-    const geo = getGeometry(index);
+    // v5: the leafy 3D suit made with Higgsfield, when its model file is there
+    const use3d = hasGhillieModel();
+    const geo = getGeometry(index, use3d);
     this.bodyMat = new THREE.MeshStandardMaterial({ color: 0x0d0d09, roughness: 0.95 });
     this.stripMat = new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
     // per-character motion for the strands (world space): smoothed velocity, turn rate, bob
-    this.motion = { uVel: { value: new THREE.Vector3() }, uTurn: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uBob: { value: 0 } };
+    this.motion = { uVel: { value: new THREE.Vector3() }, uTurn: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uBob: { value: 0 }, uDroop: { value: use3d ? 1 : 0 } };
     this.stripMat.customProgramCacheKey = () => 'ghillie';
     this.stripMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = SHARED.uTime;
@@ -320,6 +326,7 @@ uniform vec3 uVel;
 uniform float uTurn;
 uniform vec3 uCenter;
 uniform float uBob;
+uniform float uDroop;
 ${GUST_GLSL}`)
         // after skinning: move the strands in world space so wind and drag act in the
         // right direction whatever the pose (standing, kneeling or prone)
@@ -337,6 +344,8 @@ vec4 wp = modelMatrix * vec4(transformed, 1.0);
   float dl = length(drag);
   if (dl > 0.28) drag *= 0.28 / dl;
   d += drag + vec3(0.0, uBob * (0.5 + 0.5 * sin(ph)), 0.0);
+  // gravity: loose ends hang down whatever the limb is doing (an aimed arm, lying prone)
+  d.y -= 0.09 * uDroop;
   wp.xyz += d * aSway;
 }
 vec4 mvPosition = viewMatrix * wp;
@@ -364,6 +373,15 @@ gl_Position = projectionMatrix * mvPosition;`);
     this.mesh = mesh;
     this.group = new THREE.Group();
     this.group.add(mesh);
+    if (use3d) {
+      const restPos = {};
+      for (const [name, parent, x, y, z] of BONES) restPos[name] = new THREE.Vector3(x, y, z).add(parent ? restPos[parent] : new THREE.Vector3());
+      const model = new GhillieModel(this.bones, restPos);
+      if (model.ok) {
+        this.model = model;
+        this.group.add(model.root);
+      }
+    }
     // rifle on the chest bone
     this.rifle = buildRifle();
     this.bones.chest.add(this.rifle);
@@ -468,6 +486,9 @@ gl_Position = projectionMatrix * mvPosition;`);
     this.rifleState.q.slerp(_q.setFromEuler(_e.set(rp.rot[0], rp.rot[1], rp.rot[2])), rate);
     this.rifle.position.copy(this.rifleState.pos);
     this.rifle.quaternion.copy(this.rifleState.q);
+    // hands on the rifle: right hand on the grip, left hand under the fore-end (two-bone IK;
+    // the 3D suit only, the procedural suit keeps its own arm poses)
+    if (cb.alive && this.model) this._armsIK(yaw);
     // strand motion: velocity and turn rate lag a little (the strands' inertia)
     const m = this.motion;
     if (this.prevPos && dt > 0) {
@@ -486,6 +507,61 @@ gl_Position = projectionMatrix * mvPosition;`);
     // camo tint
     this.tint.lerp(this.tintTarget, 1 - Math.exp(-dt * 0.8));
     this.stripMat.color.copy(this.tint);
+    this.modelDirty = true;
+  }
+
+  // Two-bone IK for both arms toward the rifle's grip and fore-end (in the rifle's own space).
+  // Elbows point down and a little out. Rest arms hang along -y, so a bone's world rotation is
+  // the rotation from straight down to where it points.
+  _armsIK(yaw) {
+    const B = this.bones;
+    this.group.updateMatrixWorld(true);
+    const gripR = _ik.a.set(0.0, -0.07, 0.1).applyMatrix4(this.rifle.matrixWorld);
+    const gripL = _ik.b.set(0.0, -0.05, -0.32).applyMatrix4(this.rifle.matrixWorld);
+    const right = _ik.side.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    this._ikArm(B.upperArmR, B.foreArmR, B.handR, gripR, right, 1);
+    this._ikArm(B.upperArmL, B.foreArmL, B.handL, gripL, right, -1);
+  }
+
+  _ikArm(upper, fore, hand, target, right, sideSign) {
+    const L1 = 0.29, L2 = 0.26;
+    const S = _ik.s.setFromMatrixPosition(upper.matrixWorld);
+    const toT = _ik.t.subVectors(target, S);
+    let d = toT.length();
+    if (d < 1e-4) return;
+    const u = toT.divideScalar(d);
+    d = Math.min(d, (L1 + L2) * 0.995);
+    const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+    // pole: down and out to this arm's side, made perpendicular to the shoulder-hand line
+    const pole = _ik.p.set(0, -1, 0).addScaledVector(right, 0.6 * sideSign);
+    pole.addScaledVector(u, -pole.dot(u));
+    if (pole.lengthSq() < 1e-6) pole.set(0, -1, 0);
+    pole.normalize();
+    const E = _ik.e.copy(S).addScaledVector(u, a).addScaledVector(pole, h);
+    const dirU = _ik.du.subVectors(E, S).normalize();
+    const H = _ik.h.copy(S).addScaledVector(u, d);
+    const dirF = _ik.df.subVectors(H, E).normalize();
+    // world rotations: upper arm from rest (down) to dirU; forearm continues from the upper arm
+    const qU = _ik.qu.setFromUnitVectors(_down, dirU);
+    const qF = _ik.qf.setFromUnitVectors(dirU, dirF).multiply(qU);
+    // to local: parent (chest) world rotation⁻¹ × world
+    upper.parent.getWorldQuaternion(_ik.qp);
+    upper.quaternion.copy(_ik.qp.invert().multiply(qU));
+    fore.quaternion.copy(_ik.qt.copy(qU).invert().multiply(qF));
+    hand.quaternion.identity();
+    upper.updateMatrixWorld(true);
+  }
+
+  // The 3D suit follows the game skeleton. Called just before drawing, for characters on screen
+  // only (main.js cullCharacters), so off-screen ones cost nothing and nothing is a frame late.
+  syncModel() {
+    if (!this.model || !this.modelDirty) return;
+    this.modelDirty = false;
+    this.group.updateMatrixWorld(true);
+    this.model.update();
+    _c.copy(this.tint).lerp(_white, 0.45);
+    this.model.setTint(_c);
   }
 
   setVisible(v) { this.group.visible = v; }
@@ -494,6 +570,7 @@ gl_Position = projectionMatrix * mvPosition;`);
     this.scene.remove(this.group);
     this.bodyMat.dispose();
     this.stripMat.dispose();
+    if (this.model) this.model.dispose();
     // per-character rifle and armband (the skinned suit geometry is shared and cached)
     for (const o of [this.rifle, this.armband]) {
       if (!o) continue;
@@ -502,3 +579,10 @@ gl_Position = projectionMatrix * mvPosition;`);
   }
 }
 const _v = new THREE.Vector3();
+const _c = new THREE.Color(), _white = new THREE.Color(1, 1, 1);
+const _down = new THREE.Vector3(0, -1, 0);
+const _ik = {
+  a: new THREE.Vector3(), b: new THREE.Vector3(), side: new THREE.Vector3(), s: new THREE.Vector3(), t: new THREE.Vector3(),
+  p: new THREE.Vector3(), e: new THREE.Vector3(), du: new THREE.Vector3(), h: new THREE.Vector3(), df: new THREE.Vector3(),
+  qu: new THREE.Quaternion(), qf: new THREE.Quaternion(), qp: new THREE.Quaternion(), qt: new THREE.Quaternion(),
+};

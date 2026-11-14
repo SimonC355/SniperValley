@@ -316,6 +316,7 @@ if (-mvPosition.z > 70.0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
     const z = this.rng.float(-M.width / 2 - 8, M.width / 2 + 8);
     const T = this.terrain;
     if (T.waterDepthAt(x, z) > 0 || T.heightAt(x, z) < 1.4) return null;
+    if (!T.isFree(x, z, 2.5)) return null;
     const d = this.forest.density(x, z);
     if (d < minDensity || this.rng.next() > d) return null;
     if (T.normalAt(x, z).y < 0.84) return null;

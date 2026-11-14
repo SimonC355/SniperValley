@@ -245,7 +245,8 @@ export class LanGame {
     this.s.toAll({ k: 'respawn', id: c.id, x: r2(x), z: r2(z), y: r3(yaw) });
   }
 
-  sendDied(victim) { this.s.toHost({ k: 'died', v: victim.id }); }
+  // Client: we died by the zone or the river (cause), the host confirms it to everyone.
+  sendDied(victim, cause = 'zone') { this.s.toHost({ k: 'died', v: victim.id, c: cause }); }
 
   broadcastRoundEnd(winner) {
     const g = this.game;
@@ -320,7 +321,7 @@ export class LanGame {
         if (!this.isHost) return;
         const victim = this.byId(d.v);
         if (!victim || !victim.alive || victim.peer !== from) return;
-        g.applyZoneDeath(victim);
+        g.applyZoneDeath(victim, d.c === 'river' ? 'river' : 'zone');
         break;
       }
       case 'kill':

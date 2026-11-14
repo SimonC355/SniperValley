@@ -298,6 +298,7 @@ uniform float uOutside;
 uniform float uFade;
 uniform vec2 uReticleOffset;
 uniform vec3 uGrade; // saturation, contrast, warmth
+uniform float uSharpen;
 varying vec2 vUv;
 
 vec3 RRTAndODTFit(vec3 v) {
@@ -337,6 +338,15 @@ void main() {
     col.b = texture2D(tDiffuse, duv - cao).b;
   } else {
     col = texture2D(tDiffuse, uv).rgb;
+    // v5: light sharpening (an unsharp mask limited to a share of the pixel's own brightness,
+    // so edges get crisper without halos)
+    if (uSharpen > 0.001) {
+      vec2 px = 1.0 / uRes;
+      vec3 nb = texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb
+              + texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb + texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb;
+      vec3 detail = col - nb * 0.25;
+      col = max(col + clamp(detail, -0.3 * col, 0.3 * col) * uSharpen, 0.0);
+    }
   }
   col *= uExposure;
   // grading in linear HDR: log-space contrast around mid grey, saturation, split toning
@@ -436,6 +446,7 @@ export class PostFX {
         uFade: { value: 0 },
         uReticleOffset: { value: new THREE.Vector2() },
         uGrade: { value: new THREE.Vector3(CONFIG.grade.saturation, CONFIG.grade.contrast, CONFIG.grade.warmth) },
+        uSharpen: { value: CONFIG.render.sharpen ?? 0.6 },
       },
     }));
     this.composer.addPass(this.final);

@@ -71,7 +71,8 @@ impostors from them, and keep our wind and collision setup.
   20°, with spurs and gullies running downhill and a terrace on each side.
 - The terrain continues as scenery beyond the play area (distant hills, impostor forest).
   Invisible walls stop you at the play-area edge.
-- **Water:** deep water (> 0.85 m) is **impassable**. The shallow shelf slows you to 55% and
+- **Water:** deep water (> 0.85 m) was **impassable** until v5; now its current sweeps you away
+  (see v5.0 below). The shallow shelf slows you to 55% and
   every step makes a splash. A splash is a reveal event, audible to about 90 m. Optional shallow
   fords can be added with `map.fords: [x, ...]`; there are none by default, per the design
   assumption.
@@ -275,7 +276,8 @@ made all three about a quarter smaller again:
 | Tree trunks (the drawn shape: tapered, bent, flared at the base) | yes | yes |
 | Tree crown *core* (inner ~40% radius, where foliage is drawn dense) | yes | yes |
 | Outer needle cards | no | no (gaps you can see through are real) |
-| Rocks | yes | yes |
+| Rocks (their drawn top surface, v5) | yes | yes |
+| Buildings, ruin walls, the edge wall (v5) | yes | yes |
 | Fallen logs, stumps | yes | yes (cover for prone players; logs block walking, but you can jump over them) |
 | Bushes, ferns | no | soften AI visibility |
 | Water surface | stops bullets (splash) | no |
@@ -775,3 +777,117 @@ options. The backend also takes test commands (a friend's *Join Game*, statistic
   hits (no cheat protection), there is no host migration, and a friend who joins during a
   deathmatch waits for the next match. Joining a running deathmatch would be a good next step.
 - The Steam overlay (Shift+Tab, invites from inside the game) is off; see v0.4.0.
+
+## v5.0: player-requested updates
+
+Asked for (in Danish) as one list. Each point, how I read it and what changed.
+
+- **"Flere sten … og i dag kan man ikke kravle over dem"** (more rocks, and you can't climb
+  over them).
+  - Rock count 340 → 640 per reference area, with about 12 % placed as outcrops (a big rock with
+    2–5 smaller ones leaning on it). Rocks keep clear of trunks, lean with the slope and are sunk
+    so no side floats above the ground (the old ones did on slopes).
+  - Each rock variant gets a height map of its drawn top surface (rays straight down onto the
+    mesh, 36 × 36), baked per placed rock into an 18 × 18 world grid (`rockTopAt` in
+    `src/rocks.js`). `World.groundAt` is the terrain or the highest rock/wall/building top.
+  - The player (`_move` in `src/player.js`): an obstacle up to `stepHeight` (0.55 m) is walked
+    onto; higher blocks you (sliding along it). Holding forward against something up to
+    `climbHeight` (2.4 m) for 0.22 s, or pressing jump, climbs onto it: up first, then over the
+    edge, 0.35–0.6 s. Steps up and down are eased in the camera instead of popping.
+  - Bullets and sight lines march through the rock's footprint against the same height map
+    (they used to hit a sphere that reached well above the drawn rock, the same problem the
+    trunks had in 0.3.1). The AI still walks around rocks.
+  - Test (Narrow valley, 12 rocks 0.8–2.2 m high, walking straight at them for 4 s): on top of
+    9; the other 3 were walked around because a neighbouring rock or trunk pushed the player
+    aside.
+- **Slide.** Crouch while sprinting (and faster than walking): 9.2 m/s, slowed by 6 m/s² on
+  level ground, sped up downhill, steered a little with the mouse, ending crouched below
+  2.4 m/s (about 1.6 s and 9 m on level ground in a test). Jump ends it with a hop. It counts as
+  a loud footstep for the AI. Others see a crouched player moving fast (no new pose, so the
+  network message and hit boxes are unchanged).
+- **"Ikke noget som indikerer at banen stopper sidelæns"** (nothing shows where the map ends).
+  A dry-stone wall along the whole edge (`EdgeWall` in `src/buildings.js`): 2.3 m (Ravine) to
+  2.9 m (Valley) high, leaning faces, a rounded cap, a low weir across the river. Trees, rocks,
+  bushes and debris keep a strip clear in front of it so it is seen from a distance. It is a
+  solid for bullets and sight; the player stops just inside it, as before.
+- **"Default skal cirklen …"**: read as "the circle (radial zone, *toward the water*) should be
+  the default". It is, and saved settings from before 5.0 switch to it once (`zv: 5` in the
+  saved match settings).
+- **The river.** Deep water used to be a wall. Now the deep channel sweeps you downstream at
+  5 m/s (toward −X, the way the surface pattern flows, now about 2 m/s) and into the middle of
+  the channel; you can barely steer and can't scope or fire. It drowns you in 3.5 s (*RIVER ✕*
+  in the kill feed; in deathmatch you respawn as after any death). The shallows pull at you a
+  little. White water streaks show the current. On LAN/Steam the drowning player reports it,
+  like a zone death.
+- **Gunshot "like an air rifle".** Measured on the rendered buffers (48 kHz):
+
+  | | Peak | RMS 0–100 ms | RMS 0–500 ms | Crest | Audible for |
+  |---|---|---|---|---|---|
+  | old blast | −0.4 dBFS | −18.8 dB | −25.6 dB | 18.4 dB | 0.22 s |
+  | new blast | −0.3 dBFS | −7.6 dB | −12.5 dB | 7.3 dB | 2.8 s |
+
+  So the old one was a click with almost nothing behind it. The new one starts with the bullet's
+  N-wave crack (the whip), then a 3 ms blast wave, a saturated hot-gas burst, a chest thump made
+  of filtered noise (no tone, so no "bee"), tree reflections, the far slope answering at
+  0.4–0.9 s and a rumble rolling away. Distant reports are a little louder and less muffled,
+  and the near-miss crack radius is 50 m. **Untested by ear here**, as before.
+- **Tuscan Hills.** Same concept as the valleys. 2–3 hamlets per slope on flatter benches
+  (3–6 houses along the contour, sometimes a tower), plus lone farmhouses and ruins. Houses are
+  one convex solid each (walls plus gable roof: 7 planes), ruins are 4 broken walls of
+  1.1–3.6 m in pieces with gaps. Everything is drawn with one procedural masonry shader (dry
+  stone, rubble with mortar, ochre plaster falling off in patches, terracotta tiles) with a
+  derivative bump that fades out with distance. Trees: cypresses near the hamlets and on the
+  ridges, olive groves, umbrella pines; open dry-grass hillsides between the groves.
+- **Beech River.** New `lowland` terrain: the same river cross-section with a cut bank, then
+  gentle rolling ground (ridges only 8–9 m) and low wooded hills instead of mountains. A broad
+  river (12 m deep channel half-width). Beeches are a new broadleaf tree builder: a trunk that
+  forks into limbs and a dome of leafy twig cards on the crown shell with normals bent around
+  the crown's centre. Fewer, much bigger trees (7.2 m spacing), little undergrowth, a leaf-litter
+  ground texture and patches of planted spruce.
+- **Graphics** ("looks like something from ten years ago"). The biggest single difference in
+  screenshots was the first-person rifle (plain cylinders and boxes), now a detailed modern
+  rifle with stippled cerakote, anodised and blued metal, rubber and coated glass. Also: a
+  light sharpening pass (`render.sharpen`), more contrast, less fog, fuller grass. The Windows
+  build now runs `npm run assets`, so releases get the CC0 photoscans; the procedural textures
+  remain the fallback if the download fails. **The real Poly Haven API is still untested
+  from here** (blocked); CI is the first real run, and colours may need tuning
+  (`assets.adjust`).
+- **Kill marker.** Your kills get a skull at the body (head height) with the distance for 8 s,
+  clamped to the screen edge with an arrow when off screen. Only your own kills.
+- **UI.** Rounded, glassy (backdrop blur) panels in olive drab and khaki, a segmented tab bar,
+  styled selects and sliders, pill-shaped HUD pieces. Every id and class the code uses is kept.
+- **Start screen with art** (asked for afterwards: "opgradere layout med Higgsfield"). Six
+  pictures generated with Higgsfield's Z Image model (the free plan's model): key art (a second
+  try put the sniper on the right so the menu on the left doesn't cover him) and one picture per
+  map. They are WebP files in `public/ui/` (about 1.1 MB together). The menu moved to the left
+  over the key art, the map dropdown became picture cards (they drive the old, now hidden,
+  select, so the LAN rule "the host chooses the map" still greys them out), and the loading
+  screen shows the map being loaded.
+- **"Closer to 2026 than 2016"** (after upgrading Higgsfield): the user wants the existing world
+  upgraded (trees, houses, water, ghillie suit, rocks, leaves), not new objects. (A first try with
+  new landmark props was removed at once.)
+  - *Textures* (`src/hftextures.js`, files in `public/hf/`): every ground, bark and wall texture
+    and every foliage/ghillie card is a generated photo. Surfaces are made seamless (an offset
+    blend), get a height map from the high-passed luminance and a normal map from that, packed
+    like the procedural bakes (albedo + height, normal + roughness), so the existing terrain,
+    tree and rock shaders use them unchanged. Cards are generated on magenta and keyed to alpha,
+    colour-matched to the old palette (so camouflage still works) and bled into the transparent
+    texels. The photoscans (CI) still win for the conifer ground. `?hf=0` shows the old look.
+  - *Houses* (`src/models.js`, `Buildings._modelHouse`): three textured house models (farmhouse,
+    cottage, ochre village house; a tower house came out grey and was dropped), each on a stone
+    plinth that levels the slope, with a light copy beyond 90 m (effective). The collider is the
+    same convex house solid as before. Ruins stay procedural, now in photo stone.
+  - *Rocks*: three 3D rock models replace the icosphere boulders; the height maps for walking,
+    climbing and bullets are baked from the models exactly as from the old meshes.
+  - *Walls*: the masonry shader uses the photo walls with their normal maps (a derivative bump
+    from the photo's height was pixel noise, and texture reads inside the per-face branches had
+    undefined mip levels).
+  - *Water*: the mirror image skipped every near tree for speed, so the river reflected a bare
+    bank and the sky and looked milky; light copies of the near trees now stand in during the
+    reflection. Foam and white water read a real noise channel (they read a constant before), and
+    there are finer ripples near the camera.
+  - Size: about 14 MB of textures and 2.9 MB of models in the repository.
+- **Version 5.0.0** ("kald denne version 5.0"); the start screen shows *VERSION 5.0 ·
+  PLAYER-REQUESTED UPDATES*. LAN and Steam players need the same version, as before.
+- **Not done / to check on a real PC:** frame rates with the new rifle, crowns and walls; the
+  photoscans in the CI build; the new gunshot by ear; shot distances on the new maps.
