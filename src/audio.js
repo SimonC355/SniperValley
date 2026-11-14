@@ -33,7 +33,9 @@ export class AudioSystem {
     const curve = new Float32Array(2048);
     for (let i = 0; i < curve.length; i++) {
       const x = (i / (curve.length - 1)) * 2 - 1;
-      curve[i] = Math.tanh(1.2 * x * 1.5) / Math.tanh(1.8);
+      // ceiling 0.82: the 4× oversampling filter overshoots a hard transient by up to ~20 %,
+      // which pushed a full-volume gunshot to +1.5 dBFS (clipped in the sound card)
+      curve[i] = (0.82 * Math.tanh(1.2 * x * 1.5)) / Math.tanh(1.8);
     }
     clip.curve = curve;
     clip.oversample = '4x';
