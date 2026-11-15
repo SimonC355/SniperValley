@@ -47,19 +47,34 @@ photoscans from Poly Haven into `public/assets/` there.
 - **Scope**: textures only. Trees stay procedural: realistic CC0 conifer models are rare, and
   the tree system depends on its own LOD, impostor and wind setup.
 
-### Megascans (asked about, not added)
+### Megascans (export tool, assets not in the repository)
 
 Quixel Megascans now live on Epic's Fab marketplace under the Fab Standard License. That
-license allows use in any engine, web included, but Megascans are **not CC0**: most cost money
-since 2025 (assets claimed during the free period in 2024 stay yours), and the license is for
-use inside a project, not for sharing the files themselves. The brief asked for CC0 only, so
-none are in the repository.
+license allows use in any engine, web included, and selling the game, but Megascans are **not
+CC0**: most cost money since 2025 (assets claimed during the free period in 2024 stay yours), and
+the files themselves may not be shared, so they never go into this repository (it is public).
+They live in a **private** repository instead (`SniperValley-assets`); the game will load them
+from the git-ignored `public/assets/megascans/` and fall back to its own trees without them.
 
-If you want them anyway, the plan is the same as for the photoscans: you download the assets
-you own into a git-ignored folder (`public/assets/megascans/`), and a loader uses them when
-they are there and falls back to the procedural forest when they are not. Megascans 3D plants
-are made for desktop engines, so the browser build would use their lowest LODs, bake
-impostors from them, and keep our wind and collision setup.
+Some packs, among them the **European Beech** trees (17 trees: 8 forest, 1 field, 4 saplings,
+4 seedlings, 9 LODs from about 2.3 million vertices down), are offered in Unreal Engine format
+only. `scripts/megascans/` gets them out with Unreal Engine 5 on Windows:
+
+1. `powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 setup` makes an
+   empty project `SVMegascans` (Python, Editor Scripting and glTF Exporter plugins on) and opens it
+   once. Then, in Epic Games Launcher: Fab Library -> European Beech -> Add to Project.
+2. `... megascans.ps1 export` opens the project with `export_megascans.py`, which (in memory, not
+   saved) turns Nanite off, picks for every mesh the first LOD under 60 000 and under 15 000
+   vertices, writes them as `.glb` (geometry and material slots, metres), exports the textures
+   the materials use as PNG, and writes `inventory.json` (LOD vertex counts, sizes, material
+   parents, blend modes, texture/scalar/vector parameters). The script then scales the textures
+   to 2048 px. Output: `%USERPROFILE%\SniperValley-megascans` (about 100-300 MB expected).
+3. `... megascans.ps1 upload` pushes that folder to the private repository and refuses a public
+   one.
+
+**Not tested inside Unreal here** (no Unreal in the cloud sessions): the first run's `report.txt`
+says what worked. Next step once the files are in: a loader that builds the beech map's trees
+from the exported LODs (wind, collision and impostors from our own tree system).
 
 ## Map
 
