@@ -176,6 +176,21 @@ class Game {
     };
     this.combat.onClaim = (shooter, victim, part, point, dist) => { if (this.net) this.net.sendClaim(shooter, victim, part, point, dist); };
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
+    // Your own bullet trail starts where your rifle's muzzle is drawn (the viewmodel has its own
+    // camera), or under the reticle when scoped, so it reads as a line from the gun to the target
+    // instead of a dot under the crosshair.
+    this.effects.ownTrailStart = () => {
+      const cam = this.camera;
+      const ndc = new THREE.Vector3(0, -0.42, 0.5);
+      if (!this.player.scoped) {
+        this.viewmodel.flash.getWorldPosition(ndc);
+        ndc.project(this.vmCamera);
+        if (!Number.isFinite(ndc.x) || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) return null;
+      }
+      const dir = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(cam).sub(cam.position).normalize();
+      const fwd = cam.getWorldDirection(new THREE.Vector3());
+      return cam.position.clone().addScaledVector(dir, 1.6 / Math.max(0.2, dir.dot(fwd)));
+    };
     // the rifle is lit by its own light (dimmed in shade); world cloud shadows don't apply to it
     this.vmScene.traverse((o) => {
       for (const m of [].concat(o.material || [])) { m.defines = { ...(m.defines || {}), NO_CLOUD_SHADOW: '' }; m.needsUpdate = true; }

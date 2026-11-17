@@ -132,7 +132,7 @@ export class HUD {
           <label>Swap sides each round</label><select id="set-swap">${onoff}</select>
           <label>Zone mode</label><select id="set-zone">${opt([['radial', 'circle (closes toward the water)'], ['ends', 'ends (closes from the valley ends)']])}</select>
           <label>Camouflage</label><input id="set-camo" type="range" min="0" max="1" step="0.05">
-          <label>Tracers</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'faint'], ['bright', 'bright']])}</select>
+          <label>Bullet trails</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'light (yours clear, others faint)'], ['bright', 'bright (everyone)']])}</select>
           <label>Ballistics</label><select id="set-ball">${opt([['0', 'hitscan'], ['1', 'travel time + drop + wind']])}</select>
         </div>
         <div class="note">Match settings apply when a new match starts. Rounds, side swap and the zone are for elimination; deathmatch keeps the whole valley open for ${Math.round(CONFIG.match.tdmTime / 60)} minutes. Changing the map reloads the game (in a LAN game the host's map is used).</div>

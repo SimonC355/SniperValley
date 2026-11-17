@@ -253,7 +253,7 @@ CREDITS.md.
 ## URL options
 
 `?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–20) · `?game=tdm` (team deathmatch) ·
-`?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` ·
+`?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` (bullet trails) ·
 `?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
@@ -289,7 +289,7 @@ src/
   events.js      reveal event bus
   birds.js       crow flocks
   zone.js        shrinking zone
-  effects.js     muzzle flash, glint, impacts, tracers
+  effects.js     muzzle flash, glint, impacts, bullet trails
   viewmodel.js   first-person rifle
   audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river)
   sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack

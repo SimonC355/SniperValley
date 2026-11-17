@@ -1,5 +1,5 @@
 // Shooting: bolt-action fire, hitscan (default) or simulated projectiles (optional travel
-// time, drop and wind), hit resolution against body hitboxes, impacts, tracers, near-miss
+// time, drop and wind), hit resolution against body hitboxes, impacts, bullet trails, near-miss
 // cracks and reveal events (shot sound + muzzle flash).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
@@ -96,7 +96,10 @@ export class Combat {
       this.projectiles.push({
         shooter, pos: origin.clone(), vel: dir.clone().multiplyScalar(W.ballistics.muzzleVelocity),
         start: muzzle.clone(), origin: origin.clone(), age: 0, travelled: 0, nearMissDone: false, visual,
+        trail: this.effects.startTrail(muzzle, shooter.isPlayer),   // follows the real arc
       });
+      const pr = this.projectiles[this.projectiles.length - 1];
+      pr.trailGen = pr.trail ? pr.trail.gen : 0;   // the pooled trail may be reused for a later shot
     } else {
       this._trace(shooter, origin, dir, W.range, muzzle, time, 0, { visual });
     }
@@ -127,6 +130,7 @@ export class Combat {
     }
     const endT = best ? best.t : tWorld;
     const end = new THREE.Vector3().copy(origin).addScaledVector(dir, endT);
+    this.lastEnd = end;
     // near-miss crack for the listening player
     const L = this.listener;
     if (L && L.alive && L !== shooter && (!best || best.c !== L) && !ctx.nearMissDone) {
@@ -141,7 +145,9 @@ export class Combat {
         if (this.onNearMiss && miss < 5) this.onNearMiss(shooter, miss);
       }
     }
-    if (tracerFrom) this.effects.tracer(tracerFrom, end);
+    // the trail's head reaches the impact a moment later: the puff waits for it
+    const trail = tracerFrom ? this.effects.bulletTrail(tracerFrom, end, shooter.isPlayer) : null;
+    const arrive = trail ? trail.lastT : 0;
     if (best) {
       // a replayed shot stops at the body; the host's kill message does the rest
       if (ctx.visual) return true;
@@ -152,7 +158,7 @@ export class Combat {
     }
     if (kind) {
       const k = kind === 'terrain' ? (this.terrain.canopyAt(end.x, end.z) > 0.5 ? 'forest' : 'ground') : (kind === 'log' || kind === 'stump' ? 'tree' : kind);
-      this.effects.impact(end, k === 'forest' ? 'ground' : k);
+      this.effects.impact(end, k === 'forest' ? 'ground' : k, undefined, arrive);
       this.audio.impact(end, k);
       this.bus.emit({ type: 'impact', position: end.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id, kind: k });
       return true;
@@ -190,15 +196,19 @@ export class Combat {
         const len = seg.length();
         if (len < 1e-6) continue;
         const dir = seg.clone().divideScalar(len);
+        const tStep = pr.age + (dt - remaining);
+        if (pr.trail && pr.trail.gen !== pr.trailGen) pr.trail = null;
         if (this._trace(pr.shooter, prev, dir, len, null, time, pr.travelled, pr)) {
-          // show the whole flight path as a tracer on impact
-          this.effects.tracer(pr.start, prev.clone().addScaledVector(dir, len * 0.5));
+          if (pr.trail) pr.trail.add(this.lastEnd, tStep - h * (1 - prev.distanceTo(this.lastEnd) / len));
           done = true;
-        }
+        } else if (pr.trail) pr.trail.add(pr.pos, tStep);
         pr.travelled += len;
       }
       pr.age += dt;
-      if (done || pr.age > 3 || pr.pos.y < -50) this.projectiles.splice(i, 1);
+      if (done || pr.age > 3 || pr.pos.y < -50) {
+        if (pr.trail) pr.trail.close();
+        this.projectiles.splice(i, 1);
+      }
     }
   }
 }

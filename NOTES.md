@@ -160,7 +160,18 @@ made all three about a quarter smaller again:
   0.2 s and is visible to 400 m with line of sight.
   - AI notice a flash within 100° of where they are looking.
   - Shots are also heard: sound arrives after `distance / 340` s, through a valley-echo convolver.
-  - Tracers are `faint` by default; set `weapon.tracers` to `'off'` or `'bright'`.
+  - **Bullet trails** (`weapon.tracers`, MATCH → Bullet trails): every shot leaves a thin
+    whitish vapour trail along its path, like the bullet trails in modern shooters. A bright
+    head runs at the bullet's speed (a hitscan shot's head arrives within 0.25 s, and its
+    impact puff waits for it); behind it the trail lingers for about 1.8 s, widening, breaking
+    up and drifting with the wind. With ballistics on it follows the real arc (drop and wind).
+    - `faint` (default): your own trail is clear, everyone else's faint, a light hint back at
+      the shooter (like the muzzle flash). `bright`: everyone's clear. `off`: none.
+    - Your own trail starts where your rifle's muzzle is drawn (the viewmodel has its own
+      camera), or just under the reticle when scoped, so you see a line from the gun to the
+      target instead of a dot under the crosshair.
+    - Drawn as camera-facing ribbons whose width stays between 1.6 and 7 pixels (a line
+      through the scope and from the side); tuning in `weapon.trail`.
 - **"You are being aimed at"**: shown when an enemy AI in aim or fire state is targeting you,
   its glint points at you (within 10°), and it has line of sight. It tells you *that* you are
   being aimed at, never *where* from. Toggle with `hud.aimedAtWarning`.
@@ -489,7 +500,7 @@ made all three about a quarter smaller again:
     LAN.
   - their own zone damage (reported when it kills them).
   - **There is no cheat protection: this is for friends.**
-- **Shots** are replayed visually everywhere (muzzle flash, distance-delayed sound, tracer,
+- **Shots** are replayed visually everywhere (muzzle flash, distance-delayed sound, bullet trail,
   impacts, near-miss crack). On the host, a replayed shot also emits the shot and flash reveal
   events, so the AI reacts to human players exactly as it does in single player.
   - The host turns remote players' movement into footstep and splash events for the AI.

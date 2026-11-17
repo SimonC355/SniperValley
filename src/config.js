@@ -176,8 +176,17 @@ export const CONFIG = {
     holdBreathSteady: 0.1,     // sway multiplier while holding the breath
     breathRecovery: 0.5,       // seconds of breath regained per second
     outOfBreathTime: 3.0,      // after running out: no breath hold and more sway for this long
-    tracers: 'faint',          // 'off' | 'faint' | 'bright'
-    tracerOpacity: 0.12,
+    tracers: 'faint',          // bullet trails: 'off' | 'faint' (default) | 'bright'
+    trail: {
+      life: 1.8,               // seconds the vapour trail lingers behind the bullet
+      opacity: 0.65,           // your own shots ('faint')
+      othersOpacity: 0.3,      // everyone else's shots ('faint'): a light hint back at the shooter
+      brightOpacity: 0.85,     // every shot with 'bright'
+      width: 0.04,             // metres right behind the bullet
+      spread: 0.25,            // metres per second the trail widens as it disperses
+      drift: 0.5,              // share of the wind the vapour drifts with
+      headTime: 0.025,         // seconds of bright streak at the bullet
+    },
     ballistics: {
       enabled: false,          // bullet travel time, drop and wind
       muzzleVelocity: 850,

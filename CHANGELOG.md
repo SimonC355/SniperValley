@@ -3,6 +3,17 @@
 Each version's section becomes the notes of its release on GitHub (see
 `scripts/release-notes.mjs`); the text after the version is the release's name.
 
+## Unreleased
+
+- **Bullet trails.** Every shot leaves a thin, whitish vapour trail along its path, like in
+  modern shooters: a bright streak runs out at the bullet's speed and the trail hangs in the
+  air for a moment before it drifts and fades. Through the scope you see where your shot went
+  and can correct the next one. Your own trail is clear; other players' trails are faint,
+  a light hint at where a shot came from. MATCH → Bullet trails: off, light (default) or
+  bright. With ballistics on, the trail follows the bullet's real arc.
+- **Megascans export tool** (`scripts/megascans`): gets Unreal-only Fab packs such as the
+  European Beech trees out of Unreal Engine, for a private asset repository.
+
 ## 5.0.0 – Player-requested updates
 
 Everything in this version was asked for by players and testers.
