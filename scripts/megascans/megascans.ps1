@@ -14,6 +14,8 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 upload
 #       pushes that folder to your PRIVATE repository <owner>/SniperValley-assets (create it on
 #       github.com first: New repository, Private, no README). Refuses a public repository.
+#       Every folder in it goes up, one push each (GitHub: at most 100 MB per file and 2 GB per
+#       push), so other assets can go along in folders of their own; files over 95 MB stop it.
 #
 # The Fab Standard License forbids sharing the files themselves, so they never go into the
 # SniperValley repository, which is public. Options: -Pack beech (word(s) in the asset paths,
@@ -170,8 +172,17 @@ function Invoke-Export {
 }
 
 function Invoke-Upload {
-  $packs = @(Get-ChildItem $OutDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'inventory.json') } | ForEach-Object Name)
-  if ($packs.Count -eq 0) { throw "Kør først: powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export" }
+  # every folder in SniperValley-megascans is uploaded: exports (with inventory.json) and any
+  # other assets you put in a folder of their own (e.g. SniperValley-megascans\grass\...)
+  $packs = @(Get-ChildItem $OutDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '.git' -and @(Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0 })
+  if ($packs.Count -eq 0) { throw "Intet at uploade i $OutDir. Kør export først, eller læg dine filer i en mappe derinde (fx $OutDir\graes)." }
+  # GitHub takes at most 100 MB per file: stop before pushing rather than half way
+  $big = @($packs | ForEach-Object { Get-ChildItem $_.FullName -Recurse -File } | Where-Object { $_.Length -gt 95MB })
+  if ($big.Count) {
+    Say 'Disse filer er for store til GitHub (over 95 MB):' 'Yellow'
+    $big | ForEach-Object { Write-Host ("  {0:N0} MB  {1}" -f ($_.Length / 1MB), $_.FullName.Substring($OutDir.Length + 1)) }
+    throw "Gør dem mindre først: teksturer med -MaxTexture 1024 (kør export igen), store .fbx/.glb ved at eksportere dem gennem Unreal (export-trinnet vælger mindre LODs). Eller spørg Claude."
+  }
   $origin = (git -C $Root remote get-url origin)
   if ($origin -notmatch 'github\.com[:/]([^/]+)/') { throw "Kunne ikke finde din GitHub-bruger ud fra '$origin'." }
   $owner = $Matches[1]
@@ -190,10 +201,21 @@ function Invoke-Upload {
     if (-not (git config user.name)) { git config user.name 'SniperValley export' }
     if (-not (git config user.email)) { git config user.email 'export@localhost' }
     if (@(git remote) -contains 'origin') { git remote set-url origin $url } else { git remote add origin $url }
+    if (Test-Path 'LICENSE-NOTE.txt') { git add LICENSE-NOTE.txt }
+    # one commit and push per folder: GitHub refuses a single push over 2 GB
+    foreach ($pk in $packs) {
+      git add -A -- $pk.Name
+      git diff --cached --quiet
+      if ($LASTEXITCODE -eq 0) { Say "  $($pk.Name): uændret"; continue }
+      $mb = (@(Get-ChildItem $pk.FullName -Recurse -File) | Measure-Object Length -Sum).Sum / 1MB
+      Say ("  {0}: {1:N0} MB, uploader..." -f $pk.Name, $mb)
+      git commit -q -m "Assets: $($pk.Name)"
+      git push -u origin main
+      if ($LASTEXITCODE -ne 0) { throw "Upload fejlede ved $($pk.Name). Findes det private repo $owner/$Repo på github.com (Private, uden README)? Prøv igen: det der allerede er uploadet, springes over." }
+    }
     git add -A
-    git commit -q -m "Megascans export: $($packs -join ', ')"
-    git push -u origin main
-    if ($LASTEXITCODE -ne 0) { throw "Upload fejlede. Findes det private repo $owner/$Repo på github.com (Private, uden README)?" }
+    git diff --cached --quiet
+    if ($LASTEXITCODE -ne 0) { git commit -q -m 'Assets: notes'; git push -u origin main }
   } finally { Pop-Location }
   Say ''
   Say "Uploadet til $url" 'Green'

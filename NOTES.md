@@ -72,7 +72,10 @@ only. `scripts/megascans/` gets them out with Unreal Engine 5 on Windows:
    expected for the trees). Each pack gets its own folder, so exporting another pack doesn't
    overwrite the last one.
 3. `... megascans.ps1 upload` pushes that folder (all packs) to the private repository and
-   refuses a public one.
+   refuses a public one. Every folder in it goes up, one commit and push each (GitHub takes at
+   most 100 MB per file and 2 GB per push), so assets that need no Unreal export can go along in
+   folders of their own; a file over 95 MB stops it before anything is pushed. The raw Unreal
+   files (`.uasset`) are never needed: only Unreal can read them.
 
 **Ground textures** (Megascans *surfaces*: tileable photoscans with albedo, normal, roughness,
 displacement and AO maps) go the same way: Add to Project into `SVMegascans`, then
