@@ -315,12 +315,41 @@ export class Effects {
       it.kind = 'puff';
       it.life = kind === 'water' ? 0.9 : 1.1;
       it.vel = new THREE.Vector3((Math.random() - 0.5) * 0.6, kind === 'water' ? 2.5 + i * 1.5 : 0.6 + Math.random() * 0.5, (Math.random() - 0.5) * 0.6);
+      it.alpha = undefined;
+      it.drag = 0;
       it.size0 = kind === 'water' ? 0.35 : 0.3;
       it.size1 = kind === 'water' ? 1.0 : 1.6;
       const col = kind === 'water' ? [0.75, 0.8, 0.82] : kind === 'tree' ? [0.36, 0.26, 0.17] : kind === 'rock' ? [0.45, 0.43, 0.4] : kind === 'body' ? [0.28, 0.05, 0.04] : [0.32, 0.26, 0.19];
       it.s.material.color.setRGB(col[0], col[1], col[2]);
       it.s.material.opacity = 0.85;
       it.s.position.copy(pos);
+      this.active.push(it);
+    }
+  }
+
+  // v5.2: the muzzle blast of a rifle fired prone throws up dust and needles in front of it:
+  // low, wide puffs pushed forward and to the sides (others can see it; so can you, through
+  // the scope, for a moment). fwd: horizontal unit vector the rifle points along.
+  blastDust(pos, fwd) {
+    for (let i = 0; i < 5; i++) {
+      const it = this.puffs.get();
+      const side = (i - 2) * 0.55;
+      it.pos = pos.clone();
+      it.pos.x += -fwd.z * side * 0.25;
+      it.pos.z += fwd.x * side * 0.25;
+      it.t = 0;
+      it.kind = 'puff';
+      it.life = 1.5 + Math.random() * 0.5;
+      const sp = 1.2 + Math.random() * 1.2;
+      it.vel = new THREE.Vector3((fwd.x - fwd.z * side) * sp, 0.25 + Math.random() * 0.35, (fwd.z + fwd.x * side) * sp);
+      it.size0 = 0.25;
+      it.size1 = 1.5 + Math.random() * 0.6;
+      const c = 0.32 + Math.random() * 0.06;
+      it.s.material.color.setRGB(c, c * 0.85, c * 0.66);
+      it.alpha = 0.55;
+      it.drag = 1.6;
+      it.s.material.opacity = 0.55;
+      it.s.position.copy(it.pos);
       this.active.push(it);
     }
   }
@@ -394,10 +423,11 @@ export class Effects {
         it.s.material.color.setRGB(I, I * 0.85, I * 0.6);
       } else {
         it.vel.y -= (it.kind === 'puff' && it.vel.y > 1.5 ? 6 : 0.3) * dt;
+        if (it.drag) it.vel.multiplyScalar(Math.exp(-it.drag * dt));
         it.s.position.addScaledVector(it.vel, dt);
         const size = THREE.MathUtils.lerp(it.size0, it.size1, Math.sqrt(k));
         it.s.scale.setScalar(Math.max(size, d * 0.004 * fovScale));
-        it.s.material.opacity = 0.75 * (1 - k);
+        it.s.material.opacity = (it.alpha ?? 0.75) * (1 - k);
       }
     }
     if (this.lightT > 0) {

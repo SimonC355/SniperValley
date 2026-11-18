@@ -1,7 +1,7 @@
 // DOM HUD: crosshair, team status, zone timer, compass, health, bolt + glint status,
 // "being aimed at" warning, kill feed, teammate markers, overlays (start/pause/settings/end).
 import * as THREE from 'three';
-import { CONFIG, DEFAULT_BINDS, MAPS, MAP_ID, saveRenderSettings } from './config.js';
+import { CONFIG, DEFAULT_BINDS, MAPS, MAP_ID, saveRenderSettings, GRAPHICS_PRESETS, currentPreset } from './config.js';
 import { keyLabel } from './input.js';
 
 const ACTION_LABELS = {
@@ -140,6 +140,7 @@ export class HUD {
       <div class="tabpage" data-page="graphics">
         <div class="settings">
           <label class="desk">Fullscreen (F11)</label><select id="set-fullscreen" class="desk">${onoff}</select>
+          <label>Quality preset</label><select id="set-preset">${opt([['low', 'low'], ['medium', 'medium'], ['high', 'high (default)'], ['ultra', 'ultra'], ['custom', 'custom']])}</select>
           <label>Render scale</label><div class="rng"><input id="set-scale" type="range" min="0.5" max="1" step="0.05"><span id="set-scale-v"></span></div>
           <label>Auto resolution</label><select id="set-autores">${opt([['1', 'on (keeps ~60 fps)'], ['0', 'off']])}</select>
           <label>Shadows</label><select id="set-shadow"><option>off</option><option>low</option><option>medium</option><option>high</option></select>
@@ -149,6 +150,8 @@ export class HUD {
           <label>Water reflections</label><select id="set-refl">${onoff}</select>
           <label>MSAA (reload)</label><select id="set-msaa">${opt([['4', '4x'], ['0', 'off']])}</select>
           <label>Grass density (reload)</label><input id="set-grass" type="range" min="0" max="1.5" step="0.1">
+          <label>Scope eye box</label><select id="set-eyebox">${opt([['1', 'on (dark edge when the eye is off the scope)'], ['0', 'off']])}</select>
+          <label>Heat mirage</label><select id="set-mirage">${opt([['1', 'on (shimmer at long range)'], ['0', 'off']])}</select>
         </div>
         <div class="note">Graphics settings are saved on this computer. <a href="?bench" class="link">Run the benchmark</a> to measure frame rates on this PC.</div>
       </div>
@@ -158,6 +161,8 @@ export class HUD {
           <label>Effects</label><div class="rng"><input id="set-vfx" type="range" min="0" max="1.5" step="0.05"><span id="set-vfx-v"></span></div>
           <label>Ambience</label><div class="rng"><input id="set-vamb" type="range" min="0" max="1.5" step="0.05"><span id="set-vamb-v"></span></div>
           <label>Valley echo</label><select id="set-echo">${onoff}</select>
+          <label>Breath &amp; heartbeat</label><div class="rng"><input id="set-vbody" type="range" min="0" max="1.5" step="0.05"><span id="set-vbody-v"></span></div>
+          <label>Hit sound</label><select id="set-hitsnd">${opt([['1', 'on (tick, then the far-off thump)'], ['0', 'off']])}</select>
         </div>
       </div>`;
     // map cards: a picture of each map (UI art made with Higgsfield, see CREDITS.md)
@@ -227,7 +232,7 @@ export class HUD {
   bindSettings(onChange, input) {
     const C = CONFIG;
     const fmt = { sens: (v) => `${(+v).toFixed(2)}×`, ssens: (v) => `${(+v).toFixed(2)}×`, fov: (v) => `${v}°`, scale: (v) => `${Math.round(v * 100)}%`,
-      vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%` };
+      vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%`, vbody: (v) => `${Math.round(v * 100)}%` };
     const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; this.syncMapCards(); };
     this.syncAll = syncAll;
     $('map-quick').addEventListener('change', () => onChange('map', $('map-quick').value));
@@ -297,6 +302,12 @@ export class HUD {
         g('vfx').value = String(C.audio.effects);
         g('vamb').value = String(C.audio.ambience);
         g('echo').value = C.audio.echo ? '1' : '0';
+        g('vbody').value = String(C.audio.body);
+        g('hitsnd').value = C.feel.hitSound ? '1' : '0';
+        g('eyebox').value = C.feel.scopeShadow ? '1' : '0';
+        g('mirage').value = C.feel.mirage ? '1' : '0';
+        g('preset').value = currentPreset();
+        g('preset').querySelector('option[value="custom"]').disabled = currentPreset() !== 'custom';
         for (const k in fmt) { const el = g(`${k}-v`); if (el) el.textContent = fmt[k](g(k).value); }
         renderBinds();
       };
@@ -332,6 +343,20 @@ export class HUD {
       on('vfx', (v) => { C.audio.effects = parseFloat(v); }, 'input');
       on('vamb', (v) => { C.audio.ambience = parseFloat(v); }, 'input');
       on('echo', (v) => { C.audio.echo = v === '1'; });
+      on('vbody', (v) => { C.audio.body = parseFloat(v); }, 'input');
+      on('hitsnd', (v) => { C.feel.hitSound = v === '1'; });
+      on('eyebox', (v) => { C.feel.scopeShadow = v === '1'; });
+      on('mirage', (v) => { C.feel.mirage = v === '1'; });
+      // a preset sets every graphics option at once (MSAA and grass after a reload)
+      g('preset').addEventListener('change', () => {
+        const P = GRAPHICS_PRESETS[g('preset').value];
+        if (!P) return;
+        const reload = P.msaa !== C.render.msaa || P.grassDensity !== C.render.grassDensity;
+        Object.assign(C.render, P);
+        saveRenderSettings();
+        syncAll();
+        onChange('preset', reload);
+      });
       g('bindreset').addEventListener('click', () => {
         C.controls.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
         saveRenderSettings();

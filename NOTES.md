@@ -946,3 +946,104 @@ closed off by mountain or terrain, whether it looks real or not".
 - The river runs into the mountain wall at both ends of the valley.
 - The stone wall (`EdgeWall`) and the `wall` map setting are gone.
 
+
+## v5.2: the small details
+
+Asked for: "if you were to bring the game experience as close as possible to a sniper in Call
+of Duty or Battlefield, what would it take?", then "it must still be a sniper-only game: it's
+more the features like sound, graphics standards, hearing close shots, breathing and so on,
+all the small technical details". So no new weapons, modes or progression: only the feel.
+Most of it lives in `src/feel.js`; the sounds are in `src/audio.js` (synthesised like the
+rest; each can be replaced by a recording, see the README).
+
+- **Your hearing** is now a low-pass filter on everything from outside your head (`hearing`
+  in `audio.js`), and the sounds inside it (breath, heartbeat, ringing ears, the hit tick) go
+  to their own `body` bus that skips it (AUDIO → Breath & heartbeat sets its volume). The
+  ambience has its own duck gain.
+- **Suppression** (`Feel.nearMiss`, `Feel.nearImpact`): a bullet whose closest point to your
+  head is within `feel.suppressRadius` (6 m), or that lands that close, suppresses you by
+  k = (1 − miss/6)^0.7 (impacts: 0.85 × (1 − d/6)). It:
+  - closes the hearing filter (down to ~650 Hz at k = 1) for 0.1-0.5 s and lets it open over
+    about a second, and dips the ambience;
+  - rings your ears when the miss was under 1.6 m: a single 3.5-4.1 kHz sine fading over a few
+    seconds (one sine only: two close ones would beat, which is a buzz);
+  - jolts the aim by up to `feel.flinch` (0.3°) in a random direction, half that prone; it
+    settles in half a second, like the recoil;
+  - drains the colour, darkens and blurs the edges of the view (`uSuppress` in the final pass);
+  - wears off over `feel.suppressTime` (1.6 s); meanwhile the sway is up to 2.2× and the
+    breathing and the heart are faster (`player.stress`).
+- **The crack** now seems to come from where the shock wave left the bullet's path (0.44 × the
+  miss distance back toward the shooter, the Mach angle at 850 m/s), and a bullet within 4 m
+  also tears the air: a short broadband hiss whose source runs along the bullet's path past
+  your head in 50 ms. A bullet landing within 9 m adds a thud and a patter of dirt, needles or
+  splinters coming down. There are still no pitch sweeps or tones in the insect band
+  (100-700 Hz): see the measurements below.
+- **Breathing** follows the phase that already moves the reticle (`player.breathPhase`): an
+  inhale starts at the bottom of the swing and an exhale at the top, each lasting most of the
+  half breath. Through the scope it is quiet; after a sprint (fatigue) or out of breath it is
+  a pant you also hear unscoped. Breath is noise through a moving formant, not a tone.
+- **Heartbeat**: while you hold your breath it comes up after 0.6 s and grows as the breath
+  runs out (64 bpm calm, faster with fatigue, stress and the breath hold); also when winded or
+  under fire. "Lub-dub" is two low-passed noise thumps (94% of the energy below 700 Hz but
+  no pitch). Each beat while holding the breath scoped twitches the aim by `feel.pulse`
+  (0.00045 rad, about 4 px at 12× on a 1080p screen), the only thing that still moves it.
+- **Rifle foley**: cloth and cheek as the rifle comes up (scopeT leaves 0) and down (leaves
+  1), one detent click per zoom step. The bolt got its slides back and forward, the ejector's
+  tick and the case landing 0.7-0.85 s later where you stand (`casingSurface`: rock or a wall
+  you stand on rings with a few bounces of high inharmonic partials; forest floor ticks; grass
+  thumps; mud and water swallow it). In first person the case flies out of the ejection port
+  to the right at the end of the back stroke (`Viewmodel._updateBrass`); it lives in camera
+  space, so turning the view swings it the other way, as if it stayed in the world.
+- **Your own shot** compresses your ears: the hearing filter closes to ~4 kHz 35 ms after the
+  shot (after the onset, so the crack is untouched: the first 30 ms measure the same with and
+  without), for 50 ms, opening over 0.3 s; the ambience dips by 60%. Shots within 40 m do the
+  same, less. The view gets a small roll punch; through the scope the picture jumps (a short
+  vertical blur, `uKick`) and the eye box flashes.
+- **The scope's eye box** (`uEye` in the final pass): a real scope only shows a full picture
+  with the eye exactly behind it. The offset follows how fast the view turns (screen widths
+  per second), walking with the rifle up, and the recoil; a dark crescent closes in from the
+  side the eye has slipped toward. As the rifle comes up the picture opens from a tunnel
+  (0.22 s). GRAPHICS → Scope eye box turns it off.
+- **Heat mirage** (`uMirage`): fine wavy bands in the scope picture that boil upward and drift
+  with the crosswind (the wind's component across your line of sight, so you can read it like a
+  wind flag with ballistics on). Strength grows with the rangefinder distance (140-650 m), the
+  magnification (3-9×) and the sunshine (clouds dim it). Up to ~3 px at 1080p. GRAPHICS →
+  Heat mirage turns it off.
+- **Hits**: a tick right away (head: a crisper double tick) and the far-off thump of the hit
+  coming back at the speed of sound. AUDIO → Hit sound.
+- **Prone muzzle dust** (`Effects.blastDust`): a shot fired prone with the muzzle within 1.4 m
+  of the ground kicks up five low puffs pushed forward and to the sides. Everyone sees it (it
+  is a giveaway, as in real life); the AI doesn't use it yet.
+- **Graphics presets** (`GRAPHICS_PRESETS` in `config.js`, GRAPHICS → Quality preset and
+  `?quality=`): low (70% scale, low shadows, no AO, bloom, shafts, reflections or MSAA, 40%
+  grass), medium, high (the default look) and ultra (high shadows, 1.5× grass, pixel ratio up
+  to 2). Any change to a single option shows *custom*. MSAA and grass need a reload.
+
+**Measurements** (each sound rendered offline through the real chain; peak in dBFS; "pitch"
+is the share of 40 ms windows with a real pitch whose fundamental is in 100-700 Hz):
+
+| Sound | Peak | Pitch in 100-700 Hz | Energy below 700 Hz |
+|---|---|---|---|
+| Crack at 1 m with the air tear | −2.2 | 0% | |
+| Ringing ears | −31 | 0% (a 3.5-4.1 kHz tone) | |
+| Breath, calm in/out | −33 / −32 | 0% | 3% |
+| Breath, winded | −21 | 0% | |
+| Heartbeat, full | −18 | 0% | 94% |
+| Scope in / out, zoom click | −27 / −32 / −31 | 0% | |
+| Bolt with the case on rock | −14 | windows flagged by the high partials | 0% |
+| Hit tick + thump at 300 m | −23 | 0% | |
+| Bullet into the ground 3 m away | −8 | 0% | |
+
+The bolt (old clicks too) trips the pitch meter because its high clicks and the case's partials
+repeat at multiples of their short periods; with no energy below 700 Hz it can't sound like an
+insect. As before, **none of this has been checked by ear here**.
+
+**Tested** (headless, swiftshader): the scope-in foley and tunnel, 4 zoom clicks to 12×,
+breathing alternating in/out every 2 s through the scope with no heartbeat, the heartbeat
+coming up while holding the breath (4 beats in 3.8 s, rising strength) with no breathing and
+a 0.0004 rad twitch per beat, the eye box on a fast swing, suppression at 0.92 with a 0.08-0.12°
+flinch wearing off in 2.5 s, the own-shot kick, mirage 0.75 at 520 m and 12×, the case
+ejected to the right, the bolt getting the surface, prone dust (5 puffs), panting after a
+sprint, and no page errors. One run of the swing screenshot came out magenta; two reruns of
+the same sequence didn't, so it looks like a swiftshader glitch, but tell me if you ever see
+a pink scope picture.

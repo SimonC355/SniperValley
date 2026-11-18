@@ -19,6 +19,8 @@ export class Combat {
     this.onKill = null;       // (shooter, victim, distance, part, hitPoint)
     this.onShot = null;       // (shooter)
     this.listener = null;     // the player combatant (for near-miss cracks)
+    this.onNearMiss = null;   // (shooter, miss, closestPoint, dir): a bullet passed the listener within feel.suppressRadius
+    this.onNearImpact = null; // (shooter, distance, point, kind): a bullet landed that close to the listener
     this.onFired = null;      // (shooter, origin, dir, time) for shots simulated here (LAN sync)
     this.onClaim = null;      // (shooter, victim, part, point, dist) when claimHits is on
     this.claimHits = false;   // joined LAN client: hits are claims the host confirms
@@ -86,6 +88,16 @@ export class Combat {
     // reveal: muzzle flash (visual) + shot (sound)
     if (!shooter.isPlayer) this.effects.muzzleFlash(muzzle);
     else { this.effects.light.position.copy(muzzle); this.effects.light.intensity = 250; this.effects.lightT = 0.06; }
+    // v5.2: fired prone, the muzzle blast kicks up the ground in front of the rifle
+    if (shooter.stance === 'prone' && CONFIG.feel.muzzleDust) {
+      _v.set(dir.x, 0, dir.z);
+      if (_v.lengthSq() > 1e-6) {
+        _v.normalize();
+        const gx = muzzle.x + _v.x * 0.5, gz = muzzle.z + _v.z * 0.5;
+        const gy = this.terrain.heightAt(gx, gz);
+        if (gy > CONFIG.map.waterLevel + 0.05 && muzzle.y - gy < 1.4) this.effects.blastDust(_p.set(gx, gy + 0.08, gz), _v);
+      }
+    }
     this.audio.shot(muzzle, shooter.isPlayer);
     const base = { position: muzzle.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id };
     this.bus.emit({ type: 'flash', ...base });
@@ -141,8 +153,8 @@ export class Combat {
       // the supersonic crack is heard well off the bullet's path (a whip-like "PISK")
       if (miss < CONFIG.audio.crackRadius && travelledBefore + t > 12) {
         ctx.nearMissDone = true;
-        this.audio.crack(closest, miss);
-        if (this.onNearMiss && miss < 5) this.onNearMiss(shooter, miss);
+        this.audio.crack(closest, miss, dir);
+        if (this.onNearMiss && miss < CONFIG.feel.suppressRadius) this.onNearMiss(shooter, miss, closest, dir);
       }
     }
     // the trail's head reaches the impact a moment later: the puff waits for it
@@ -161,6 +173,11 @@ export class Combat {
       this.effects.impact(end, k === 'forest' ? 'ground' : k, undefined, arrive);
       this.audio.impact(end, k);
       this.bus.emit({ type: 'impact', position: end.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id, kind: k });
+      // v5.2: a bullet landing right next to the listening player suppresses them too
+      if (L && L.alive && L !== shooter && this.onNearImpact) {
+        const di = end.distanceTo(L.eyePos(_o));
+        if (di < CONFIG.feel.suppressRadius) this.onNearImpact(shooter, di, end, k);
+      }
       return true;
     }
     return false;

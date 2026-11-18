@@ -313,6 +313,21 @@ export const CONFIG = {
     ambience: 1.0,         // wind and river
     echo: true,
     crackRadius: 50,       // a passing bullet's supersonic crack is heard this far from its path
+    body: 1.0,             // your own breathing, heartbeat and ringing ears
+  },
+
+  // v5.2: the small details of being a sniper (see NOTES "v5.2").
+  feel: {
+    suppressRadius: 6,     // m: a bullet passing closer than this, or landing this close, suppresses you
+    suppressTime: 1.6,     // seconds a full suppression takes to wear off
+    flinch: 0.3,           // degrees of aim jolt from a bullet cracking right past your head
+    tinnitusMiss: 1.6,     // m: a miss this close leaves your ears ringing
+    breathing: true,       // audible breathing through the scope and after sprinting, a heartbeat while holding it
+    pulse: 0.00045,        // radians: the aim twitches with each heartbeat while you hold your breath
+    scopeShadow: true,     // the scope's eye box: a dark crescent when the rifle moves off your eye
+    mirage: true,          // heat shimmer through the scope at long range (drifts with the crosswind)
+    muzzleDust: true,      // a shot fired prone kicks up dust in front of the muzzle (others can see it)
+    hitSound: true,        // a tick when your bullet hits, and the far-off thump of the hit a moment later
   },
 
   // Player controls (saved per browser from the settings menu).
@@ -338,6 +353,20 @@ export const DEFAULT_BINDS = {
 };
 CONFIG.controls.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
 
+// v5.2: graphics presets for the settings menu (and ?quality=low|medium|high|ultra).
+// 'high' is the default look; MSAA and grass density take effect after a reload.
+export const GRAPHICS_PRESETS = {
+  low: { renderScale: 0.7, maxPixelRatio: 1, shadowQuality: 'low', ao: false, bloom: false, sunShafts: false, reflections: false, msaa: 0, grassDensity: 0.4 },
+  medium: { renderScale: 0.85, maxPixelRatio: 1.25, shadowQuality: 'medium', ao: false, bloom: true, sunShafts: false, reflections: true, msaa: 0, grassDensity: 0.8 },
+  high: { renderScale: 1.0, maxPixelRatio: 1.5, shadowQuality: 'medium', ao: true, bloom: true, sunShafts: true, reflections: true, msaa: 4, grassDensity: 1.0 },
+  ultra: { renderScale: 1.0, maxPixelRatio: 2, shadowQuality: 'high', ao: true, bloom: true, sunShafts: true, reflections: true, msaa: 4, grassDensity: 1.5 },
+};
+// The preset the current render settings match, or 'custom'.
+export function currentPreset() {
+  for (const [name, p] of Object.entries(GRAPHICS_PRESETS)) if (Object.entries(p).every(([k, v]) => CONFIG.render[k] === v)) return name;
+  return 'custom';
+}
+
 // Persisted per-browser render settings override the defaults (see settings menu).
 try {
   const saved = JSON.parse(localStorage.getItem('sniperyard.render') || 'null');
@@ -351,7 +380,8 @@ try {
     for (const k of ['sensitivity', 'scopeSensitivity', 'invertY', 'scopeZoom']) if (k in saved) CONFIG.controls[k] = saved[k];
     if (saved.binds) for (const a in DEFAULT_BINDS) if (Array.isArray(saved.binds[a]) && saved.binds[a].length) CONFIG.controls.binds[a] = saved.binds[a];
     if (saved.fov) CONFIG.player.fovHip = saved.fov;
-    for (const k of ['master', 'effects', 'ambience']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
+    for (const k of ['master', 'effects', 'ambience', 'body']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
+    if (saved.feel && typeof saved.feel === 'object') for (const k of ['breathing', 'scopeShadow', 'mirage', 'hitSound']) if (k in saved.feel) CONFIG.feel[k] = !!saved.feel[k];
   }
 } catch (e) { /* storage unavailable */ }
 
@@ -386,7 +416,8 @@ export function saveRenderSettings() {
     const C = CONFIG.controls;
     localStorage.setItem('sniperyard.controls', JSON.stringify({
       sensitivity: C.sensitivity, scopeSensitivity: C.scopeSensitivity, invertY: C.invertY, scopeZoom: C.scopeZoom, binds: C.binds,
-      fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience },
+      fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience, body: CONFIG.audio.body },
+      feel: { breathing: CONFIG.feel.breathing, scopeShadow: CONFIG.feel.scopeShadow, mirage: CONFIG.feel.mirage, hitSound: CONFIG.feel.hitSound },
     }));
   } catch (e) { /* ignore */ }
 }
@@ -406,7 +437,7 @@ try {
   if (q.get('shafts')) CONFIG.render.sunShafts = q.get('shafts') !== '0';
   if (q.get('autores')) CONFIG.render.autoResolution = q.get('autores') !== '0';
   if (q.get('rounds')) CONFIG.match.roundsToWin = Math.max(1, parseInt(q.get('rounds'), 10) || 2);
-  if (q.get('quality') === 'low') Object.assign(CONFIG.render, { renderScale: 0.7, shadowQuality: 'low', ao: false, msaa: 0, reflections: false, grassDensity: 0.5 });
+  if (GRAPHICS_PRESETS[q.get('quality')]) Object.assign(CONFIG.render, GRAPHICS_PRESETS[q.get('quality')]);
 } catch (e) { /* ignore */ }
 
 // ---------------------------------------------------------------- maps

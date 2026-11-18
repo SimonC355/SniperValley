@@ -5,6 +5,31 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
+- **The small details of being a sniper.** Still a sniper-only game; these are the touches
+  that make it feel like one:
+  - **Bullets passing close.** A bullet that cracks past within a few metres (or slams into the
+    ground next to you) suppresses you: your hearing closes for a moment, the colour drains and
+    the edges of the view darken and blur, the aim jolts, and your hands shake more while it
+    wears off. One that passes right by your head leaves your ears ringing. Very close you also
+    hear the air tear as the bullet rushes past, and dirt or splinters rain down around you.
+  - **Breathing and heartbeat.** Through the scope you hear yourself breathe, in time with the
+    reticle's rise and fall; after a sprint you pant. Hold your breath and the heartbeat comes
+    up, louder and faster as the breath runs out, and each beat twitches the reticle a hair.
+  - **The rifle.** Cloth and cheek as the rifle comes up to your eye, a click for each step of
+    the zoom ring, the bolt sliding back and forward, and the empty case flying out to the
+    right and landing next to you (it rings on rock and ticks on the forest floor). Your own
+    shot compresses your ears for a moment and the forest goes quiet under it.
+  - **The scope.** The picture opens up from a tunnel as the rifle settles on your cheek, a
+    dark crescent closes in when you swing fast, walk or take the recoil, and the picture jumps
+    when you fire. On sunny days far targets shimmer in the heat mirage, which drifts with the
+    crosswind.
+  - **Hits.** A tick when your bullet hits, then the dull thump of the hit coming back over
+    the distance a moment later.
+  - **Prone dust.** A shot fired prone kicks up dust in front of the muzzle, which others can
+    see, and so can you through the scope for a moment.
+  - **Settings.** GRAPHICS → Quality preset (low, medium, high, ultra) sets every graphics
+    option at once; also Scope eye box and Heat mirage on/off. AUDIO → Breath & heartbeat
+    volume and Hit sound on/off.
 - **Every map ends in mountains.** The stone wall around the edge is gone: right at the edge
   of every map the ground now rises into steep rock mountains, higher on the big maps, so you
   always see where the map ends, and beyond it there is only mountain and sky (no more valley

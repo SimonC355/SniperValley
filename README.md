@@ -199,7 +199,7 @@ sensitivity, field of view, invert Y, and whether the scope opens at 2× or at t
 |---|---|
 | WASD | move |
 | Mouse | look (arrow keys if pointer lock is unavailable) |
-| Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s) |
+| Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s; the heartbeat comes up as it runs out) |
 | Space | jump / stand up · climb onto a rock or low wall you are facing |
 | W (hold) against a rock or low wall | climb onto it (up to about 2.4 m) |
 | C or Ctrl | crouch · while sprinting: slide |
@@ -243,7 +243,9 @@ file or a list of variations:
   "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
   "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
   "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
-  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg" }
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg",
+  "breathe_in": "in.ogg", "breathe_out": "out.ogg", "heartbeat": "beat.ogg", "hit": "hit.ogg",
+  "scope_in": "up.ogg", "scope_out": "down.ogg", "zoom": "click.ogg" }
 ```
 
 Any sound you leave out stays synthesised. Use CC0 recordings, for example
@@ -254,7 +256,7 @@ CREDITS.md.
 
 `?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–20) · `?game=tdm` (team deathmatch) ·
 `?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` (bullet trails) ·
-`?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
+`?camo=0.5` · `?quality=low|medium|high|ultra` (graphics preset) · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
 (benchmark) · `?autores=0` (no auto resolution).
@@ -280,7 +282,8 @@ src/
   assets.js      loads optional photoscanned textures (public/assets) in place of the bakes
   shaders.js     shared uniforms, gusts, exponential height fog, foliage material patch
   world.js       analytic raycasts / line of sight / collisions (no physics engine)
-  player.js      first-person controller, scope, sway, recoil
+  player.js      first-person controller, scope, sway, recoil, flinch
+  feel.js        suppression, breathing and heartbeat, rifle foley, scope eye box and mirage
   entity.js      shared combatant state
   hitbox.js      body capsules + ray tests
   combat.js      firing, hitscan / ballistics, hits, impacts, reveal events
@@ -290,8 +293,9 @@ src/
   birds.js       crow flocks
   zone.js        shrinking zone
   effects.js     muzzle flash, glint, impacts, bullet trails
-  viewmodel.js   first-person rifle
-  audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river)
+  viewmodel.js   first-person rifle, bolt cycle, the ejected case
+  audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river, your
+                 hearing filter, breath, heartbeat, rifle foley)
   sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack
   forestsound.js songbirds, woodpecker, needle rustle and gust roar
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
@@ -503,3 +507,21 @@ are in [CREDITS.md](CREDITS.md).
 - **Kill marker.** Shoot someone: a skull marks where they fell, with the distance.
 - **Looks.** The new rifle, menus and HUD. If anything looks off (textures too bright or too
   dark), a screenshot helps.
+
+**5.2: the small details** (best with headphones)
+
+- **Under fire.** Let the AI shoot at you and miss: the crack, a moment of muffled hearing, the
+  colour draining and the edges going soft, the aim jolting. A very close one rings your ears.
+  A bullet into the ground next to you: a thud and dirt pattering down.
+- **Breathing.** Scope in and keep still: you hear yourself breathe as the reticle rises and
+  falls. Sprint for 10 s and stop: you pant. Hold Shift while scoped: the breathing stops and
+  the heartbeat comes up as the breath runs out.
+- **The rifle.** Scope in and out (cloth, cheek), roll the zoom (clicks), fire and listen to the
+  bolt and the case landing (stand on a rock for the ringing case). Fire from the hip: the case
+  flies out to the right.
+- **The scope.** Scope in: the picture opens from a tunnel. Swing fast or walk scoped: a dark
+  crescent at the edge. Fire: the picture jumps. On a sunny day zoom 10-12× on something
+  400 m+ away: it shimmers.
+- **Prone.** Fire prone and watch the dust in front of the muzzle.
+- **Hits.** Hit someone far away: a tick, then the thump of the hit a moment later.
+- **Settings.** Try each Quality preset; tell me which one runs smoothly on your PC.

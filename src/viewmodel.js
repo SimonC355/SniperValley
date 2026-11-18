@@ -8,6 +8,8 @@ import { FX_TEX } from './effects.js';
 import { RNG } from './noise.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
+const _up = new THREE.Vector3(), _g = new THREE.Vector3(), _xAxis = new THREE.Vector3(1, 0, 0);
+
 function meshAt(geo, mat, x, y, z) {
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
@@ -248,6 +250,24 @@ export class Viewmodel {
     rifle.traverse((o) => { o.frustumCulled = false; });
     vmCamera.add(rifle);
 
+    // v5.2: the empty case thrown out to the right when the bolt comes back
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0xc9a04a, roughness: 0.28, metalness: 1, envMap: environment || null, envMapIntensity: 1.2 });
+    const caseGeo = mergeGeometries([
+      new THREE.CylinderGeometry(0.0062, 0.0064, 0.04, 12).translate(0, -0.006, 0),
+      new THREE.CylinderGeometry(0.0039, 0.0062, 0.008, 12).translate(0, 0.018, 0),
+      new THREE.CylinderGeometry(0.0039, 0.0039, 0.007, 12).translate(0, 0.0255, 0),
+    ]);
+    this.brass = new THREE.Mesh(caseGeo, brassMat);
+    this.brass.visible = false;
+    this.brass.frustumCulled = false;
+    vmCamera.add(this.brass);
+    this.brassV = new THREE.Vector3();
+    this.brassW = new THREE.Vector3();
+    this.brassT = -1;
+    this.ejectPort = new THREE.Vector3(0.024, BORE + 0.012, -0.02);
+    this.ejected = true;
+    this.vmCamera = vmCamera;
+
     this.hip = new THREE.Vector3(0.17, -0.185, -0.43);
     this.ads = new THREE.Vector3(0, -0.088, -0.13);
     this.kick = 0;
@@ -318,10 +338,42 @@ export class Viewmodel {
   }
 
   onFire(time) {
+    this.ejected = false;
     this.kick = 1;
     this.flashT = 0.055;
     this.shotTime = time;
     this.flash.material.rotation = Math.random() * Math.PI;
+  }
+
+  // The case: out of the ejection port at the end of the back stroke, spinning away to the
+  // right and falling. It lives in camera space, so turning the view swings it the other way
+  // (as if it stayed where it was in the world).
+  _updateBrass(dt, ts, player, dyaw, dpitch) {
+    const b = this.brass;
+    if (!this.ejected && ts >= 0.6) {
+      this.ejected = true;
+      this.rifle.updateMatrixWorld(true);
+      b.position.copy(this.rifle.localToWorld(this.ejectPort.clone()));
+      this.vmCamera.worldToLocal(b.position);
+      b.quaternion.copy(this.rifle.quaternion);
+      b.rotateX(Math.PI / 2);
+      this.brassV.set(1.1 + Math.random() * 0.5, 0.8 + Math.random() * 0.4, 0.15 + Math.random() * 0.3);
+      this.brassW.set(10 + Math.random() * 8, (Math.random() - 0.5) * 6, 6 + Math.random() * 6);
+      this.brassT = 0;
+    }
+    if (this.brassT < 0) { b.visible = false; return; }
+    this.brassT += dt;
+    if (this.brassT > 0.8 || b.position.y < -0.7) { this.brassT = -1; b.visible = false; return; }
+    b.visible = this.rifle.visible;
+    // the view turned: the case stays put in the world
+    const p = player.pitch;
+    const upC = _up.set(0, Math.cos(p), -Math.sin(p));
+    b.position.applyAxisAngle(upC, -dyaw); this.brassV.applyAxisAngle(upC, -dyaw);
+    b.position.applyAxisAngle(_xAxis, -dpitch); this.brassV.applyAxisAngle(_xAxis, -dpitch);
+    // gravity is "down" in the world, seen from the camera
+    this.brassV.addScaledVector(_g.set(0, -Math.cos(p), Math.sin(p)), 9.8 * dt);
+    b.position.addScaledVector(this.brassV, dt);
+    b.rotateX(this.brassW.x * dt); b.rotateY(this.brassW.y * dt); b.rotateZ(this.brassW.z * dt);
   }
 
   update(dt, time, player, sunDirView, inShade) {
@@ -353,6 +405,7 @@ export class Viewmodel {
     const back = ph(0.4, 0.62) - ph(0.62, 0.85);
     this.bolt.rotation.z = up * 1.3;
     this.bolt.position.z = 0.015 + back * 0.085;
+    this._updateBrass(dt, ts, player, dyaw, dpitch);
     const cycling = ts < 1.05 ? Math.sin(Math.min(1, ts / 1.05) * Math.PI) : 0;
     this.rifle.rotation.set(k * 0.12 - this.sprintBlend * 0.5 + cycling * 0.05, -0.03 * (1 - ads) + this.sprintBlend * 0.5, 0.02 * (1 - ads) - cycling * 0.18);
     // own muzzle flash

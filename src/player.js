@@ -29,6 +29,11 @@ export class Player extends Combatant {
     this.breathPhase = 0;
     this.steady = 1;          // sway multiplier, eases toward the breath-hold value
     this.onBreath = null;     // (kind) 'hold' | 'release' | 'gasp' for sounds
+    this.breathPeriod = 4;    // seconds per breath right now (shorter after sprinting)
+    this.holdT = 0;           // seconds the breath has been held
+    this.stress = 0;          // 0..1 under fire (feel.js): shakier hands, faster heart
+    this.flinchYaw = 0;       // transient aim jolt from a near miss (radians)
+    this.flinchPitch = 0;
     this.zoomIndex = 0;       // into CONFIG.player.zoomLevels
     this.zoomFov = zoomFov(CONFIG.player.zoomLevels[0]);
     this.sprintBlocked = false;
@@ -69,6 +74,10 @@ export class Player extends Combatant {
     this.breath = CONFIG.weapon.holdBreathTime;
     this.breathCooldown = 0;
     this.holdingBreath = false;
+    this.holdT = 0;
+    this.stress = 0;
+    this.flinchYaw = 0;
+    this.flinchPitch = 0;
     this.steady = 1;
     this.zoomIndex = 0;
     this.zoomFov = zoomFov(CONFIG.player.zoomLevels[0]);
@@ -238,14 +247,17 @@ export class Player extends Combatant {
       this.breath = Math.min(W.holdBreathTime, this.breath + dt * W.breathRecovery);
     }
     if (this.onBreath && this.holdingBreath !== wasHolding) this.onBreath(this.holdingBreath ? 'hold' : this.breathCooldown > 0 ? 'gasp' : 'release');
+    this.holdT = this.holdingBreath ? this.holdT + dt : 0;
     const moveFactor = clamp(this.speed / P.walkSpeed, 0, 1.5);
     const stanceK = this.stance === 'prone' ? W.swayProne : this.stance === 'crouch' ? W.swayCrouch : 1;
     // the breathing part is mostly felt through the scope
     let amp = (W.swayIdle * lerp(0.2, 1, this.scopeT) + W.swayMove * moveFactor + W.swaySprintCarry * this.fatigue) * stanceK;
+    amp *= 1 + 1.2 * this.stress;   // v5.2: under fire the hands shake
     this.steady = lerp(this.steady, this.holdingBreath ? W.holdBreathSteady : this.breathCooldown > 0 ? 1.8 : 1, 1 - Math.exp(-dt * 5));
     amp *= this.steady * DEG;
     // breathing: ~4 s a breath (faster when out of breath); it stops while the breath is held
-    if (!this.holdingBreath) this.breathPhase += dt * Math.PI * 2 / (this.breathCooldown > 0 ? 2.2 : 4 - 1.5 * this.fatigue);
+    this.breathPeriod = this.breathCooldown > 0 ? 2.2 : 4 - 1.5 * this.fatigue - 0.8 * this.stress;
+    if (!this.holdingBreath) this.breathPhase += dt * Math.PI * 2 / this.breathPeriod;
     const t = time;
     const n = this.swayNoise;
     const targetSY = (n.noise2(t * 0.3, 1.3) * 0.75 + Math.sin(this.breathPhase * 0.5 + 0.7) * 0.25) * amp;
@@ -255,14 +267,16 @@ export class Player extends Combatant {
 
     // recoil recovery
     this.recoil = lerp(this.recoil, 0, 1 - Math.exp(-dt * 7));
+    this.flinchYaw = lerp(this.flinchYaw, 0, 1 - Math.exp(-dt * 5));
+    this.flinchPitch = lerp(this.flinchPitch, 0, 1 - Math.exp(-dt * 5));
 
     // head bob (not while scoped)
     if (this.onGround && moved > 0.001 && !this.scoped) this.bobPhase += moved * (sprinting ? 1.6 : 2.2);
     const bobAmt = this.scoped || this.slide || this.climb || this.swept ? 0 : clamp(this.speed / P.sprintSpeed, 0, 1) * 0.045;
 
     // final aim = look + sway + recoil
-    this.yaw = this.lookYaw + this.swayYaw;
-    this.pitch = this.lookPitch + this.swayPitch + this.recoil;
+    this.yaw = this.lookYaw + this.swayYaw + this.flinchYaw;
+    this.pitch = this.lookPitch + this.swayPitch + this.recoil + this.flinchPitch;
 
     // ---------------------------------------------------------------- camera
     const cam = this.camera;
@@ -483,6 +497,23 @@ export class Player extends Combatant {
     this.stance = 'stand';
     this.scopeT = 0;
   }
+
+  // v5.2: a bullet cracking past (or landing next to you) jolts the aim by up to `deg`
+  // degrees in a random direction; it settles back within half a second. Prone, braced on
+  // the ground, the jolt is smaller.
+  flinch(deg) {
+    const a = deg * DEG * (this.stance === 'prone' ? 0.55 : 1) * (0.6 + 0.4 * Math.random());
+    const ang = Math.random() * Math.PI * 2;
+    this.flinchYaw += Math.cos(ang) * a;
+    this.flinchPitch += Math.sin(ang) * a * 0.7;
+    this.roll += (Math.random() - 0.5) * a * 2;
+  }
+
+  // A camera-only jolt (roll) that doesn't move the aim: the rifle's punch, a nearby impact.
+  punch(rollRad) { this.roll += rollRad * (Math.random() < 0.5 ? -1 : 1); }
+
+  // the heartbeat twitches the aim while the breath is held (radians, settles with the recoil)
+  pulse(rad) { this.recoil += rad; }
 
   applyRecoil() {
     const W = CONFIG.weapon;

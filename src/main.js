@@ -54,6 +54,7 @@ const REVEAL_TEXT = {
 };
 import { Birds } from './birds.js';
 import { Zone } from './zone.js';
+import { Feel } from './feel.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 const _eye = new THREE.Vector3();
@@ -163,6 +164,10 @@ class Game {
     this.audio.onShotHeard = (d) => this.forestSound.onShot(d);
     this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
     this.combat.listener = this.player;
+    // v5.2: suppression, breathing, heartbeat, rifle foley, the scope's eye box and mirage
+    this.feel = new Feel(this);
+    this.combat.onNearMiss = (shooter, miss, pos, dir) => this.feel.nearMiss(miss, pos, dir);
+    this.combat.onNearImpact = (shooter, d) => this.feel.nearImpact(d);
     this.combat.onKill = (shooter, victim, dist, part, point) => {
       this.scoreKill(shooter, victim);
       this.onKill(shooter, victim, dist, part, point);
@@ -278,6 +283,14 @@ class Game {
   }
 
   // Ground type under a point, for footstep sounds.
+  // where the player's empty case lands: on a rock or wall they stand on, in the water, or the ground
+  casingSurface() {
+    const p = this.player;
+    if (p.inWater > 0.05) return 'water';
+    if (p.pos.y > this.terrain.heightAt(p.pos.x, p.pos.z) + 0.3) return 'rock';
+    return this.surfaceAt(p.pos.x, p.pos.z);
+  }
+
   surfaceAt(x, z) {
     const T = this.terrain;
     if (T.heightAt(x, z) < 1.2) return 'mud';
@@ -326,10 +339,11 @@ class Game {
 
   onSettingsChanged(kind, value) {
     if (kind === 'map') { this.changeMap(value); return; }
-    if (['scale', 'refl'].includes(kind)) this.resize();
-    if (kind === 'shadow') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
+    if (['scale', 'refl', 'preset'].includes(kind)) this.resize();
+    if (kind === 'shadow' || kind === 'preset') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
+    if (kind === 'preset' && value) this.hud.centerMessage('RELOAD TO APPLY', 'MSAA AND GRASS DENSITY', 2);
     if (['msaa', 'grass'].includes(kind)) this.hud.centerMessage('RELOAD TO APPLY', '', 2);
-    if (['vmaster', 'vfx', 'vamb', 'echo'].includes(kind)) this.audio.setVolumes();
+    if (['vmaster', 'vfx', 'vamb', 'echo', 'vbody'].includes(kind)) this.audio.setVolumes();
     if (kind === 'autores' && !CONFIG.render.autoResolution) { this.dynScale = 1; this.resize(); }
   }
 
@@ -1094,6 +1108,7 @@ class Game {
     }
     if (shooter.isPlayer) {
       this.hud.hitMarker(true);
+      if (CONFIG.feel.hitSound && victim !== shooter) this.audio.hitConfirm(point || victim.pos, part, dist);
       this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, ff && this.tdm ? `${victim.name} · −1 FOR YOUR TEAM` : victim.name, 1.8);
     }
     if (victim.isPlayer) {
@@ -1186,7 +1201,8 @@ class Game {
     if (this.combat.fire(p, dir, this.time)) {
       p.applyRecoil();
       this.viewmodel.onFire(this.time);
-      this.audio.bolt(0.25);
+      this.audio.bolt(0.25, this.casingSurface());
+      this.feel.ownShot();
     }
   }
 
@@ -1456,6 +1472,7 @@ class Game {
   render(dtReal) {
     this.renderer.info.reset();
     this.updateRenderSystems(dtReal);
+    this.feel.update(this.paused || this.state !== 'playing' ? 0 : dtReal, dtReal);
     this.post.uniforms.uScope.value = THREE.MathUtils.smoothstep(this.player.scopeT, 0.55, 1.0);
     this.post.render(dtReal, this.realTime);
     const p = this.player;
