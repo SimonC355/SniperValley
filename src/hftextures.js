@@ -15,7 +15,7 @@ const SURFACES = {
   beech: { grass: 'beechgrass', forest: 'leaflitter', rock: 'rock', mud: 'mud', barkSpruce: 'bark-spruce', barkBeech: 'bark-beech' },
   tuscany: { grass: 'drygrass', forest: 'drysoil', rock: 'rock', mud: 'mud', barkPine: 'bark-pine', barkOlive: 'bark-olive' },
 };
-// photo stone walls for the edge wall and the Tuscan ruins (every map)
+// photo stone walls for the Tuscan houses and ruins
 const WALLS = { wallDry: 'wall-dry', wallRubble: 'wall-rubble' };
 // metres per repeat on the terrain (barks use the trunk's own uv)
 const TILE = { grass: 2.6, forest: 2.4, rock: 3.2, mud: 2.2, wallDry: 2.4, wallRubble: 2.0 };
@@ -50,7 +50,7 @@ export async function loadHFTextures(renderer, textures, biome = 'conifer') {
   const loader = new THREE.TextureLoader();
   const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const done = [];
-  const surf = { ...(SURFACES[biome] || SURFACES.conifer), ...WALLS };
+  const surf = { ...(SURFACES[biome] || SURFACES.conifer), ...(biome === 'tuscany' ? WALLS : {}) };
   const cards = CARDS[biome] || CARDS.conifer;
   await Promise.all([
     ...Object.entries(surf).map(async ([slot, name]) => {

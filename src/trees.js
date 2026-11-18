@@ -593,21 +593,7 @@ export class Forest {
       }
     }
     this.playCount = this.trees.length;
-    // outer scenery: coarser grid
-    const E = CONFIG.map.terrainExtent / 2 - 40;
-    const oc = 9;
-    for (let z = -E; z < E; z += oc) {
-      for (let x = -E; x < E; x += oc) {
-        const px = x + this.rng.float(0, oc), pz = z + this.rng.float(0, oc);
-        if (Math.abs(px) < hx && Math.abs(pz) < hz) continue;
-        const h = t.heightAt(px, pz);
-        if (h > 175) continue;
-        const d = this.density(px, pz) * (1 - smoothstep(110, 175, h)) * (biome === 'beech' ? 0.55 : 1);
-        if (this.rng.next() > d * 0.85) continue;
-        if (!t.isFree(px, pz, 0.8)) continue;
-        this._addTree(px, pz, true);
-      }
-    }
+    // (no scenery forest outside since v5.1: the play area ends in bare mountains)
   }
 
   _addTree(x, z, outer) {

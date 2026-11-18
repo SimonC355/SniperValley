@@ -33,7 +33,7 @@ export const CONFIG = {
     biome: 'conifer',      // set from MAPS below
     terrain: 'valley',
     farHills: [90, 70],
-    wallHeight: 2.9,
+    rimHeight: null,       // mountains around the edge: crest height above the ground there (null: 0.21 × width, 30-70 m)
   },
 
   // ---------------------------------------------------------------- rendering
@@ -418,27 +418,27 @@ try {
 // and bird flocks follow the play area so the forest is as dense on every map.
 //   biome:   'conifer' | 'tuscany' | 'beech' (trees, ground textures, buildings, colours)
 //   terrain: 'valley' (two slopes up to ridges) | 'lowland' (gentle, rolling banks)
-//   farHills: height of the scenery hills/mountains around the play area
-//   wall:    height of the stone wall that marks the edge of the play area
+//   farHills: height of the mountain mass far behind the mountains that close off the play area
+//   (the mountains themselves follow the map size: CONFIG.map.rimHeight, terrain.js _rim)
 export const MAPS = {
   valley: {
-    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.9,
+    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 340, width: 290, ridgeDist: 136, ridgeHeightNorth: 52, ridgeHeightSouth: 47, riverDeepHalfWidth: 8, riverShelfStart: 11, riverShelfEnd: 15, riverDepth: 2.6, meander: 0.85, relief: 0.9 },
   },
   narrow: {
-    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.6,
+    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70], wall: 2.3,
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
   },
   tuscany: {
-    name: 'TUSCAN HILLS', size: '300 × 240 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'tuscany', terrain: 'valley', farHills: [55, 40], wall: 2.7,
+    name: 'TUSCAN HILLS', size: '300 × 240 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'tuscany', terrain: 'valley', farHills: [55, 40],
     map: { length: 300, width: 240, ridgeDist: 112, ridgeHeightNorth: 38, ridgeHeightSouth: 34, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.7, relief: 0.7 },
   },
   beech: {
-    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14], wall: 2.7,
+    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14],
     map: { length: 320, width: 260, ridgeDist: 122, ridgeHeightNorth: 9, ridgeHeightSouth: 8, riverDeepHalfWidth: 12, riverShelfStart: 15, riverShelfEnd: 19, riverDepth: 3.0, meander: 0.9, relief: 0.55 },
   },
 };
@@ -461,7 +461,6 @@ export const MAP_ID = (() => {
   CONFIG.map.biome = P.biome;
   CONFIG.map.terrain = P.terrain;
   CONFIG.map.farHills = P.farHills;
-  CONFIG.map.wallHeight = P.wall;
   const k = (P.map.length * P.map.width) / (440 * 380);
   CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
   // beech forests are open underneath; Tuscany's hillsides are drier and more open

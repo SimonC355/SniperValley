@@ -84,8 +84,9 @@ from the exported LODs (wind, collision and impostors from our own tree system).
   puts north toward +Z. You spawn looking south across the valley.
 - Ridges are about 60 m above the water, roughly 175 m from the river. Slopes average about
   20°, with spurs and gullies running downhill and a terrace on each side.
-- The terrain continues as scenery beyond the play area (distant hills, impostor forest).
-  Invisible walls stop you at the play-area edge.
+- Since v5.1 every map ends in **mountains**: right at the edge of the play area the ground
+  rises as a steep rock wall to a jagged crest (see v5.1 below), so beyond the map you see
+  mountain and sky, no more valley or forest. You stop at the foot of the wall.
 - **Water:** deep water (> 0.85 m) was **impassable** until v5; now its current sweeps you away
   (see v5.0 below). The shallow shelf slows you to 55% and
   every step makes a splash. A splash is a reveal event, audible to about 90 m. Optional shallow
@@ -303,7 +304,8 @@ made all three about a quarter smaller again:
 | Tree crown *core* (inner ~40% radius, where foliage is drawn dense) | yes | yes |
 | Outer needle cards | no | no (gaps you can see through are real) |
 | Rocks (their drawn top surface, v5) | yes | yes |
-| Buildings, ruin walls, the edge wall (v5) | yes | yes |
+| Buildings, ruin walls (v5) | yes | yes |
+| The mountains around the map (terrain, v5.1) | yes | yes |
 | Fallen logs, stumps | yes | yes (cover for prone players; logs block walking, but you can jump over them) |
 | Bushes, ferns | no | soften AI visibility |
 | Water surface | stops bullets (splash) | no |
@@ -832,10 +834,8 @@ Asked for (in Danish) as one list. Each point, how I read it and what changed.
   a loud footstep for the AI. Others see a crouched player moving fast (no new pose, so the
   network message and hit boxes are unchanged).
 - **"Ikke noget som indikerer at banen stopper sidelæns"** (nothing shows where the map ends).
-  A dry-stone wall along the whole edge (`EdgeWall` in `src/buildings.js`): 2.3 m (Ravine) to
-  2.9 m (Valley) high, leaning faces, a rounded cap, a low weir across the river. Trees, rocks,
-  bushes and debris keep a strip clear in front of it so it is seen from a distance. It is a
-  solid for bullets and sight; the player stops just inside it, as before.
+  A dry-stone wall along the whole edge, 2.3 m (Ravine) to 2.9 m (Valley) high, with a low weir
+  across the river. **Replaced by mountains in v5.1** (below).
 - **"Default skal cirklen …"**: read as "the circle (radial zone, *toward the water*) should be
   the default". It is, and saved settings from before 5.0 switch to it once (`zv: 5` in the
   saved match settings).
@@ -917,3 +917,32 @@ Asked for (in Danish) as one list. Each point, how I read it and what changed.
   PLAYER-REQUESTED UPDATES*. LAN and Steam players need the same version, as before.
 - **Not done / to check on a real PC:** frame rates with the new rifle, crowns and walls; the
   photoscans in the CI build; the new gunshot by ear; shot distances on the new maps.
+
+## v5.1: mountains around every map
+
+Asked for: "the stone wall that marks the edge should be terrain or mountains instead; you
+should not see any more of the map, just sky", and "every map must show clearly where it ends,
+closed off by mountain or terrain, whether it looks real or not".
+
+- **The mountain ring** (`Terrain._rim` in `src/terrain.js`, part of the height field, so
+  bullets, sight lines, the water reflection and the AI's line-of-sight all see it): measured
+  by the distance outside the play-area rectangle (`edgeDist`, rounded at the corners), the
+  ground rises from exactly the edge to a crest `rimHeight` above the ground there (or above
+  80% of the ridge height, so the valley ends, where the river runs out, get as high a wall),
+  `0.6 × rimHeight` further out. The profile is steepest at the foot (a cliff, about 70°) and
+  rounds off at the crest; the crest has peaks and saddles, the face buttresses and gullies,
+  and behind the crest the mountain mass keeps climbing. `rimHeight` follows the map:
+  0.21 × the map's width, 30-70 m (Ravine 32 m, Narrow 44, Tuscan 50, Beech 55, Valley 61).
+- From anywhere in the play area the mountains rise at least ~15° above the eye in every
+  direction (a horizon check in the tests), so nothing beyond them shows but sky (and, in some
+  directions, higher mountains further back).
+- **Nothing grows on them**: `isFree` now refuses everything outside the play area and keeps a
+  2.5 m strip clear at the foot; the scenery forest outside the play area is gone (thousands of
+  impostor trees fewer to draw).
+- **Look**: the terrain shader projects the rock texture on steep faces (no streaks down a
+  cliff), and darkens and warms the rock outside the play area with faint bands. Tuscany's rock
+  comes out as warm sandstone, the others as grey rock. The mesh keeps its 2 m spacing over the
+  faces and crest.
+- The river runs into the mountain wall at both ends of the valley.
+- The stone wall (`EdgeWall`) and the `wall` map setting are gone.
+

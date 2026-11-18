@@ -1,17 +1,14 @@
-// Stone walls and buildings (v5).
+// Buildings (v5): the old stone hamlets of the TUSCAN HILLS map: houses of rough stone or ochre
+// plaster with terracotta roofs, green shutters, a few towers, and roofless ruins whose low
+// walls you can climb over and hide behind. (The v5.0 stone wall around the edge of every map
+// gave way to mountains in v5.1, see terrain.js.)
 //
-// - EdgeWall: a tall dry-stone wall along the whole edge of the play area, on every map, so you
-//   see where the map ends before you get there. Its height follows the map size.
-// - Buildings: the old stone hamlets of the TUSCAN HILLS map: houses of rough stone or ochre
-//   plaster with terracotta roofs, green shutters, a few towers, and roofless ruins whose low
-//   walls you can climb over and hide behind.
-//
-// Both are drawn with one procedural masonry/roof-tile shader (no textures to download), and
-// both are convex "solids" in the World: they stop bullets and sight, the AI walks around
-// them, and the player stands on (and climbs) the low ones (World.groundAt).
+// Drawn with one procedural masonry/roof-tile shader (photo stone where the Higgsfield textures
+// are loaded), and convex "solids" in the World: they stop bullets and sight, the AI walks
+// around them, and the player stands on (and climbs) the low ones (World.groundAt).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { RNG, Simplex, clamp, lerp, smoothstep } from './noise.js';
+import { RNG, lerp } from './noise.js';
 import { fitParts } from './models.js';
 
 // ------------------------------------------------------------------------------- solids
@@ -86,7 +83,7 @@ vec3 stones(vec2 p) {
 }
 `;
 
-// kind: 0 dry-stone edge wall, 1 Tuscan rubble stone, 2 ochre plaster, 3 roof tiles,
+// kind: 0 dry stone, 1 Tuscan rubble stone, 2 ochre plaster, 3 roof tiles,
 //       4 dark foundation stone, 5 window/door opening
 function masonryMaterial(textures) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, vertexColors: true });
@@ -282,74 +279,6 @@ function addBox(B, cx, cz, angle, hx, hz, y0, topFn, kind, col, { top = true, uO
   if (top) {
     const p = corners.map(([x, z]) => W(x, topFn(x, z), z));
     B.quad(p[3], p[2], p[1], p[0], [-hx, hz], [hx, hz], [hx, -hz], [-hx, -hz], topKind, col);
-  }
-}
-
-// ------------------------------------------------------------------------------- edge wall
-
-export class EdgeWall {
-  constructor(scene, terrain, textures, seed) {
-    const M = CONFIG.map;
-    const H = M.wallHeight || 2.6;
-    const noise = new Simplex(seed + 707);
-    const B = new MasonryBuilder();
-    this.solids = [];
-    const hx = terrain.halfX, hz = terrain.halfZ;
-    const T = 1.25;          // thickness at the foot; it narrows toward the top
-    const seg = 1.0;          // metres per column of the mesh
-    // the four sides, each as a line from a to b with the play area on its left
-    const sides = [
-      { a: [-hx, -hz], b: [hx, -hz], out: [0, -1] },
-      { a: [hx, -hz], b: [hx, hz], out: [1, 0] },
-      { a: [hx, hz], b: [-hx, hz], out: [0, 1] },
-      { a: [-hx, hz], b: [-hx, -hz], out: [-1, 0] },
-    ];
-    let uRun = 0;
-    for (const sd of sides) {
-      const [ax, az] = sd.a, [bx, bz] = sd.b, [ox, oz] = sd.out;
-      const L = Math.hypot(bx - ax, bz - az);
-      const n = Math.ceil(L / seg);
-      const dx = (bx - ax) / L, dz = (bz - az) / L;
-      const cols = [];
-      for (let i = 0; i <= n; i++) {
-        // run past the corners a little so the walls meet
-        const t = -T + (L + 2 * T) * (i / n);
-        const px = ax + dx * t, pz = az + dz * t;
-        const gi = terrain.heightAt(px, pz), go = terrain.heightAt(px + ox * T, pz + oz * T);
-        const ground = Math.min(gi, go);
-        const over = ground < 0.4;    // across the river: a lower weir of the same stone
-        const top = Math.max(gi, go) + (over ? 1.1 : H) * (1 + 0.07 * noise.noise2(px * 0.08, pz * 0.08)) + 0.12 * noise.noise2(px * 0.9, pz * 0.9);
-        cols.push({ px, pz, bot: Math.min(ground, M.waterLevel - (over ? M.riverDepth : 0)) - 0.7, top: over ? Math.max(top, M.waterLevel + 0.9) : top, u: uRun + t });
-      }
-      uRun += L + 4;
-      const inner = (c, f) => new THREE.Vector3(c.px + ox * f, 0, c.pz + oz * f);
-      for (let i = 0; i < n; i++) {
-        const c0 = cols[i], c1 = cols[i + 1];
-        const P = (c, off, y) => { const v = inner(c, off); v.y = y; return v; };
-        const tIn = 0.18, tOut = T - 0.18;   // the faces lean in toward the top
-        // inner face (facing the play area), outer face, and a rounded cap up to a crest
-        B.quad(P(c0, 0, c0.bot), P(c1, 0, c1.bot), P(c1, tIn, c1.top), P(c0, tIn, c0.top), [c0.u, c0.bot], [c1.u, c1.bot], [c1.u, c1.top], [c0.u, c0.top], 0);
-        B.quad(P(c1, T, c1.bot), P(c0, T, c0.bot), P(c0, tOut, c0.top), P(c1, tOut, c1.top), [c1.u, c1.bot], [c0.u, c0.bot], [c0.u, c0.top], [c1.u, c1.top], 0);
-        const cr0 = c0.top + 0.16, cr1 = c1.top + 0.16, mid = T * 0.5;
-        B.quad(P(c0, tIn, c0.top), P(c1, tIn, c1.top), P(c1, mid, cr1), P(c0, mid, cr0), [c0.u, 0], [c1.u, 0], [c1.u, 0.5], [c0.u, 0.5], 0);
-        B.quad(P(c1, tOut, c1.top), P(c0, tOut, c0.top), P(c0, mid, cr0), P(c1, mid, cr1), [c1.u, 1], [c0.u, 1], [c0.u, 0.5], [c1.u, 0.5], 0);
-      }
-      // solids in short pieces (bullets and sight stop at the wall; only nearby cells list them)
-      const piece = 8;
-      for (let t = 0; t < L; t += piece) {
-        const l = Math.min(piece, L - t);
-        const cx = ax + dx * (t + l / 2) + ox * T / 2, cz = az + dz * (t + l / 2) + oz * T / 2;
-        let top = -Infinity, bot = Infinity;
-        for (const c of cols) if (Math.abs((c.px - ax) * dx + (c.pz - az) * dz - (t + l / 2)) <= l / 2 + 1) { top = Math.max(top, c.top); bot = Math.min(bot, c.bot); }
-        this.solids.push(boxSolid(cx, cz, Math.atan2(dz, dx), l / 2 + 0.05, T / 2, bot, top, 'edge'));
-      }
-    }
-    const mesh = new THREE.Mesh(B.build(), masonryMaterial(textures));
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = 'edge-wall';
-    scene.add(mesh);
-    this.mesh = mesh;
   }
 }
 
@@ -665,4 +594,3 @@ class DetailBuilder {
   }
 }
 
-export { clamp, smoothstep };

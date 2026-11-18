@@ -17,7 +17,7 @@ import { Terrain } from './terrain.js';
 import { SkySystem } from './sky.js';
 import { Forest, Undergrowth } from './trees.js';
 import { Rocks } from './rocks.js';
-import { EdgeWall, Buildings } from './buildings.js';
+import { Buildings } from './buildings.js';
 import { loadHouseModels, loadRockModels } from './models.js';
 import { loadGhillieModel } from './ghilliemodel.js';
 import { Grass } from './grass.js';
@@ -110,11 +110,9 @@ class Game {
     terrain.bakeSplat(() => 0);
     this.terrain = terrain;
     this.sky = new SkySystem(renderer, scene);
-    // v5: a stone wall around the play area, and the Tuscan hamlets (before the forest, which
-    // keeps clear of them)
-    this.hud.setLoading(CONFIG.map.biome === 'tuscany' ? 'BUILDING THE HAMLETS' : 'LAYING THE STONE WALLS');
+    // the Tuscan hamlets (before the forest, which keeps clear of them)
+    this.hud.setLoading(CONFIG.map.biome === 'tuscany' ? 'BUILDING THE HAMLETS' : 'RAISING THE MOUNTAINS');
     await nextFrame();
-    this.edgeWall = new EdgeWall(scene, terrain, this.textures, CONFIG.seed);
     // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
     // (and the leafy 3D ghillie suit, which every character clones)
     const [houseModels, rockModels] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadGhillieModel()]);
@@ -143,7 +141,7 @@ class Game {
       for (const m of this.forest.buckets[name].l0.meshes) if (!this.forest.reflectionProxies.includes(m)) this.water.hideDuringReflection.push(m);
     }
     this.water.showDuringReflection.push(...this.forest.reflectionProxies);
-    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris, [...this.edgeWall.solids, ...this.buildings.solids]);
+    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris, this.buildings.solids);
     // what feet and bodies rest on: the terrain, or the top of a rock, wall or building
     this.ground = { heightAt: (x, z) => this.world.groundAt(x, z) };
     this.hud.setLoading('SCOUTING SNIPER POSITIONS');

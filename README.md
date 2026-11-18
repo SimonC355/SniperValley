@@ -145,8 +145,8 @@ settings stay.
 The first three are the same forested river valley at different sizes: narrower slopes, a
 smaller river and lower ridges, with the same mountains behind. Tuscan Hills is a valley of old
 stone hamlets (houses and ruins block bullets; you can climb the low ruin walls), and Beech
-River a flat, rolling beech forest with a broad river between the teams. A stone wall marks the
-edge of every map. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+River a flat, rolling beech forest with a broad river between the teams. Every map ends in
+steep mountains right at its edge, so you always see where it ends. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
@@ -493,7 +493,8 @@ are in [CREDITS.md](CREDITS.md).
 - **Rocks.** Walk onto a low rock; hold W against a higher one (or press Space) to climb it.
   Lie prone on top. Shots that clear a rock on screen should not hit it.
 - **Slide.** Sprint, then press C: you slide and end up crouched. Try it downhill.
-- **Edge of the map.** Walk toward the side: the stone wall is visible from far away.
+- **Edge of the map.** Look around: on every map, mountains close off all four sides and only
+  sky shows above them. Walk to the side: you stop at the foot of the rock wall.
 - **Zone.** A new match uses the circle (toward the water) unless you choose *ends*.
 - **River.** Walk into the deep water: the current takes you downstream and you drown in a
   few seconds (in deathmatch you respawn).

@@ -5,6 +5,10 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
+- **Every map ends in mountains.** The stone wall around the edge is gone: right at the edge
+  of every map the ground now rises into steep rock mountains, higher on the big maps, so you
+  always see where the map ends, and beyond it there is only mountain and sky (no more valley
+  or forest out there). The river runs into the mountains at both ends of the valley.
 - **Bullet trails.** Every shot leaves a thin, whitish vapour trail along its path, like in
   modern shooters: a bright streak runs out at the bullet's speed and the trail hangs in the
   air for a moment before it drifts and fades. Through the scope you see where your shot went
