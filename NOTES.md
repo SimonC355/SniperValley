@@ -68,9 +68,21 @@ only. `scripts/megascans/` gets them out with Unreal Engine 5 on Windows:
    vertices, writes them as `.glb` (geometry and material slots, metres), exports the textures
    the materials use as PNG, and writes `inventory.json` (LOD vertex counts, sizes, material
    parents, blend modes, texture/scalar/vector parameters). The script then scales the textures
-   to 2048 px. Output: `%USERPROFILE%\SniperValley-megascans` (about 100-300 MB expected).
-3. `... megascans.ps1 upload` pushes that folder to the private repository and refuses a public
-   one.
+   to 2048 px. Output: `%USERPROFILE%\SniperValley-megascans\<pack>` (about 100-300 MB
+   expected for the trees). Each pack gets its own folder, so exporting another pack doesn't
+   overwrite the last one.
+3. `... megascans.ps1 upload` pushes that folder (all packs) to the private repository and
+   refuses a public one.
+
+**Ground textures** (Megascans *surfaces*: tileable photoscans with albedo, normal, roughness,
+displacement and AO maps) go the same way: Add to Project into `SVMegascans`, then
+`... megascans.ps1 export -Pack surfaces`. With no meshes in the pack, `export_megascans.py`
+exports every material instance whose path has the pack word, with its textures, to
+`surfaces/<name>/`, and lists the maps per material parameter in `inventory.json`. If nothing
+matches, the script lists the project's folders so the right `-Pack` word can be picked (it
+takes several, comma-separated). The game's ground has four slots per biome (grass, forest
+floor, rock, mud; see `SURFACES` in `src/hftextures.js`), so about 8-10 surfaces cover all five
+maps.
 
 **Not tested inside Unreal here** (no Unreal in the cloud sessions): the first run's `report.txt`
 says what worked. Next step once the files are in: a loader that builds the beech map's trees

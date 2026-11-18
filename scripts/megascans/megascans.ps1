@@ -7,13 +7,17 @@
 #       Then, in Epic Games Launcher: Library -> Fab Library -> European Beech -> Add to Project.
 #   powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export
 #       opens the project with export_megascans.py, waits for it, scales the textures to 2048.
-#       Output: %USERPROFILE%\SniperValley-megascans
+#       Output: %USERPROFILE%\SniperValley-megascans\<pack> (one folder per pack, so the trees
+#       and the ground textures don't overwrite each other)
+#   powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export -Pack surfaces
+#       the same for ground textures (Megascans surfaces added to the same project)
 #   powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 upload
 #       pushes that folder to your PRIVATE repository <owner>/SniperValley-assets (create it on
 #       github.com first: New repository, Private, no README). Refuses a public repository.
 #
 # The Fab Standard License forbids sharing the files themselves, so they never go into the
-# SniperValley repository, which is public. Options: -Pack beech (a word in the asset paths),
+# SniperValley repository, which is public. Options: -Pack beech (word(s) in the asset paths,
+# comma-separated),
 # -Repo SniperValley-assets, -MaxTexture 2048.
 param(
   [Parameter(Position = 0)][ValidateSet('setup', 'export', 'upload')][string]$Step = 'setup',
@@ -27,6 +31,8 @@ $ProjectName = 'SVMegascans'
 $ProjectDir = Join-Path ([Environment]::GetFolderPath('MyDocuments')) "Unreal Projects\$ProjectName"
 $Uproject = Join-Path $ProjectDir "$ProjectName.uproject"
 $OutDir = Join-Path $HOME 'SniperValley-megascans'
+$PackDir = Join-Path $OutDir (($Pack -replace '[^A-Za-z0-9_-]+', '_').ToLower())
+$Words = @($Pack.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 function Say([string]$Msg, [string]$Color = 'Cyan') { Write-Host $Msg -ForegroundColor $Color }
 
@@ -91,23 +97,26 @@ function Invoke-Export {
   Assert-NoUnreal
   if (-not (Test-Path $Uproject)) { throw "Kør først: powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 setup" }
   $e = Find-Engine ((Get-Content $Uproject -Raw | ConvertFrom-Json).EngineAssociation)
-  $hits = @(Get-ChildItem (Join-Path $ProjectDir 'Content') -Recurse -Filter '*.uasset' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*$Pack*" })
+  $all = @(Get-ChildItem (Join-Path $ProjectDir 'Content') -Recurse -Filter '*.uasset' -ErrorAction SilentlyContinue)
+  $hits = @($all | Where-Object { $f = $_.FullName; @($Words | Where-Object { $f -like "*$_*" }).Count -gt 0 })
   if ($hits.Count -eq 0) {
-    throw "Pakken er ikke i projektet endnu. Epic Games Launcher -> Library -> Fab Library -> European Beech -> Add to Project -> $ProjectName"
+    $dirs = @($all | ForEach-Object { $_.Directory.FullName.Substring((Join-Path $ProjectDir 'Content').Length) } | Sort-Object -Unique | Select-Object -First 25)
+    if ($dirs.Count) { Say "Ingen Unreal-filer med '$Pack' i stien. Mapper i projektet:" 'Yellow'; $dirs | ForEach-Object { Write-Host "  $_" } }
+    throw "Pakken er ikke i projektet endnu (eller hedder noget andet: brug -Pack med et ord fra mapperne ovenfor). Epic Games Launcher -> Library -> Fab Library -> <pakken> -> Add to Project -> $ProjectName"
   }
   Say "Fandt $($hits.Count) Unreal-filer fra pakken."
-  # fresh output (keep .git from an earlier upload)
-  New-Item -ItemType Directory -Force $OutDir | Out-Null
-  Get-ChildItem $OutDir -Force | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
+  # fresh output for this pack (other packs and .git from an earlier upload stay)
+  New-Item -ItemType Directory -Force $PackDir | Out-Null
+  Get-ChildItem $PackDir -Force | Remove-Item -Recurse -Force
   [IO.File]::WriteAllText((Join-Path $OutDir 'LICENSE-NOTE.txt'),
     "Quixel Megascans content from Fab, Fab Standard License.`r`nPRIVATE: do not share or publish these files. For use inside SniperValley only.`r`n")
-  $env:SV_EXPORT_DIR = $OutDir
+  $env:SV_EXPORT_DIR = $PackDir
   $env:SV_PACK = $Pack
   $py = Join-Path $PSScriptRoot 'export_megascans.py'
   Say 'Unreal starter og eksporterer. Det kan tage 10-60 minutter første gang. Lad vinduet være.'
   $p = Start-Process -FilePath $e.Editor -ArgumentList "`"$Uproject`" -ExecutePythonScript=`"$py`"" -PassThru
-  $done = Join-Path $OutDir 'done.txt'
-  $report = Join-Path $OutDir 'report.txt'
+  $done = Join-Path $PackDir 'done.txt'
+  $report = Join-Path $PackDir 'report.txt'
   $start = Get-Date
   $last = ''
   while (-not (Test-Path $done) -and -not $p.HasExited) {
@@ -125,7 +134,7 @@ function Invoke-Export {
 
   # textures above $MaxTexture px -> $MaxTexture (the game and the browser use no more)
   Add-Type -AssemblyName System.Drawing
-  foreach ($f in @(Get-ChildItem (Join-Path $OutDir 'textures') -Filter '*.png' -ErrorAction SilentlyContinue)) {
+  foreach ($f in @(Get-ChildItem $PackDir -Recurse -Filter '*.png' -ErrorAction SilentlyContinue)) {
     $img = [System.Drawing.Image]::FromFile($f.FullName)
     $w = $img.Width; $h = $img.Height
     if ([Math]::Max($w, $h) -le $MaxTexture) { $img.Dispose(); continue }
@@ -145,12 +154,12 @@ function Invoke-Export {
     Write-Host ("  {0}: {1}x{2} -> {3}x{4}" -f $f.Name, $w, $h, $nw, $nh)
   }
 
-  $files = @(Get-ChildItem $OutDir -Recurse -File | Where-Object { $_.FullName -notlike '*\.git\*' })
+  $files = @(Get-ChildItem $PackDir -Recurse -File)
   $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
   $glb = @($files | Where-Object Extension -eq '.glb').Count
-  $tex = @($files | Where-Object { $_.DirectoryName -like '*\textures' }).Count
+  $tex = @($files | Where-Object { $_.Extension -in '.png', '.tga', '.exr' }).Count
   Say ''
-  Say ("Eksport færdig: {0} modeller (.glb), {1} teksturer, {2:N0} MB i {3}" -f $glb, $tex, $mb, $OutDir) 'Green'
+  Say ("Eksport færdig: {0} modeller (.glb), {1} teksturer, {2:N0} MB i {3}" -f $glb, $tex, $mb, $PackDir) 'Green'
   foreach ($big in @($files | Where-Object { $_.Length -gt 95MB })) { Say ("  For stor til GitHub (over 95 MB): {0}" -f $big.Name) 'Yellow' }
   Get-Content $report -Tail 3
   Say ''
@@ -159,7 +168,8 @@ function Invoke-Export {
 }
 
 function Invoke-Upload {
-  if (-not (Test-Path (Join-Path $OutDir 'inventory.json'))) { throw "Kør først: powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export" }
+  $packs = @(Get-ChildItem $OutDir -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'inventory.json') } | ForEach-Object Name)
+  if ($packs.Count -eq 0) { throw "Kør først: powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export" }
   $origin = (git -C $Root remote get-url origin)
   if ($origin -notmatch 'github\.com[:/]([^/]+)/') { throw "Kunne ikke finde din GitHub-bruger ud fra '$origin'." }
   $owner = $Matches[1]
@@ -179,7 +189,7 @@ function Invoke-Upload {
     if (-not (git config user.email)) { git config user.email 'export@localhost' }
     if (@(git remote) -contains 'origin') { git remote set-url origin $url } else { git remote add origin $url }
     git add -A
-    git commit -q -m "Megascans export: $Pack"
+    git commit -q -m "Megascans export: $($packs -join ', ')"
     git push -u origin main
     if ($LASTEXITCODE -ne 0) { throw "Upload fejlede. Findes det private repo $owner/$Repo på github.com (Private, uden README)?" }
   } finally { Pop-Location }

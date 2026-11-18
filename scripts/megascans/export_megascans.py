@@ -1,9 +1,14 @@
 # Runs inside Unreal Editor 5.x and exports a Megascans pack (default: the European Beech trees)
 # in a form SniperValley can use. Started by megascans.ps1 ("export" step):
 #   UnrealEditor.exe <project> -ExecutePythonScript="<this file>"
+# Two kinds of pack:
+#   - 3D assets (trees, plants, rocks): every mesh whose path has the pack word, with the
+#     textures its materials use;
+#   - surfaces (ground textures, -Pack surfaces): no meshes, so every material instance whose
+#     path has the pack word is exported with its textures, one folder per surface.
 # Environment:
 #   SV_EXPORT_DIR  output folder (outside the git repository: Fab content must not be in it)
-#   SV_PACK        word in the asset paths of the pack (default "beech")
+#   SV_PACK        word(s) in the asset paths of the pack, comma-separated (default "beech")
 #   SV_NEAR, SV_FAR  vertex budgets for the two exported LODs (default 60000 and 15000)
 # Output:
 #   meshes/<mesh>_lod<i>.glb   every mesh of the pack at two of its own LODs, geometry and
@@ -24,6 +29,12 @@ import unreal
 
 OUT = os.environ.get('SV_EXPORT_DIR') or os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), 'SniperValleyExport')
 PACK = (os.environ.get('SV_PACK') or 'beech').lower()
+WORDS = [w.strip() for w in PACK.split(',') if w.strip()]
+
+
+def in_pack(path):
+    p = path.lower()
+    return any(w in p for w in WORDS)
 NEAR = int(os.environ.get('SV_NEAR') or 60000)
 FAR = int(os.environ.get('SV_FAR') or 15000)
 
@@ -78,7 +89,7 @@ def find_assets():
     safe(lambda: reg.search_all_assets(True))
     safe(lambda: reg.wait_for_completion())
     paths = EAL.list_assets('/Game', recursive=True, include_folder=False)
-    pack = [p for p in paths if PACK in p.lower()]
+    pack = [p for p in paths if in_pack(p)]
     log('assets in /Game:', len(paths), '| with "%s" in the path:' % PACK, len(pack))
     opts = unreal.AssetRegistryDependencyOptions(
         include_soft_package_references=False, include_hard_package_references=True,
@@ -254,6 +265,49 @@ def export_glb(mesh, lod, filename):
     return bool(ok) and os.path.exists(filename)
 
 
+# ---------------------------------------------------------------- surfaces
+
+def export_surfaces(by_class):
+    # a surface is a material instance with its texture maps (albedo, normal, roughness,
+    # displacement, AO ...); base materials are the shared masters, not surfaces
+    mis = sorted(p for c in ('MaterialInstanceConstant', 'MaterialInstance') for p in by_class.get(c, []) if in_pack(p))
+    if not mis:
+        log('NO MESHES OR SURFACES FOUND. Is the pack added to this project (Add to Project)?')
+        log('Folders in /Game with Megascans content:')
+        for d in sorted({'/'.join(p.split('/')[:5]) for p in EAL.list_assets('/Game', recursive=True, include_folder=False)})[:60]:
+            log('   ', d)
+        return
+    log('surfaces (material instances):', len(mis))
+    inv = {'engine': unreal.SystemLibrary.get_engine_version(), 'pack': PACK, 'surfaces': [], 'materials': {}, 'textures': {}}
+    for idx, path in enumerate(mis):
+        name = path.split('.')[-1]
+        log('[%d/%d] %s' % (idx + 1, len(mis), name))
+        try:
+            mat = EAL.load_asset(path)
+            textures = {}
+            info = material_info(mat, textures)
+            inv['materials'][path] = info
+            folder = os.path.join(OUT, 'surfaces', clean(name))
+            os.makedirs(folder, exist_ok=True)
+            entry = {'name': name, 'material': path, 'parameters': info['textures'], 'files': {}}
+            for tp, t in sorted(textures.items()):
+                ti = texture_info(t)
+                ti['file'] = export_texture(t, folder)
+                if ti['file']:
+                    ti['file'] = 'surfaces/%s/%s' % (clean(name), ti['file'])
+                inv['textures'][t.get_name()] = ti
+                entry['files'][t.get_name()] = ti['file']
+                log('    %-44s %s %s' % (t.get_name(), ti['size'], ti['file'] or 'EXPORT FAILED'))
+            inv['surfaces'].append(entry)
+        except Exception:
+            log('    ERROR', traceback.format_exc())
+        flush()
+    with open(os.path.join(OUT, 'inventory.json'), 'w', encoding='utf-8') as f:
+        json.dump(inv, f, indent=1)
+    n = sum(len([v for v in s['files'].values() if v]) for s in inv['surfaces'])
+    log('DONE: %d surfaces, %d textures' % (len(inv['surfaces']), n))
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -269,11 +323,11 @@ def main():
         log('  %-32s %d' % (c, len(by_class[c])))
     flush()
 
-    statics = sorted(p for p in by_class.get('StaticMesh', []) if PACK in p.lower())
-    skeletals = sorted(p for p in by_class.get('SkeletalMesh', []) if PACK in p.lower())
+    statics = sorted(p for p in by_class.get('StaticMesh', []) if in_pack(p))
+    skeletals = sorted(p for p in by_class.get('SkeletalMesh', []) if in_pack(p))
     meshes = [(p, 'static') for p in statics] or [(p, 'skeletal') for p in skeletals]
     if not meshes:
-        log('NO MESHES FOUND. Is the pack added to this project (Add to Project)?')
+        export_surfaces(by_class)
         return
 
     inv = {'engine': unreal.SystemLibrary.get_engine_version(), 'pack': PACK, 'meshes': [], 'materials': {}, 'textures': {}}
