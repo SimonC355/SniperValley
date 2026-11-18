@@ -324,6 +324,14 @@ def main():
     flush()
 
     statics = sorted(p for p in by_class.get('StaticMesh', []) if in_pack(p))
+    # Megascans tree packs ship each tree twice: plain, and a Pivot Painter copy (SM_..._PP, with
+    # pivots baked into extra UVs for Unreal's wind). The game does its own wind: keep the
+    # plain one where there is one
+    plain = {p.split('.')[-1] for p in statics if not re.search(r'_PP$', p.split('.')[-1])}
+    dropped = [p for p in statics if re.search(r'_PP$', p.split('.')[-1]) and p.split('.')[-1][:-3] in plain]
+    if dropped:
+        log('Pivot Painter copies skipped (the plain mesh is exported):', len(dropped))
+        statics = [p for p in statics if p not in dropped]
     skeletals = sorted(p for p in by_class.get('SkeletalMesh', []) if in_pack(p))
     meshes = [(p, 'static') for p in statics] or [(p, 'skeletal') for p in skeletals]
     if not meshes:

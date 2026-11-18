@@ -90,6 +90,8 @@ function Invoke-Setup {
   Say '  1. Når Unreal er åbent: luk det igen.'
   Say "  2. Epic Games Launcher -> Unreal Engine -> Library -> Fab Library -> European Beech -> Add to Project -> $ProjectName"
   Say '     (står projektet ikke på listen: sæt hak i "Show all projects" og vælg det; spørger den om version, tag den nyeste).'
+  Say "     Har du allerede mappen EuropeanBeech (med Foliage, Geometry, Materials, Textures) et andet sted:"
+  Say "     kopier hele mappen ind i $(Join-Path $ProjectDir 'Content'), så den ligger som Content\EuropeanBeech." 
   Say '  3. Vent til downloaden er færdig, og kør:  powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 export'
 }
 
@@ -102,7 +104,7 @@ function Invoke-Export {
   if ($hits.Count -eq 0) {
     $dirs = @($all | ForEach-Object { $_.Directory.FullName.Substring((Join-Path $ProjectDir 'Content').Length) } | Sort-Object -Unique | Select-Object -First 25)
     if ($dirs.Count) { Say "Ingen Unreal-filer med '$Pack' i stien. Mapper i projektet:" 'Yellow'; $dirs | ForEach-Object { Write-Host "  $_" } }
-    throw "Pakken er ikke i projektet endnu (eller hedder noget andet: brug -Pack med et ord fra mapperne ovenfor). Epic Games Launcher -> Library -> Fab Library -> <pakken> -> Add to Project -> $ProjectName"
+    throw "Pakken er ikke i projektet endnu (eller hedder noget andet: brug -Pack med et ord fra mapperne ovenfor). Epic Games Launcher -> Library -> Fab Library -> <pakken> -> Add to Project -> $ProjectName. Har du pakkens mappe (fx EuropeanBeech) et andet sted, så kopier den ind i $(Join-Path $ProjectDir 'Content')."
   }
   Say "Fandt $($hits.Count) Unreal-filer fra pakken."
   # fresh output for this pack (other packs and .git from an earlier upload stay)
