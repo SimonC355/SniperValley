@@ -182,6 +182,13 @@ a.link { color: var(--accent); }
 .lanlist .t0 { color: var(--friend); }
 .lanlist .t1 { color: var(--danger); }
 .lanlist .dim { color: var(--dim); }
+/* online over Steam (program only) */
+.steamstatus { margin-top: 6px; }
+.steamstatus b { color: var(--friend); font-weight: 600; }
+.steamstatus b.off { color: var(--dim); }
+.steamcode { display: flex; align-items: center; gap: 14px; margin-top: 12px; font-size: 14px; letter-spacing: 0.14em; color: var(--dim); }
+.steamcode b { color: var(--accent); font-size: 28px; letter-spacing: 0.24em; user-select: text; }
+.steamcode button { padding: 4px 12px; font-size: 13px; }
 button:disabled { opacity: 0.45; cursor: default; }
 
 /* scoreboard (hold Tab) */
@@ -201,7 +208,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 /* only in the SniperValley program (body.desktop, see desktop.js) */
 body:not(.desktop) .desk { display: none !important; }
-#lan-ip { font-family: inherit; font-size: 16px; font-weight: 600; letter-spacing: 0.08em; width: 210px; padding: 8px 10px; background: #1a201c; color: var(--fg); border: 1px solid #3a443d; border-radius: 3px; user-select: text; }
+#lan-ip { font-family: inherit; font-size: 16px; font-weight: 600; letter-spacing: 0.08em; width: 250px; padding: 8px 10px; background: #1a201c; color: var(--fg); border: 1px solid #3a443d; border-radius: 3px; user-select: text; }
 #lan-ip::placeholder { color: var(--dim); }
 #lan-ip:disabled { opacity: 0.45; }
 .btnrow button.quit { margin-left: auto; }

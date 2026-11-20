@@ -31,6 +31,10 @@ _No photoscanned textures downloaded. Run `npm run assets` to fetch CC0 textures
   `LICENSES.chromium.html` next to the program): the Windows program.
 - [@electron/packager](https://github.com/electron/packager) (BSD-2-Clause): builds the
   program (not shipped with it).
+- [steamworks.js](https://github.com/ceifa/steamworks.js) (MIT): Steam support for online
+  play. It includes Valve's Steamworks API library (`steam_api64.dll`), which Valve lets games
+  ship with them; Steam and Steamworks are Valve's. The program ships the steamworks.js licence
+  in `licenses/steamworks.js-MIT.txt`.
 
 ## Fonts
 

@@ -3,6 +3,26 @@
 Each version's section becomes the notes of its release on GitHub (see
 `scripts/release-notes.mjs`); the text after the version is the release's name.
 
+## 0.4.0 – Online with friends over Steam
+
+- **Play online with friends.** Host a game and friends join from anywhere: they right-click
+  you in Steam's friends list and choose **Join Game**, or type your 7-character **Steam
+  code**. Steam carries the game over Valve's network, so nobody opens ports or types IP
+  addresses. Everyone needs Steam running and logged in.
+- **A test setup for now.** Until SniperValley has its own Steam App ID it runs online games as
+  Valve's free test app Spacewar, so Steam shows you as *Playing Spacewar*. Add it once with
+  Win+R → `steam://install/480`. The README has the steps.
+- **Who can join** is a setting in the multiplayer box: Steam friends, anyone with the code,
+  or nobody (LAN only). LAN games work as before, with or without Steam.
+- **Ping** to the host in the lobby and on the scoreboard (Tab).
+- **Smoother movement of other players**, online and on LAN. They are drawn a tenth of a
+  second in the past, between the positions received, so a late or lost packet no longer makes
+  them stop and jump.
+- **Same version only.** A friend with another version of the game is told so instead of
+  joining a game that goes wrong.
+- **steam-log.txt** in the settings folder (`%APPDATA%\SniperValley`) records what Steam did,
+  for bug reports.
+
 ## 0.3.1 – First game experience fixes
 
 From the first hour-long play test.

@@ -158,15 +158,18 @@ export class HUD {
       <h1>SNIPER<span>VALLEY</span></h1>
       <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
       <div id="lanbox" class="lan" style="display:none">
-        <h2>LAN MULTIPLAYER</h2>
+        <h2 id="lan-h">LAN MULTIPLAYER</h2>
         <div class="settings">
           <label>Your name</label><input id="lan-name" maxlength="12" placeholder="NAME">
           <label>Team</label><select id="lan-team"><option value="auto">auto-balance</option><option value="0">ALPHA</option><option value="1">BRAVO</option></select>
           <label>Fill empty slots with AI</label><select id="lan-ai"><option value="1">on (up to the team size in MATCH)</option><option value="0">off (players only)</option></select>
+          <label class="desk">Online (Steam)</label><select id="lan-steam" class="desk"><option value="friends">Steam friends can join (code or friends list)</option><option value="open">anyone with the code can join</option><option value="off">off (LAN only)</option></select>
         </div>
+        <div id="steam-status" class="note steamstatus desk"></div>
         <div id="lan-list" class="lanlist"></div>
+        <div id="steam-code" class="steamcode desk" style="display:none">STEAM CODE <b id="steam-code-v"></b><button id="steam-copy">COPY</button></div>
         <div class="btnrow">
-          <button id="btn-host">HOST GAME</button><input id="lan-ip" class="desk" maxlength="40" placeholder="HOST'S IP ADDRESS" spellcheck="false"><button id="btn-join">JOIN GAME</button>
+          <button id="btn-host">HOST GAME</button><input id="lan-ip" class="desk" maxlength="40" placeholder="STEAM CODE OR IP ADDRESS" spellcheck="false"><button id="btn-join">JOIN GAME</button>
           <button class="primary" id="btn-mpstart" style="display:none">START MATCH</button><button id="btn-leave" style="display:none">LEAVE</button>
         </div>
         <div class="note" id="lan-note"></div>
@@ -375,7 +378,7 @@ export class HUD {
     } else m.style.display = 'none';
   }
 
-  // Hold-to-show scoreboard: rows = [{ name, team, alive, kills, deaths, human, me }].
+  // Hold-to-show scoreboard: rows = [{ name, team, alive, kills, deaths, human, me, ping }].
   // Deathmatch lists kills / deaths for the match, best first.
   setScoreboard(on, rows, myTeam, score, tdm = false) {
     const el = $('scoreboard');
@@ -387,7 +390,7 @@ export class HUD {
       const list = rows.filter((r) => r.team === t);
       if (tdm) list.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
       return `<div class="col ${t === myTeam ? 'f' : 'e'}"><div class="h">${names[t]} · ${score[t]}${tdm ? ' KILLS' : ''}</div>${list.map((r) =>
-        `<div class="r ${r.alive || tdm ? '' : 'dead'} ${r.me ? 'me' : ''}"><span>${r.name}${r.human ? '' : ' <i>AI</i>'}</span><span>${tdm ? `${r.kills} / ${r.deaths}` : r.kills}</span></div>`).join('')}</div>`;
+        `<div class="r ${r.alive || tdm ? '' : 'dead'} ${r.me ? 'me' : ''}"><span>${r.name}${r.human ? (r.ping !== undefined ? ` <i>${r.ping} MS</i>` : '') : ' <i>AI</i>'}</span><span>${tdm ? `${r.kills} / ${r.deaths}` : r.kills}</span></div>`).join('')}</div>`;
     };
     el.innerHTML = `<div class="sh"><span>PLAYER</span><span>${tdm ? 'KILLS / DEATHS' : 'ROUND KILLS'}</span></div><div class="cols">${col(myTeam)}${col(1 - myTeam)}</div>`;
   }

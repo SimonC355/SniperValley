@@ -484,7 +484,7 @@ made all three about a quarter smaller again:
 - **Not handled**:
   - no host migration (if the host leaves, everyone returns to the menu);
   - no reconnect;
-  - no lag compensation (LAN latency is a few ms);
+  - no lag compensation (others are drawn 0.1 s in the past, and hits are the shooter's call);
   - no voice chat.
   - Pausing doesn't stop a LAN match.
 - **Tested** with the real `npm run host` server and two headless browsers:
@@ -626,6 +626,137 @@ From an hour of play testing. Each point, what I found and what changed.
 - Version 0.3.1 and the branch `v0.3.1`, as asked. The release workflow now takes the
   release title and notes for a version from `CHANGELOG.md`.
 
+## v0.4.0: online over Steam
+
+Asked for: "byg steam login så jeg kan spille online med mine venner". There is no separate
+login: the game uses whoever is logged in to Steam on that PC.
+
+- **What Steam does here.**
+  - **Lobbies:** the host's game opens a Steam lobby, and friends find it through Steam's
+    friends list (*Join Game*) or a code.
+  - **Transport:** Steam's P2P networking carries the game's messages through Valve's relays.
+    Nobody opens ports, and nobody sees anyone's IP address.
+  - **No game servers:** the game still runs on the host's PC, exactly like a LAN game, and
+    costs nothing to run.
+- **App ID 480 (Spacewar).** Valve's public test app, available to every Steam account, so this
+  works before the game has its own App ID ($100 through Steam Direct).
+  - Steam shows *Playing Spacewar* while the program runs, because Steam starts as soon as the
+    program starts, so a friend's *Join Game* reaches it.
+  - *Join Game* only works while SniperValley is already running: Steam would start the real
+    Spacewar otherwise.
+  - Switching to an own App ID is one constant (`APP_ID` in `electron/steam.cjs`). Then Steam
+    starts SniperValley for *Join Game* (`+connect_lobby` is handled already) and lobbies are
+    SniperValley's alone.
+- **Library: steamworks.js 0.4.0.**
+  - It ships Valve's Steam API file for Windows, Linux and macOS, so neither the build (CI)
+    nor anyone else needs a Steamworks account.
+  - The other option, steamworks-ffi-node, is newer and covers Valve's newer networking API,
+    but it needs Valve's SDK downloaded separately with a Steamworks developer login.
+  - steamworks.js uses Valve's older P2P API (`ISteamNetworking`). Valve calls it deprecated,
+    but it still works, goes through the relays, and has unreliable packets (up to 1200
+    bytes) and reliable ones.
+  - The library loads in the program's main process. The game page reaches it only through
+    `window.desktop.steam`.
+- **How it fits the LAN code**, which is unchanged:
+  - **Host:** the relay (`server/relay.mjs`) runs in the host's program as for LAN, and each
+    Steam friend becomes one more relay peer, sending through Steam instead of a WebSocket. A
+    host's game can also have LAN players and Steam friends in the same match.
+  - **Friend:** the game connects to its own program (`ws://127.0.0.1:<port>/steamnet`), and
+    `electron/steam.cjs` forwards each message to the host over Steam. The game speaks the same
+    relay protocol either way.
+  - **Packets** are one byte of kind plus text:
+    - `D` data (a relay message);
+    - `O` open and `C` close (a relay peer comes and goes);
+    - `P`/`Q` ping and pong.
+  - **Keep-alive and timeouts:** pings go both ways every second. 15 s without a packet means
+    the other side is gone, and so does Steam reporting that someone left the lobby or that a
+    connection failed.
+  - **The lobby stays open while the host's game reloads** (a map change) for up to 60 s.
+    Friends' games reload too and rejoin by themselves, over Steam. It closes when the host
+    leaves or quits.
+  - **Steam friends can't host** on someone else's relay. The bridge only accepts the game's own
+    page (Origin check), so a web page open on the same PC can't use it.
+- **Codes.** A lobby's Steam ID in Crockford base 32. Lobby IDs share their top 32 bits, so a
+  code is 7 characters (for example `2DKXX36`). Lower case, O for 0 and I/L for 1 are accepted,
+  and so is a pasted lobby ID. A text with a dot or colon is an IP address (LAN) instead.
+- **Netcode for the internet** (also used on LAN):
+  - **Unreliable positions.** The host's 20 Hz snapshot goes as several messages of about
+    0.9 KB, each fitting one Steam packet, sent unreliably. A lost one is simply replaced 50 ms
+    later.
+  - **Reliable events.** Zone and bird state moved to a reliable `world` message (zone every
+    second, birds on change), next to kills, shots, rounds and respawns.
+  - **Stale messages are dropped.** Snapshots carry the host's round count (a late one from
+    the previous round is dropped), and every position carries the sender's real clock (an older
+    one than already received is dropped).
+  - **Drawing others.** Other players and the host's AI were drawn by easing toward the
+    newest position. Now each is drawn 0.1 s in the past, between the two received states around
+    that moment, or extrapolated up to 0.2 s if packets are late. The sender's clock to local
+    time is the lowest transit time seen, which follows changes slowly.
+  - Measured with the fake Steam at 50 ± 30 ms one way and 3 % loss: a player walking 3 m/s in
+    a circle, seen by the friend, frame by frame (5th–95th percentile of speed):
+    - before: 1.64–4.44 m/s (stop and jump);
+    - after: 2.86–3.18 m/s.
+  - **Traffic, 20v20 with one friend:** 76 packets/s and 0.37 Mbit/s both ways. The largest
+    snapshot piece is 974 bytes; the largest reliable message (the round roster) is 3.6 KB. Ten
+    friends need about 3–4 Mbit/s of the host's upload.
+  - **Hits** are still the shooter's call, and the host confirms them. Over the internet that
+    can mean being hit just after reaching cover, and that is accepted for games between
+    friends.
+- **Same version only.** The lobby (Steam and relay) carries the host's version. A friend with
+  another version gets a message instead of joining. The relay also refuses older games that
+  don't say their version.
+- **Menu (program only).**
+  - Status line: `STEAM ● LOGGED IN AS …`, or why not. It checks again every 5 s on the menu,
+    so starting Steam later works.
+  - *Online (Steam)*: friends (FriendsOnly lobby), anyone with the code (Public lobby), or off.
+  - The host sees the code with COPY. Friends type it where the IP address went.
+  - The player name defaults to the Steam name.
+  - Pings: in the lobby list, the friend's note and the Tab scoreboard.
+  - A *Join Game* while playing single player reloads into the menu and joins.
+- **`steam-log.txt`** in the settings folder logs what Steam did in the last run (lobbies,
+  sessions, connects, timeouts), for bug reports from real Steam.
+- **The build check:** CI runs the packed `SniperValley.exe --steam-selftest=<file>`, which
+  only loads Steam support and writes the result, so a missing native file fails the build. The
+  native files are unpacked from the app archive, and `steam_api64.dll` also sits next to the
+  .exe.
+
+### Testing online play (without Steam)
+
+`scripts/fake-steam/` stands in for Steam: `backend.mjs` is the "Steam servers" (lobbies, P2P
+packets with a simulated internet), and `index.cjs` replaces steamworks.js in each copy of the
+program.
+
+```
+npm run build
+node scripts/fake-steam/backend.mjs --latency 50 --jitter 30 --loss 0.03
+# two copies of the program, each its own Steam user and settings folder:
+SNIPERVALLEY_FAKE_STEAM=$PWD/scripts/fake-steam/index.cjs FAKE_STEAM_ID=1001 FAKE_STEAM_NAME=Host npx electron .
+SNIPERVALLEY_FAKE_STEAM=$PWD/scripts/fake-steam/index.cjs FAKE_STEAM_ID=1002 FAKE_STEAM_NAME=Friend SNIPERVALLEY_USER_DATA=/tmp/sv-friend npx electron .
+```
+
+`FAKE_STEAM_OFF=1` acts as if Steam isn't running; `SNIPERVALLEY_QUERY=norender` adds URL
+options. The backend also takes test commands (a friend's *Join Game*, statistics).
+
+- **Tested** that way (two copies of the program, driven by Playwright, at 40–50 ms ± 20–30 ms
+  and 2–3 % loss):
+  - hosting, the code, joining by code and by *Join Game*;
+  - pings, settings and roster, positions agreeing;
+  - smooth movement, kills both ways, a respawn and scores;
+  - a friend quitting, the host leaving, a map change with automatic rejoin;
+  - another version, a wrong code, *Join Game* during single player, no Steam (LAN only);
+  - 20v20 traffic;
+  - the LAN tests from 0.3.1 (deathmatch and elimination in browsers, the browser test on
+    `npm run host`) still pass;
+  - the packed Linux program loads Steam support from the unpacked files.
+- **Not tested:**
+  - **real Steam:** the steamworks.js calls are checked against its source and types, and on
+    Linux it loads and reports that Steam isn't running, but no lobby or packet has gone through
+    Valve;
+  - real internet conditions;
+  - the Windows .exe with Steam (CI loads the module only);
+  - the Steam overlay (Shift+Tab). It is left off, because steamworks.js turns it on with
+    Chromium switches (in-process GPU) that could cost frame rate.
+
 ## Known limitations and ideas
 
 - LOD transitions are hard switches; dithered cross-fades would hide popping.
@@ -640,5 +771,7 @@ From an hour of play testing. Each point, what I found and what changed.
 - Light shafts are screen-space, so they need the sun on screen or near it.
 - The light shafts don't affect the AI. Looking into the sun is harder only for the player.
 - No points or ranking (out of scope).
-- LAN only. Online play would need a public relay or WebRTC with NAT traversal, plus server-side
-  hit validation.
+- Online play is between friends: the host's game decides everything and trusts each player's
+  hits (no cheat protection), there is no host migration, and a friend who joins during a
+  deathmatch waits for the next match. Joining a running deathmatch would be a good next step.
+- The Steam overlay (Shift+Tab, invites from inside the game) is off; see v0.4.0.

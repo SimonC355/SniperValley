@@ -27,7 +27,7 @@ const notes = [
   '',
   'The program is not code-signed. To start it without a warning: right-click the zip, choose **Properties**, tick **Unblock** and click **OK** before you unzip it. Otherwise Windows shows *Windows protected your PC* the first time: click **More info**, then **Run anyway**.',
   '',
-  'LAN games: one player clicks HOST GAME, the others type the IP address it shows and click JOIN GAME.',
+  'Multiplayer: one player clicks HOST GAME. Friends online join with the Steam code it shows (or Join Game in Steam\'s friends list; Steam must be running), friends on the same network with the IP address it shows.',
 ];
 if (changes) notes.push('', "## What's new", '', changes);
 fs.writeFileSync('notes.md', `${notes.join('\n')}\n`);

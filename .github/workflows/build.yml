@@ -27,6 +27,17 @@ jobs:
 
       - run: npm run exe
 
+      # the packed program must load Steam support (Steam itself isn't installed here)
+      - name: Steam support loads
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'steam-selftest.json'
+          $p = Start-Process -FilePath release/SniperValley-win32-x64/SniperValley.exe -ArgumentList "--steam-selftest=$out" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw 'The program did not finish the Steam self-test' }
+          Get-Content $out
+          $r = Get-Content $out | ConvertFrom-Json
+          if (-not $r.loaded) { throw "Steam support did not load: $($r.error)" }
+
       - name: Zip the program
         shell: pwsh
         run: Compress-Archive -Path release/SniperValley-win32-x64/* -DestinationPath SniperValley-windows-x64.zip
