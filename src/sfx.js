@@ -69,7 +69,75 @@ function nWave(sr, T) {
 // Muzzle report of a full-power sniper rifle as heard by the shooter (or anyone within a few
 // metres). Distance is applied at playback (filter, level, playback rate, echo send).
 //
-// v5.2, after "the sniper sound is still hideous, can it sound more like a smeld (a sharp
+// v5.2, played: "still not it, it should be much more gu-DISHHH. A rifle: a short, loud bang.
+// Now it sounds like a lame, dull parlour rifle. It must be much more shrill, almost like a whip
+// cracking: dishhh." The earlier short version kept most of its energy below 1 kHz (a thud), and
+// the ear compression after your own shot cut the highs right after the crack. Now:
+//   1. the whip: the bullet's crack leaving the muzzle and a very short, sharp blast wave
+//      (1.2-1.5 ms positive phase), with a burst of bright noise: the "DI";
+//   2. the "SHHH": bright noise (most of it 2-8 kHz) that hisses on for ~0.4 s, the blast
+//      tearing the air and the forest throwing it back in dense, bright reflections;
+//   3. the "gu": a short low thump under it, small, so it gives weight without dulling it.
+// The first 50 ms go a little into a soft clipper (the dense front of a real shot); no tones or
+// pitch sweeps anywhere (they read as an insect flying past).
+export function muzzleBlast(sr, seed = 1) {
+  const r = rng(seed);
+  const out = new Float32Array(Math.floor(sr * 0.7));
+  // 1. crack, blast wave and the bright burst
+  const crack = nWave(sr, 0.0007 + r() * 0.0002);
+  mixInto(out, crack, 0, 1.0);
+  const Td = 0.0012 + r() * 0.0003;
+  const blast = friedlander(sr, Td, 1.4, 0.025);
+  mixInto(out, blast, Math.round(sr * 0.0002), 0.75);
+  const edge = new Float32Array(Math.floor(sr * 0.03));
+  for (let i = 0; i < edge.length; i++) edge[i] = (r() * 2 - 1) * Math.exp(-(i / sr) / 0.004);
+  highpass(edge, sr, 1800); highpass(edge, sr, 1200);
+  mixInto(out, normalize(edge, 1), 0, 0.9);
+  // 2. the hiss: bright noise, a fast attack and a ~0.3 s tail
+  const sh = new Float32Array(Math.floor(sr * 0.6));
+  for (let i = 0; i < sh.length; i++) {
+    const t = i / sr;
+    sh[i] = (r() * 2 - 1) * Math.min(1, t / 0.0015) * (Math.exp(-t / 0.035) * 0.75 + Math.exp(-t / 0.2) * 0.36);
+  }
+  highpass(sh, sr, 1500); highpass(sh, sr, 900); lowpass(sh, sr, 9000);
+  mixInto(out, normalize(sh, 1), Math.round(sr * 0.0005), 0.7);
+  // dense, bright reflections off trunks and the ground in the first ~150 ms (the rattle in it)
+  const head = new Float32Array(Math.floor(sr * 0.02));
+  mixInto(head, crack, 0, 1);
+  mixInto(head, edge, 0, 0.6);
+  highpass(head, sr, 1000);
+  for (let k = 0; k < 36; k++) {
+    const t = 0.004 + Math.pow(r(), 1.3) * 0.15;
+    mixInto(out, head, Math.round(sr * t), (0.1 + r() * 0.16) * Math.exp(-t / 0.07) * (r() < 0.5 ? -1 : 1));
+  }
+  // 3. the low "gu": a short thump and a little body, kept small
+  const thump = new Float32Array(Math.floor(sr * 0.15));
+  for (let i = 0; i < thump.length; i++) {
+    const t = i / sr;
+    thump[i] = (r() * 2 - 1) * Math.min(1, t / 0.0008) * Math.exp(-t / 0.02);
+  }
+  lowpass(thump, sr, 160); lowpass(thump, sr, 200);
+  mixInto(out, normalize(thump, 1), 0, 0.55);
+  const body = new Float32Array(Math.floor(sr * 0.1));
+  for (let i = 0; i < body.length; i++) body[i] = (r() * 2 - 1) * Math.min(1, (i / sr) / 0.0006) * Math.exp(-(i / sr) / 0.01);
+  lowpass(body, sr, 1800); highpass(body, sr, 250);
+  mixInto(out, normalize(body, 1), 0, 0.45);
+  // the first 50 ms a little into a soft clipper, crossfaded so the hiss decays clean
+  const k0 = Math.floor(sr * 0.035), k1 = Math.floor(sr * 0.06);
+  let m = 0; for (let i = 0; i < k1; i++) m = Math.max(m, Math.abs(out[i]));
+  for (let i = 0; i < k1; i++) {
+    const w = i < k0 ? 1 : 1 - (i - k0) / (k1 - k0);
+    const x = out[i] / m;
+    out[i] = m * (w * Math.tanh(x * 2.0) / Math.tanh(2.0) + (1 - w) * x);
+  }
+  // fade the last 60 ms (no click at the end of the buffer)
+  const n = out.length, f = Math.floor(sr * 0.06);
+  for (let i = 0; i < f; i++) out[n - 1 - i] *= i / f;
+  return normalize(out, 0.97);
+}
+
+// The first v5.2 report (kept for comparison in tests): played, it was "a lame, dull parlour
+// rifle". Written after "the sniper sound is still hideous, can it sound more like a smeld (a sharp
 // bang)?": the v5 boom spread its energy over 3 s (a brown-noise rumble, saturated hot-gas noise,
 // 40 reflections, tanh on everything) and read as a roar with hiss. A shot heard from behind the
 // rifle is one hard, short SMACK, then the valley answering:
@@ -81,7 +149,7 @@ function nWave(sr, T) {
 //   4. nothing after ~0.3 s: the distinct echoes from the slopes come from the echo bus
 //      (audio.js) at playback, so far shots get more of them.
 // No saturation; no pitch sweeps or tones (they read as an insect flying past).
-export function muzzleBlast(sr, seed = 1) {
+export function muzzleBlastShort(sr, seed = 1) {
   const r = rng(seed);
   const out = new Float32Array(Math.floor(sr * 0.45));
   // 1. crack and blast wave

@@ -1099,3 +1099,23 @@ hideous, can it sound more like a smeld (a sharp bang)?".
   | Tail (0.1-3 s) RMS | −20 dB | −36 dB |
 
   No pitched windows in the insect band. Still **not checked by ear here**.
+- **Played, the short one was wrong too:** "still not it, it should be much more gu-DISHHH. A
+  rifle: a short, loud bang. Now it sounds like a lame, dull parlour rifle. It must be much more
+  shrill, almost like a whip cracking: dishhh." It kept most of its energy below 1 kHz (a thud), and
+  the ear compression after your own shot (a low-pass closing to ~4 kHz 35 ms after the shot)
+  cut the highs right after the crack. Now (`muzzleBlast`; the short one is `muzzleBlastShort`):
+  a crack and a very sharp blast wave (1.2-1.5 ms) with a burst of bright noise ("DI"), bright
+  noise (mostly 2-8 kHz) hissing on for ~0.4 s with 36 dense, bright trunk and ground reflections
+  in the first 150 ms ("SHHH"), and a small low thump and body under it ("gu"). Gunshots no longer
+  close the hearing filter (bullets cracking past still do), and the valley's echoes are brighter.
+
+  | Own shot, whole chain | v5 boom | short (first v5.2) | whip crack (now) |
+  |---|---|---|---|
+  | Energy above 2 kHz, crack (0-50 ms) | 34% | 15% | 66% |
+  | Energy above 2 kHz, after it (50-400 ms) | 3% | 7% | 92% |
+  | Energy in the first 100 ms | 40% | 94% | 96% |
+  | Above −20 dB of the peak until | 250 ms+ | 82 ms | 140 ms |
+  | First echoes | −7 dB | −13 dB | −18 dB |
+
+  RMS in the first 100 ms is −13 dB (the short one −11), but the energy sits where the ear is
+  most sensitive (2-5 kHz), so it should sound louder, not quieter.

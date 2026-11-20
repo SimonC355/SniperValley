@@ -9,9 +9,11 @@ Each version's section becomes the notes of its release on GitHub (see
   back to the start screen to pick another map or mode. In a LAN game the host takes everyone
   along: they wait in the lobby until the host starts the next match. Joined players get LEAVE
   TO LOBBY. The pause menu's buttons are now at the top (they were below all the settings).
-- **The gunshot is a sharp bang ("smeld").** Your own shot is now one hard, short smack that is
-  over in about 70 ms, followed by the valley's echoes, instead of a long, rolling boom. The echo
-  is also cleaner: distinct, dulled echoes off the slopes instead of a hiss.
+- **The gunshot is a shrill whip crack: "gu-DISHHH".** A bright, loud crack with a short hiss
+  after it and a small low thump under it, then the valley's echoes, instead of a long, rolling
+  boom (and not the dull "parlour rifle" of the first try). Your ears no longer go muffled after
+  your own shot, which cut the hiss. The echo is cleaner too: distinct echoes off the slopes
+  instead of white noise.
 - **No more glittering specks.** The needles drifting down and the dust motes that lit up toward
   the sun are off. GRAPHICS → Drifting needles & dust turns them back on.
 - **The small details of being a sniper.** Still a sniper-only game; these are the touches

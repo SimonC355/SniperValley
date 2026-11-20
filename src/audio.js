@@ -192,10 +192,10 @@ export class AudioSystem {
         const rise = Math.min(1, Math.max(0, (t - 0.06) / 0.2));
         d[i] = (Math.random() * 2 - 1) * Math.exp(-t / 0.55) * rise;
       }
-      lp(d, 900); lp(d, 1200);
-      peakTo(d, 0.07);
+      lp(d, 1800); lp(d, 2400);
+      peakTo(d, 0.06);
       // the echoes: compact bursts (a few ms), duller the further they travelled
-      for (const [t0, a, hz] of [[0.3, 0.75, 2400], [0.55, 0.55, 2000], [0.98, 0.4, 1600], [1.5, 0.26, 1300], [2.15, 0.15, 1100]]) {
+      for (const [t0, a, hz] of [[0.3, 0.75, 4200], [0.55, 0.55, 3500], [0.98, 0.4, 2800], [1.5, 0.26, 2200], [2.15, 0.15, 1800]]) {
         const s0 = Math.floor((t0 + ch * 0.013 + (Math.random() - 0.5) * 0.01) * sr);
         const burst = new Float32Array(Math.floor(sr * 0.06));
         for (let k = 0; k < burst.length; k++) burst[k] = (Math.random() * 2 - 1) * Math.exp(-k / (sr * 0.006));
@@ -268,13 +268,9 @@ export class AudioSystem {
     if (this.onShotHeard) this.onShotHeard(d);
     this._log(own ? 'shot (yours)' : 'shot', d);
     const t = ctx.currentTime + d / CONFIG.reveal.soundSpeed;
-    // v5.2: a shot close by compresses your ears for a moment (after the first crack has gone
-    // through: muffling the onset would take the crack out) and the forest goes quiet under it
-    if (d < 40) {
-      const k = own ? 1 : 1 - d / 40;
-      this._muffle(lerpN(this.openHz, 2500, k * 0.9), t + 0.035, 0.05, 0.3);
-      this._duckAmbience(1 - 0.6 * k, t, 0.9);
-    }
+    // v5.2: the forest goes quiet under a shot close by. (Your ears are no longer muffled after
+    // it: that cut the hiss right after the crack, and the shot sounded dull.)
+    if (d < 40) this._duckAmbience(1 - 0.6 * (own ? 1 : 1 - d / 40), t, 0.9);
     const out = ctx.createGain();
     out.gain.value = own ? 0.9 : Math.min(1, 55 / (d + 25));
     if (own) out.connect(this.master);

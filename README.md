@@ -527,4 +527,5 @@ are in [CREDITS.md](CREDITS.md).
 - **Settings.** Try each Quality preset; tell me which one runs smoothly on your PC.
 - **Lobby.** Esc → LOBBY, pick another mode, play. Finish a match → LOBBY. In a LAN game the
   host's LOBBY takes everyone back; START MATCH brings them all in again.
-- **Gunshot.** Fire: one hard, short bang and then the valley answering, no long roar.
+- **Gunshot.** Fire: a shrill whip crack with a short hiss ("gu-DISHHH"), then the valley
+  answering; no long roar, no dull thud. Tell me in words what is still off.
