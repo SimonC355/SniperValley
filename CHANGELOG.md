@@ -13,7 +13,8 @@ Each version's section becomes the notes of its release on GitHub (see
   after it and a small low thump under it, then the valley's echoes, instead of a long, rolling
   boom (and not the dull "parlour rifle" of the first try). Your ears no longer go muffled after
   your own shot, which cut the hiss. The echo is cleaner too: distinct echoes off the slopes
-  instead of white noise.
+  instead of white noise. Other players' shots keep the same crack and hiss at a distance: they
+  are no longer played slower (a dull thud far away) or drowned in echo.
 - **No more glittering specks.** The needles drifting down and the dust motes that lit up toward
   the sun are off. GRAPHICS → Drifting needles & dust turns them back on.
 - **The small details of being a sniper.** Still a sniper-only game; these are the touches

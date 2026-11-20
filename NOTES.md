@@ -1119,3 +1119,17 @@ hideous, can it sound more like a smeld (a sharp bang)?".
 
   RMS in the first 100 ms is −13 dB (the short one −11), but the energy sits where the ear is
   most sensitive (2-5 kHz), so it should sound louder, not quieter.
+- **"Your own shot is perfect, the others' are a bit worse."** Others' shots were played slower
+  with distance (1/(1 + d/1200): 20% lower at 300 m, a dull thud), filtered hard by the air
+  (down to 2.4 kHz), drowned in echo (send up to 1.4) and dulled by the HRTF panner, which took
+  about half of the crack's highs (measured against an equal-power panner: 31% vs 56% of the
+  crack above 2 kHz at 60 m). Now: no slow-down, the air low-pass is 20 kHz / (1 + d/400) and
+  never below 4.5 kHz, the echo send is 0.35 + d/600 (at most 0.9), level 65 / (d + 35), and a
+  +6 dB shelf above 2.2 kHz makes up for the HRTF, which stays (it tells front from behind).
+
+  | Others' shot | crack above 2 kHz (before → now) | hiss above 2 kHz | echo vs. shot |
+  |---|---|---|---|
+  | 60 m | 31% → 58% | 62% → 84% | −16 → −16 dB |
+  | 150 m | 31% → 54% | 43% → 89% | −13 → −17 dB |
+  | 300 m | 53% → 56% | 41% → 84% | −9 → −16 dB |
+  | 600 m | 36% → 76% | 52% → 73% | −10 → −13 dB |

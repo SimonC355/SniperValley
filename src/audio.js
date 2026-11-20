@@ -271,24 +271,37 @@ export class AudioSystem {
     // v5.2: the forest goes quiet under a shot close by. (Your ears are no longer muffled after
     // it: that cut the hiss right after the crack, and the shot sounded dull.)
     if (d < 40) this._duckAmbience(1 - 0.6 * (own ? 1 : 1 - d / 40), t, 0.9);
+    // v5.2, "your own shot is perfect, the others' are a bit worse": others' shots kept the
+    // whip-crack's character only up close. Now they are not played slower with distance (that
+    // pitched them down, a dull thud at 300 m), the air takes the highs off more gently, the echo
+    // no longer swamps them, and a treble shelf makes up for the HRTF panner (the 3D direction
+    // filter, kept: it tells front from behind), which took about half the crack's highs.
     const out = ctx.createGain();
-    out.gain.value = own ? 0.9 : Math.min(1, 55 / (d + 25));
+    out.gain.value = own ? 0.9 : Math.min(1, 65 / (d + 35));
     if (own) out.connect(this.master);
     else out.connect(this._panner(pos)).connect(this.master);
     // send to the valley echo (relatively stronger for distant shots)
     const send = ctx.createGain();
-    send.gain.value = own ? 0.4 : Math.min(1.4, 0.4 + d / 300);
+    send.gain.value = own ? 0.4 : Math.min(0.9, 0.35 + d / 600);
     out.connect(send).connect(this.echo);
     const air = ctx.createBiquadFilter();
     air.type = 'lowpass';
     air.Q.value = 0.5;
-    air.frequency.value = own ? 20000 : Math.max(2400, 18000 / (1 + d / 250));
+    air.frequency.value = own ? 20000 : Math.max(4500, 20000 / (1 + d / 400));
+    let into = air;
+    if (!own) {
+      const shelf = ctx.createBiquadFilter();
+      shelf.type = 'highshelf';
+      shelf.frequency.value = 2200;
+      shelf.gain.value = 6;
+      shelf.connect(air);
+      into = shelf;
+    }
     air.connect(out);
-    if (this._sample(own || d < 60 ? 'shot' : 'shot_far', air, t, 1) || this._sample('shot', air, t, 1)) return;
+    if (this._sample(own || d < 60 ? 'shot' : 'shot_far', into, t, 1) || this._sample('shot', into, t, 1)) return;
     const src = ctx.createBufferSource();
     src.buffer = this.blasts[Math.floor(Math.random() * this.blasts.length)];
-    src.playbackRate.value = own ? 1 : 1 / (1 + d / 1200);
-    src.connect(air);
+    src.connect(into);
     src.start(t);
   }
 
