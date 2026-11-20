@@ -58,6 +58,20 @@ function roleOf(kind, size) {
   return flat < 0.2 ? 'patch' : 'prop';
 }
 
+// Mean brightness (linear luminance) of a model's base colour texture. Megascans are calibrated
+// dark (mossy rock about 0.02-0.06) next to the game's own textures (rock 0.23, bark 0.13), so
+// the game lifts them to match the scene (megascans.js).
+async function albedoOf(doc) {
+  const mat = doc.getRoot().listMaterials()[0];
+  const tex = mat && mat.getBaseColorTexture();
+  if (!tex) return null;
+  const { data, info } = await sharp(Buffer.from(tex.getImage())).resize(64, 64).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  let sum = 0;
+  for (let i = 0; i < data.length; i += info.channels) sum += 0.2126 * lin(data[i]) + 0.7152 * lin(data[i + 1]) + 0.0722 * lin(data[i + 2]);
+  return +(sum / (data.length / info.channels)).toFixed(4);
+}
+
 function triangles(doc) {
   let t = 0;
   for (const m of doc.getRoot().listMeshes()) for (const p of m.listPrimitives()) {
@@ -114,8 +128,9 @@ async function main() {
     await io.write(path.join(OUT, `${base}-far.glb`), b.doc);
     const kb = (f) => Math.round(fs.statSync(path.join(OUT, f)).size / 1024);
     const role = roleOf(kind, size);
-    manifest.push({ name: base, kind, role, file: `${base}.glb`, far: `${base}-far.glb`, tris: a.after, farTris: b.after, size });
-    console.log(`${role.padEnd(12)} ${base.padEnd(58)} ${a.before} → ${a.after} / ${b.after} triangles · ${kb(`${base}.glb`)} + ${kb(`${base}-far.glb`)} KB · ${size.join(' × ')} m`);
+    const albedo = await albedoOf(a.doc);
+    manifest.push({ name: base, kind, role, file: `${base}.glb`, far: `${base}-far.glb`, tris: a.after, farTris: b.after, size, albedo });
+    console.log(`${role.padEnd(12)} ${base.padEnd(58)} ${a.before} → ${a.after} / ${b.after} triangles · ${kb(`${base}.glb`)} + ${kb(`${base}-far.glb`)} KB · ${size.join(' × ')} m · albedo ${albedo}`);
   }
   fs.writeFileSync(path.join(OUT, 'megascans.json'), JSON.stringify({ models: manifest }, null, 1));
   console.log(`\n${manifest.length} models → ${OUT} (git-ignored; never commit Fab files)`);

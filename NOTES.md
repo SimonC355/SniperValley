@@ -1183,6 +1183,13 @@ one of the maps with them and see if we get closer to something 2026 than 2016 a
   of view are not drawn (the generated rocks were all drawn, all the time). Valley, measured
   (triangles drawn in a frame, shadow pass included): close views 3.7-3.9 M before, 1.6-1.7 M
   now; through the scope at 6× and 12× 4.1 / 4.0 M before, 1.8 / 1.6 M now.
+- **Brightness**: "why are the pictures so dark?" Megascans are calibrated much darker than the
+  game's own textures (mean linear albedo: mossy rocks 0.024-0.055 and the uprooted tree 0.042,
+  against the game's rock 0.23, barks 0.13-0.14, forest floor 0.09), so they stood out as black
+  lumps. `npm run megascans` now measures each model's albedo (`megascans.json`), and the game
+  lifts it to a target per role (rocks 0.14-0.15, wood 0.11-0.12, patches 0.085), never darker
+  and at most 4×. The rest of the darkness in those pictures was the scene: the low afternoon sun
+  (13°), the shade under the trees, and some shots taken against the sun.
 - Not done yet: the other maps, the trees themselves (the biggest step toward a 2026 look; the
   European Beech pack waits for its Unreal export), Megascans ground surfaces for the terrain, and
   grass. The patches' ground colour does not always match the terrain under them.
