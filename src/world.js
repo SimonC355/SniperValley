@@ -1,15 +1,20 @@
 // Analytic spatial queries: raycasts against terrain (ray-marched heightfield), tree trunks,
-// tree crown cores, rocks, fallen logs, stumps and (optionally) bushes. Used for bullets,
-// line of sight, glint/flash visibility and movement collision. No physics engine.
+// tree crown cores, rocks (their drawn top surface), buildings and walls (convex solids),
+// fallen logs, stumps and (optionally) bushes. Used for bullets, line of sight, glint/flash
+// visibility and movement collision. No physics engine.
+//
+// groundAt() is the height you stand on: the terrain, or the top of a rock, a wall or a
+// building. The player walks up small steps and climbs higher ones (player.js).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { rayCapsule } from './hitbox.js';
-import { trunkProfile } from './trees.js';
+import { trunkProfile, ROUND_CROWN } from './trees.js';
+import { rockTopAt } from './rocks.js';
 
 const CELL = 8;
 
 export class World {
-  constructor(terrain, forest, rocks, undergrowth, debris) {
+  constructor(terrain, forest, rocks, undergrowth, debris, solids = []) {
     this.terrain = terrain;
     const M = CONFIG.map;
     this.minX = -M.length / 2 - 60;
@@ -27,12 +32,15 @@ export class World {
       for (const q of trunk) br = Math.max(br, Math.hypot(q.x - t.x, q.z - t.z) + q.r);
       this._add({
         kind: 'tree', x: t.x, z: t.z, y0: t.y, top: t.y + t.height, r: t.trunkR, trunk, br,
-        cb: t.crownBase, ct: t.crownTop, cr: t.coreR, round: t.variant === 'pine', tree: t,
+        cb: t.crownBase, ct: t.crownTop, cr: t.coreR, round: ROUND_CROWN(t.variant), tree: t,
       }, Math.max(br, t.coreR));
     }
     for (const r of rocks.items) {
-      this._add({ kind: 'rock', x: r.x, z: r.z, y: r.y + r.s * 0.12, r: r.s * 0.78 }, r.s * 0.8);
+      // R: footprint radius of the drawn rock (its height map); r: the circle the AI walks around
+      this._add({ kind: 'rock', x: r.x, z: r.z, y: r.y + r.s * 0.12, r: r.s * 0.78, R: r.R, y0: r.y - r.s, top: r.maxY, item: r }, r.R);
     }
+    // buildings, ruined walls: convex solids (see buildings.js)
+    for (const so of solids) this._add(so, so.R);
     if (debris) {
       for (const l of debris.logs) {
         const mx = (l.a.x + l.b.x) / 2, mz = (l.a.z + l.b.z) / 2;
@@ -125,6 +133,24 @@ export class World {
     return [-b - s, -b + s];
   }
 
+  // Ray against a convex solid (a building, a wall): planes in its local frame (rotated by
+  // c.cos/c.sin about Y around (c.x, c.z)), each [nx, ny, nz, w] with inside = n·p <= w.
+  static _convex(o, d, c) {
+    const ox = o.x - c.x, oz = o.z - c.z;
+    const lx = ox * c.cos + oz * c.sin, lz = -ox * c.sin + oz * c.cos;
+    const dx = d.x * c.cos + d.z * c.sin, dz = -d.x * c.sin + d.z * c.cos;
+    let t0 = 0, t1 = Infinity;
+    for (const [nx, ny, nz, w] of c.planes) {
+      const den = nx * dx + ny * d.y + nz * dz;
+      const dist = w - (nx * lx + ny * o.y + nz * lz);
+      if (Math.abs(den) < 1e-9) { if (dist < 0) return Infinity; continue; }
+      const t = dist / den;
+      if (den < 0) { if (t > t0) t0 = t; } else if (t < t1) t1 = t;
+      if (t0 > t1) return Infinity;
+    }
+    return t0;
+  }
+
   _testCollider(c, o, d, maxDist, opts) {
     if (c.kind === 'tree') {
       let best = Infinity;
@@ -158,9 +184,28 @@ export class World {
       return best;
     }
     if (c.kind === 'rock') {
-      const h = World._sphere(o, d, c.x, c.y, c.z, c.r);
-      if (h && h[1] > 0 && h[0] < maxDist) return Math.max(0, h[0]);
+      // the drawn top surface: march the chord through the rock's footprint
+      const h = World._cyl(o, d, c.x, c.z, c.R, c.y0, c.top);
+      if (!h || h[1] < 0 || h[0] > maxDist) return Infinity;
+      const ta = Math.max(0, h[0]), tb = Math.min(h[1], maxDist);
+      const step = 0.1;
+      for (let t = ta; t <= tb + 1e-6; t += step) {
+        const y = o.y + d.y * t;
+        if (y < rockTopAt(c.item, o.x + d.x * t, o.z + d.z * t)) {
+          // refine between the last free sample and this one
+          let a = Math.max(ta, t - step), b = t;
+          for (let k = 0; k < 5; k++) {
+            const m = (a + b) * 0.5;
+            if (o.y + d.y * m < rockTopAt(c.item, o.x + d.x * m, o.z + d.z * m)) b = m; else a = m;
+          }
+          return b;
+        }
+      }
       return Infinity;
+    }
+    if (c.kind === 'solid') {
+      const t = World._convex(o, d, c);
+      return t < maxDist ? t : Infinity;
     }
     if (c.kind === 'log') {
       const t = rayCapsule(o, d, c.a, c.b, c.r);
@@ -247,8 +292,9 @@ export class World {
     return 1;
   }
 
-  // Push a circle (x,z) out of trunks and rocks. Returns adjusted {x,z}.
-  collideCircle(pos, radius, footY) {
+  // Push a circle (x,z) out of trunks, stumps, logs, rocks and buildings. Returns adjusted {x,z}.
+  // climber: the player, who walks onto and climbs rocks, walls and buildings (groundAt) instead.
+  collideCircle(pos, radius, footY, climber = false) {
     const i0 = Math.floor((pos.x - radius - this.minX) / CELL), i1 = Math.floor((pos.x + radius - this.minX) / CELL);
     const j0 = Math.floor((pos.z - radius - this.minZ) / CELL), j1 = Math.floor((pos.z + radius - this.minZ) / CELL);
     for (let j = Math.max(0, j0); j <= Math.min(this.nz - 1, j1); j++) {
@@ -263,8 +309,11 @@ export class World {
           }
           if (c.kind === 'tree' || c.kind === 'stump') r = c.r + radius;
           else if (c.kind === 'rock') {
-            if (footY !== undefined && footY > c.y + c.r * 0.6) continue;
+            if (climber || (footY !== undefined && footY > c.y + c.r * 0.6)) continue;
             r = c.r * 0.9 + radius;
+          } else if (c.kind === 'solid') {
+            if (!climber) this._pushFromBox(pos, c, radius);
+            continue;
           } else continue;
           const dx = pos.x - c.x, dz = pos.z - c.z;
           const d2 = dx * dx + dz * dz;
@@ -277,6 +326,64 @@ export class World {
       }
     }
     return pos;
+  }
+
+  // push a circle out of a solid's footprint (a rotated rectangle)
+  _pushFromBox(pos, c, r) {
+    const ox = pos.x - c.x, oz = pos.z - c.z;
+    const lx = ox * c.cos + oz * c.sin, lz = -ox * c.sin + oz * c.cos;
+    const cx = Math.max(-c.hx, Math.min(c.hx, lx)), cz = Math.max(-c.hz, Math.min(c.hz, lz));
+    let dx = lx - cx, dz = lz - cz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r * r) return;
+    let nx, nz;
+    if (d2 > 1e-8) { const d = Math.sqrt(d2); nx = lx + (dx / d) * (r - d); nz = lz + (dz / d) * (r - d); } else {
+      // centre inside: out through the nearest side
+      const px = c.hx - Math.abs(lx), pz = c.hz - Math.abs(lz);
+      if (px < pz) { nx = Math.sign(lx || 1) * (c.hx + r); nz = lz; } else { nx = lx; nz = Math.sign(lz || 1) * (c.hz + r); }
+    }
+    pos.x = c.x + nx * c.cos - nz * c.sin;
+    pos.z = c.z + nx * c.sin + nz * c.cos;
+  }
+
+  // Highest rock, wall or building top at (x, z) (not the terrain), or -Infinity.
+  obstacleAt(x, z) {
+    let g = -Infinity;
+    const i = Math.floor((x - this.minX) / CELL), j = Math.floor((z - this.minZ) / CELL);
+    if (i < 0 || j < 0 || i >= this.nx || j >= this.nz) return g;
+    const list = this.cells[j * this.nx + i];
+    for (let k = 0; k < list.length; k++) {
+      const c = this.colliders[list[k]];
+      if (c.kind === 'rock') {
+        if (c.top <= g) continue;
+        const h = rockTopAt(c.item, x, z);
+        if (h > g) g = h;
+      } else if (c.kind === 'solid') {
+        const h = c.topAt(x, z);
+        if (h > g) g = h;
+      }
+    }
+    return g;
+  }
+
+  // Height you stand on at (x, z): the terrain, or the top of a rock, wall or building.
+  groundAt(x, z) {
+    let g = this.terrain.heightAt(x, z);
+    const i = Math.floor((x - this.minX) / CELL), j = Math.floor((z - this.minZ) / CELL);
+    if (i < 0 || j < 0 || i >= this.nx || j >= this.nz) return g;
+    const list = this.cells[j * this.nx + i];
+    for (let k = 0; k < list.length; k++) {
+      const c = this.colliders[list[k]];
+      if (c.kind === 'rock') {
+        if (c.top <= g) continue;
+        const h = rockTopAt(c.item, x, z);
+        if (h > g) g = h;
+      } else if (c.kind === 'solid') {
+        const h = c.topAt(x, z);
+        if (h > g) g = h;
+      }
+    }
+    return g;
   }
 
   // closest point on a log's axis in 2D; returns squared distance and sets _cq
@@ -314,6 +421,12 @@ export class World {
           if (kinds && !kinds.includes(c.kind)) continue;
           if (c.kind === 'log') {
             if (this._logClosest(x, z, c) < (radius + c.r) ** 2) out.push(c);
+          } else if (c.kind === 'solid') {
+            const ox = x - c.x, oz = z - c.z;
+            const lx = Math.abs(ox * c.cos + oz * c.sin) - c.hx, lz = Math.abs(-ox * c.sin + oz * c.cos) - c.hz;
+            if (Math.max(lx, 0) ** 2 + Math.max(lz, 0) ** 2 < radius * radius) out.push(c);
+          } else if (c.kind === 'rock') {
+            if ((c.x - x) ** 2 + (c.z - z) ** 2 < (radius + c.R * 0.6) ** 2) out.push(c);
           } else if ((c.x - x) ** 2 + (c.z - z) ** 2 < radius * radius) out.push(c);
         }
       }

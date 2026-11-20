@@ -298,6 +298,11 @@ uniform float uOutside;
 uniform float uFade;
 uniform vec2 uReticleOffset;
 uniform vec3 uGrade; // saturation, contrast, warmth
+uniform float uSharpen;
+uniform float uSuppress;  // v5.2: under fire 0..1 (colour drains, the edges darken and blur)
+uniform float uKick;      // v5.2: own shot, the picture jumps (vertical blur) 0..1
+uniform vec3 uEye;        // v5.2: scope eye box: offset (lens units) and the tunnel as the rifle comes up
+uniform vec2 uMirage;     // v5.2: heat shimmer strength, crosswind (m/s)
 varying vec2 vUv;
 
 vec3 RRTAndODTFit(vec3 v) {
@@ -325,10 +330,19 @@ void main() {
   float r = length(c);
   const float lensR = 0.47;
   vec3 col;
+  vec2 suv = uv;   // where the picture is read (the lens bends it)
   if (uScope > 0.001) {
     float rn = clamp(r / lensR, 0.0, 1.2);
     vec2 cd = c * (1.0 + 0.085 * rn * rn * uScope);
+    // heat mirage: fine wavy bands that boil upward and drift with the crosswind
+    if (uMirage.x > 0.001) {
+      float tm = uTime;
+      float a = sin(cd.y * 380.0 - tm * 5.0 + sin(cd.x * 55.0 - uMirage.y * tm * 1.6) * 1.8);
+      float b = sin(cd.y * 230.0 + cd.x * 28.0 - tm * 3.7 - uMirage.y * cd.x * 4.0);
+      cd += vec2(a * 0.6 + b * 0.4, a * b * 0.8) * uMirage.x * 0.0028;
+    }
     vec2 duv = cd / vec2(uAspect, 1.0) + 0.5;
+    suv = duv;
     vec2 dir = c / max(r, 1e-4);
     float ca = 0.004 * rn * rn * uScope;
     vec2 cao = dir * ca / vec2(uAspect, 1.0);
@@ -337,6 +351,29 @@ void main() {
     col.b = texture2D(tDiffuse, duv - cao).b;
   } else {
     col = texture2D(tDiffuse, uv).rgb;
+    // v5: light sharpening (an unsharp mask limited to a share of the pixel's own brightness,
+    // so edges get crisper without halos)
+    if (uSharpen > 0.001) {
+      vec2 px = 1.0 / uRes;
+      vec3 nb = texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb
+              + texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb + texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb;
+      vec3 detail = col - nb * 0.25;
+      col = max(col + clamp(detail, -0.3 * col, 0.3 * col) * uSharpen, 0.0);
+    }
+  }
+  // v5.2: blur. The own shot smears the picture vertically for a moment; under fire the edges
+  // of the view go soft.
+  float sEdge = smoothstep(0.18, 0.75, length((vUv - 0.5) * vec2(uAspect * 0.75, 1.0)));
+  float sb = uSuppress * sEdge * 4.0;
+  if (uKick > 0.01 || sb > 0.05) {
+    vec2 px = 1.0 / uRes;
+    vec2 kv = vec2(0.0, uKick * 7.0) * px;
+    vec2 sv = vec2(sb) * px;
+    vec3 acc = texture2D(tDiffuse, suv + kv).rgb + texture2D(tDiffuse, suv - kv).rgb
+             + texture2D(tDiffuse, suv + kv * 2.0).rgb + texture2D(tDiffuse, suv - kv * 2.0).rgb
+             + texture2D(tDiffuse, suv + vec2(sv.x, 0.0)).rgb + texture2D(tDiffuse, suv - vec2(sv.x, 0.0)).rgb
+             + texture2D(tDiffuse, suv + vec2(0.0, sv.y)).rgb + texture2D(tDiffuse, suv - vec2(0.0, sv.y)).rgb;
+    col = mix(col, acc * 0.125, clamp(max(uKick * 1.2, sb * 0.5), 0.0, 0.85));
   }
   col *= uExposure;
   // grading in linear HDR: log-space contrast around mid grey, saturation, split toning
@@ -360,6 +397,11 @@ void main() {
     float mask = smoothstep(lensR + px * 1.5, lensR - px * 1.5, r);
     float rim = smoothstep(lensR - px * 10.0, lensR, r) * mask;
     col = mix(col, col * 0.25 + vec3(0.02), rim * uScope);
+    // v5.2: the eye box. With the eye off the scope's axis (a fast swing, walking, the recoil)
+    // a dark crescent closes in from one side; as the rifle comes up the picture opens from a tunnel.
+    float er = lensR * 1.12 * (1.0 - 0.6 * uEye.z);
+    float eyeShade = smoothstep(er, er * mix(0.9, 0.7, uEye.z), length(c - uEye.xy));
+    col *= mix(1.0, mix(0.02, 1.0, eyeShade), uScope);
     // reticle (slightly offset by sway lag)
     vec2 q = c - uReticleOffset;
     float lw = px * 0.9;
@@ -378,6 +420,13 @@ void main() {
     float ret = clamp(max(max(h, v), max(max(hp, vp), dots)), 0.0, 1.0) * step(r, lensR);
     col = mix(col, vec3(0.01), ret * 0.92 * uScope);
     col *= mix(1.0, mask, uScope);
+  }
+
+  // v5.2: suppressed: the colour drains and the view narrows
+  if (uSuppress > 0.001) {
+    float lumS = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(col, vec3(lumS), uSuppress * 0.55);
+    col *= 1.0 - uSuppress * sEdge * 0.6;
   }
 
   // damage / outside zone tint
@@ -436,6 +485,11 @@ export class PostFX {
         uFade: { value: 0 },
         uReticleOffset: { value: new THREE.Vector2() },
         uGrade: { value: new THREE.Vector3(CONFIG.grade.saturation, CONFIG.grade.contrast, CONFIG.grade.warmth) },
+        uSharpen: { value: CONFIG.render.sharpen ?? 0.6 },
+        uSuppress: { value: 0 },
+        uKick: { value: 0 },
+        uEye: { value: new THREE.Vector3() },
+        uMirage: { value: new THREE.Vector2() },
       },
     }));
     this.composer.addPass(this.final);

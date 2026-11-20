@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { SHARED, GUST_GLSL } from './shaders.js';
 
-function buildClump(blades = 4, segs = 2) {
+function buildClump(blades = 5, segs = 2) {
   const pos = [], uv = [], nrm = [], idx = [], bl = [];
   let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -18,7 +18,7 @@ function buildClump(blades = 4, segs = 2) {
     const hMul = 0.7 + rnd() * 0.45;
     for (let r = 0; r <= segs; r++) {
       const t = r / segs;
-      const w = 0.016 * (1 - t) + 0.002;
+      const w = 0.02 * (1 - t * 0.92) + 0.0015;
       const lean = t * t * 0.18;
       for (const s of [-1, 1]) {
         pos.push(ox + dx * w * s + leanX * lean, t * hMul, oz + dz * w * s + leanZ * lean);
@@ -145,7 +145,9 @@ vec4 mac = texture(tMacro, vBaseXZ / 47.0);
 gcol *= 0.82 + 0.36 * mac.r;
 float lum = dot(gcol, vec3(0.3, 0.6, 0.1));
 gcol = mix(vec3(lum), gcol, 1.25);
-diffuseColor.rgb = gcol * mix(0.55, 1.2, vT) * (0.85 + 0.3 * vShade);`)
+// v5: darker roots, brighter tips that dry out a little, more variety between blades
+vec3 tipCol = mix(gcol, vec3(lum) * vec3(1.25, 1.15, 0.7), 0.35);
+diffuseColor.rgb = mix(gcol, tipCol, smoothstep(0.55, 1.0, vT) * vShade) * mix(0.42, 1.25, vT) * (0.8 + 0.4 * vShade);`)
         .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
     };
     this.material = mat;

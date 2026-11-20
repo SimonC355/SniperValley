@@ -1,6 +1,7 @@
 // Terrain: analytic V-valley heightfield, baked height grid for fast queries,
 // warped-grid mesh and a splatting material (grass / forest floor / rock / mud),
-// plus the shrinking-zone line overlay.
+// plus the shrinking-zone line overlay. Since v5.1 every map ends in a ring of steep mountains
+// right at the edge of the play area (see _rim), so nothing but mountain and sky shows beyond.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { Simplex, clamp, lerp, smoothstep } from './noise.js';
@@ -27,6 +28,11 @@ export class Terrain {
     const M = CONFIG.map;
     this.halfX = M.length / 2;
     this.halfZ = M.width / 2;
+    // the mountain ring: crest height above the ground at the edge, horizontal distance from
+    // the edge to the crest, and the lowest base it rises from (so the valley ends, where the
+    // river runs out, get as high a wall as the ridges)
+    const H = M.rimHeight ?? clamp(0.21 * M.width, 30, 70);
+    this.rim = { H, L: H * 0.6, floor: 0.8 * Math.max(M.ridgeHeightNorth, M.ridgeHeightSouth) };
     // baked grid covers the play area plus margin at 1 m resolution
     this.gMinX = -this.halfX - 80;
     this.gMinZ = -this.halfZ - 70;
@@ -40,6 +46,46 @@ export class Terrain {
       }
     }
     this.splatData = new Uint8Array(this.gW * this.gH * 4);
+    // areas kept clear of trees, rocks, bushes and debris (buildings; see reserve())
+    this.reserved = [];
+  }
+
+  // Keep a circle clear of trees, rocks, bushes and debris (buildings call this).
+  reserve(x, z, r) { this.reserved.push({ x, z, r }); }
+
+  // Is (x, z) free of buildings (with margin) and inside the play area, away from its edge?
+  isFree(x, z, margin = 0) {
+    for (const c of this.reserved) {
+      const rr = c.r + margin;
+      if ((x - c.x) ** 2 + (z - c.z) ** 2 < rr * rr) return false;
+    }
+    // nothing on the mountains, and a clear strip at their foot so the edge reads from afar
+    return this.edgeDist(x, z) < -(2.5 + margin);
+  }
+
+  // Signed distance (m) to the edge of the play area: negative inside, positive outside.
+  edgeDist(x, z) {
+    const ex = Math.abs(x) - this.halfX, ez = Math.abs(z) - this.halfZ;
+    return Math.hypot(Math.max(ex, 0), Math.max(ez, 0)) + Math.min(Math.max(ex, ez), 0);
+  }
+
+  // The mountains around the play area: from the edge the ground rises as a steep rock wall
+  // (steepest at the foot, rounding off at a jagged crest well above anything inside), then
+  // keeps climbing slowly behind it. h: the valley's own height here.
+  _rim(x, z, h) {
+    const o = this.edgeDist(x, z);
+    if (o <= 0) return h;
+    const R = this.rim, n = this.noise2;
+    const u = Math.min(1, o / R.L);
+    const f = 1 - Math.pow(1 - u, 2.5);
+    // peaks and saddles along the crest
+    const peak = clamp(0.8 + 0.45 * n.fbm2(x * 0.011 + 3.1, z * 0.011 - 7.7, 3), 0.55, 1.3);
+    const top = Math.max(h, R.floor) + R.H * peak;
+    let hr = lerp(h, top, f);
+    // rock buttresses and gullies on the face, a mountain mass behind the crest
+    hr += n.fbm2(x * 0.07, z * 0.07, 3) * 3.2 * Math.sin(Math.PI * Math.min(1, u * 1.2));
+    hr += Math.max(0, o - R.L) * 0.3 + n.fbm2(x * 0.018, z * 0.018, 3) * 10 * smoothstep(R.L * 0.6, R.L * 2, o);
+    return Math.max(h, hr);
   }
 
   riverCenter(x) {
@@ -59,6 +105,8 @@ export class Terrain {
     else if (ad < M.riverShelfStart) h = lerp(-D, -0.75, smoothstep(M.riverDeepHalfWidth, M.riverShelfStart, ad));
     else if (ad < M.riverShelfEnd) h = lerp(-0.75, 0.05, (ad - M.riverShelfStart) / (M.riverShelfEnd - M.riverShelfStart));
     else h = lerp(0.05, M.bankTop, smoothstep(M.riverShelfEnd, M.riverShelfEnd + 7, ad));
+    // lowland rivers cut a clear bank into the flat ground
+    if (M.terrain === 'lowland' && ad >= M.riverShelfEnd) h += 1.6 * smoothstep(M.riverShelfEnd + 1, M.riverShelfEnd + 5, ad);
 
     // optional fords: shallow crossings
     for (const fx of M.fords) {
@@ -90,11 +138,13 @@ export class Terrain {
     h += n.noise2(x * 0.17, z * 0.17) * 0.22 * smoothstep(0.0, 0.05, t);
     // distant mountains, at the same distance from the river on every map (on the smaller
     // maps a forested plateau lies between the ridge and the mountains)
+    // (lowland: low wooded hills instead of mountains; Tuscany: softer, rounder hills)
+    const [farA, farB] = M.farHills || [90, 70];
     const far = smoothstep(232.6, 521.2, ad);
-    if (far > 0) h += far * (90 + 70 * this.noise2.fbm2(x * 0.0022, z * 0.0022, 4));
+    if (far > 0) h += far * (farA + farB * this.noise2.fbm2(x * 0.0022, z * 0.0022, 4));
     const farX = smoothstep(CONFIG.map.length * 0.9, CONFIG.map.length * 1.7, Math.abs(x));
-    if (farX > 0) h += farX * 45 * (0.6 + 0.4 * n.noise2(z * 0.004, x * 0.002)) * smoothstep(0.2, 0.5, t + 0.15);
-    return h;
+    if (farX > 0) h += farX * 45 * (farA / 90) * (0.6 + 0.4 * n.noise2(z * 0.004, x * 0.002)) * smoothstep(0.2, 0.5, t + 0.15);
+    return this._rim(x, z, h);
   }
 
   inGrid(x, z) {
@@ -157,7 +207,8 @@ export class Terrain {
         const slope = 1 - nrm.y;
         const rock = smoothstep(0.16, 0.3, slope);
         const dry = smoothstep(0.1, 1.2, hgt);
-        const grass = clamp((1 - canopy * 1.25) * (1 - rock) * dry, 0, 1);
+        // (the beech forest floor is leaves, with grass only in the clearings)
+        const grass = clamp((1 - canopy * 1.25) * (1 - rock) * dry, 0, 1) * (CONFIG.map.biome === 'beech' ? 0.35 : 1);
         d[k] = clamp(canopy, 0, 1) * 255;
         d[k + 1] = grass * 255;
         d[k + 2] = rock * 255;
@@ -190,7 +241,8 @@ export class Terrain {
   buildMesh(textures, spacing = CONFIG.map.terrainSpacing, segOut = 64, material = null) {
     const M = CONFIG.map;
     const E = M.terrainExtent / 2;
-    const innerX = this.halfX + 90, innerZ = this.halfZ + 80;
+    // fine spacing over the play area and the mountains around it (the faces and the crest)
+    const innerX = this.halfX + Math.max(90, this.rim.L * 2 + 70), innerZ = this.halfZ + Math.max(80, this.rim.L * 2 + 60);
     const segInX = Math.round((innerX * 2) / spacing);
     const segInZ = Math.round((innerZ * 2) / spacing);
     const xs = this._axis(innerX, E, segInX, segOut);
@@ -320,6 +372,12 @@ vec2 uvG = wxz / uTile.x, uvF = wxz / uTile.y, uvR = wxz / uTile.z, uvM = wxz / 
 vec4 aG = sampleAT(tGrassA, uvG, macro2.g);
 vec4 aF = sampleAT(tForestA, uvF, macro2.g);
 vec4 aR = sampleAT(tRockA, uvR + vec2(vWPos.y * 0.1), macro2.g);
+// steep faces (the mountains around the map): rock projected on the face, not stretched down it
+{
+  vec2 fd = normalize(tN.xz + vec2(1e-4, 0.0));
+  vec2 uvW = vec2(dot(wxz, vec2(-fd.y, fd.x)), vWPos.y * 1.15) / uTile.z;
+  aR = mix(aR, sampleAT(tRockA, uvW, macro2.g), smoothstep(0.32, 0.55, slope));
+}
 vec4 aM = sampleAT(tMudA, uvM, macro2.g);
 // height-aware weights
 float sG = grassW * (1.0 - forestW) * (1.0 - rockW) * (1.0 - mudW);
@@ -335,6 +393,13 @@ vec3 albedo = aG.rgb * bw.x + aF.rgb * bw.y + aR.rgb * bw.z + aM.rgb * bw.w;
 // macro colour variation
 albedo *= 0.82 + 0.36 * macro2.r;
 albedo = mix(albedo, albedo * vec3(1.18, 1.08, 0.75), smoothstep(0.55, 0.8, macro.b) * bw.x * 0.7);
+// the mountains around the play area: darker, warmer rock with lighter and darker bands
+{
+  float e = max(abs(wxz.x) - ${(CONFIG.map.length / 2).toFixed(1)}, abs(wxz.y) - ${(CONFIG.map.width / 2).toFixed(1)});
+  float mtn = smoothstep(0.0, 12.0, e);
+  float strata = 0.9 + 0.08 * sin(vWPos.y * 0.45 + macro2.g * 9.0 + macro.r * 6.0) + (macro.g - 0.5) * 0.3;
+  albedo = mix(albedo, albedo * vec3(0.74, 0.7, 0.64) * strata, mtn * bw.z);
+}
 // wetness near the waterline
 float wet = 1.0 - smoothstep(-0.05, 0.75, vWPos.y);
 albedo *= mix(1.0, 0.55, wet);

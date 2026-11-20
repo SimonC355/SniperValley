@@ -11,11 +11,16 @@ import { ForestAmbience } from './forestsound.js';
 import { installWeather, updateWeather, sunlightAt, WEATHER } from './weather.js';
 import { createTextures } from './textures.js';
 import { loadPhotoTextures } from './assets.js';
+import { loadHFTextures } from './hftextures.js';
 import { Debris } from './debris.js';
 import { Terrain } from './terrain.js';
 import { SkySystem } from './sky.js';
 import { Forest, Undergrowth } from './trees.js';
 import { Rocks } from './rocks.js';
+import { Buildings } from './buildings.js';
+import { loadHouseModels, loadRockModels } from './models.js';
+import { loadMegascans } from './megascans.js';
+import { loadGhillieModel } from './ghilliemodel.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
 import { World } from './world.js';
@@ -50,6 +55,7 @@ const REVEAL_TEXT = {
 };
 import { Birds } from './birds.js';
 import { Zone } from './zone.js';
+import { Feel } from './feel.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 const _eye = new THREE.Vector3();
@@ -91,9 +97,13 @@ class Game {
 
     this.hud.setLoading('BAKING TEXTURES');
     await nextFrame();
-    this.textures = createTextures(renderer, CONFIG.seed);
+    this.textures = createTextures(renderer, CONFIG.seed, CONFIG.map.biome);
+    // v5: photoreal textures made with Higgsfield (ground, barks, foliage, ghillie strips)
+    this.hud.setLoading('LOADING TEXTURES');
+    this.hfSlots = await loadHFTextures(renderer, this.textures, CONFIG.map.biome);
     this.hud.setLoading('LOADING PHOTOSCANNED TEXTURES');
-    this.photoSlots = await loadPhotoTextures(renderer, this.textures);
+    // the beech and Tuscan maps keep their own ground (leaf litter, dry grass) and barks
+    this.photoSlots = await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
 
     this.hud.setLoading('SHAPING THE VALLEY');
     await nextFrame();
@@ -102,6 +112,30 @@ class Game {
     terrain.bakeSplat(() => 0);
     this.terrain = terrain;
     this.sky = new SkySystem(renderer, scene);
+    // the Tuscan hamlets (before the forest, which keeps clear of them)
+    this.hud.setLoading(CONFIG.map.biome === 'tuscany' ? 'BUILDING THE HAMLETS' : 'RAISING THE MOUNTAINS');
+    await nextFrame();
+    // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
+    // (and the leafy 3D ghillie suit, which every character clones)
+    const [houseModels, rockModels, megascans] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadMegascans(MAP_ID), loadGhillieModel()]);
+    // v5.2: Megascans rocks (your own Fab downloads) replace the generated boulders on this map
+    this.megascans = megascans;
+    let rocksIn = rockModels;
+    if (megascans && (megascans['rock-boulder'] || megascans['rock-slab'])) {
+      const used = new Set();
+      const pick = (list, i) => {
+        const m = list && list[i % list.length];
+        if (!m || used.has(m)) return null;
+        used.add(m);
+        const parts = m.near;
+        parts.far = m.far;
+        return parts;
+      };
+      const b = megascans['rock-boulder'], sl = megascans['rock-slab'];
+      rocksIn = { boulder: pick(b || sl, 0), slab: pick(sl || b, 0), block: pick(sl || b, 1) };
+      for (const k of Object.keys(rocksIn)) if (!rocksIn[k]) delete rocksIn[k];
+    }
+    this.buildings = new Buildings(scene, terrain, this.textures, CONFIG.seed, houseModels);
 
     this.hud.setLoading('GROWING THE FOREST');
     await nextFrame();
@@ -109,8 +143,8 @@ class Game {
     terrain.bakeSplat(this.forest.buildCanopyGrid());
     scene.add(terrain.buildMesh(this.textures));
     this.undergrowth = new Undergrowth(scene, terrain, this.forest, this.textures, CONFIG.seed);
-    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed);
-    this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed);
+    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed, rocksIn);
+    this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed, megascans);
     this.grass = new Grass(scene, terrain, this.textures);
     this.particles = new ForestParticles(scene, terrain);
 
@@ -122,8 +156,13 @@ class Game {
     const reflTerrain = terrain.buildReflectionMesh();
     scene.add(reflTerrain);
     this.water.showDuringReflection.push(reflTerrain);
-    for (const name in this.forest.buckets) this.water.hideDuringReflection.push(...this.forest.buckets[name].l0.meshes);
-    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris);
+    for (const name in this.forest.buckets) {
+      for (const m of this.forest.buckets[name].l0.meshes) if (!this.forest.reflectionProxies.includes(m)) this.water.hideDuringReflection.push(m);
+    }
+    this.water.showDuringReflection.push(...this.forest.reflectionProxies);
+    this.world = new World(terrain, this.forest, this.rocks, this.undergrowth, this.debris, this.buildings.solids);
+    // what feet and bodies rest on: the terrain, or the top of a rock, wall or building
+    this.ground = { heightAt: (x, z) => this.world.groundAt(x, z) };
     this.hud.setLoading('SCOUTING SNIPER POSITIONS');
     await nextFrame();
     this.spots = new SpotMap(this.world, terrain, CONFIG.seed);
@@ -143,6 +182,10 @@ class Game {
     this.audio.onShotHeard = (d) => this.forestSound.onShot(d);
     this.combat = new Combat({ world: this.world, terrain, effects: this.effects, audio: this.audio, bus: this.bus });
     this.combat.listener = this.player;
+    // v5.2: suppression, breathing, heartbeat, rifle foley, the scope's eye box and mirage
+    this.feel = new Feel(this);
+    this.combat.onNearMiss = (shooter, miss, pos, dir) => this.feel.nearMiss(miss, pos, dir);
+    this.combat.onNearImpact = (shooter, d) => this.feel.nearImpact(d);
     this.combat.onKill = (shooter, victim, dist, part, point) => {
       this.scoreKill(shooter, victim);
       this.onKill(shooter, victim, dist, part, point);
@@ -154,6 +197,21 @@ class Game {
     };
     this.combat.onClaim = (shooter, victim, part, point, dist) => { if (this.net) this.net.sendClaim(shooter, victim, part, point, dist); };
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
+    // Your own bullet trail starts where your rifle's muzzle is drawn (the viewmodel has its own
+    // camera), or under the reticle when scoped, so it reads as a line from the gun to the target
+    // instead of a dot under the crosshair.
+    this.effects.ownTrailStart = () => {
+      const cam = this.camera;
+      const ndc = new THREE.Vector3(0, -0.42, 0.5);
+      if (!this.player.scoped) {
+        this.viewmodel.flash.getWorldPosition(ndc);
+        ndc.project(this.vmCamera);
+        if (!Number.isFinite(ndc.x) || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) return null;
+      }
+      const dir = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(cam).sub(cam.position).normalize();
+      const fwd = cam.getWorldDirection(new THREE.Vector3());
+      return cam.position.clone().addScaledVector(dir, 1.6 / Math.max(0.2, dir.dot(fwd)));
+    };
     // the rifle is lit by its own light (dimmed in shade); world cloud shadows don't apply to it
     this.vmScene.traverse((o) => {
       for (const m of [].concat(o.material || [])) { m.defines = { ...(m.defines || {}), NO_CLOUD_SHADOW: '' }; m.needsUpdate = true; }
@@ -163,6 +221,21 @@ class Game {
       this.bus.emit({ type: 'footstep', position: pos.clone(), time: this.time, sourceTeam: this.player.team, sourceId: this.player.id, loudness: loud });
     };
     this.player.onBreath = (kind) => this.audio.breath(kind);
+    // v5: slides, climbing onto rocks and walls, and the river's current
+    this.player.onSlide = (kind) => {
+      if (kind !== 'start') return;
+      const p = this.player;
+      this.audio.slide(this.surfaceAt(p.pos.x, p.pos.z));
+      this.bus.emit({ type: 'footstep', position: p.pos.clone(), time: this.time, sourceTeam: p.team, sourceId: p.id, loudness: 0.9 });
+    };
+    this.player.onClimb = () => this.audio.climb();
+    this.player.onSwept = () => {
+      const p = this.player;
+      this.audio.plunge();
+      this.effects.impact(p.pos.clone().setY(CONFIG.map.waterLevel + 0.05), 'water');
+      this.bus.emit({ type: 'splash', position: p.pos.clone(), time: this.time, sourceTeam: p.team, sourceId: p.id, loudness: 1.5 });
+      if (p.alive) this.hud.centerMessage('THE CURRENT HAS YOU', 'THE RIVER IS TOO STRONG TO SWIM', 2);
+    };
     this.player.onSplash = (pos, loud) => {
       this.audio.splash(pos, loud, true);
       this.effects.impact(pos.clone().add(new THREE.Vector3(0, 0.05, 0)), 'water');
@@ -194,7 +267,7 @@ class Game {
     this.params = new URLSearchParams(location.search);
     this.noRender = this.params.has('norender');   // test hook: run the game loop without drawing
 
-    this.hud.bindSettings((kind) => this.onSettingsChanged(kind), this.input);
+    this.hud.bindSettings((kind, value) => this.onSettingsChanged(kind, value), this.input);
     this.bindUI();
     setupDesktop();
     this.setupLan();
@@ -214,6 +287,15 @@ class Game {
     } else if (this.params.has('autostart')) {
       this.state = 'playing';
       this.input.fallback = true;
+    } else if (this.takeAutostart()) {
+      // the page reloaded to load the map a game was started on: play at once (the mouse and
+      // the sound need a click: a reload is no user gesture)
+      this.newMatch();
+      this.state = 'playing';
+      this.hud.showStart(false);
+      this.hud.centerMessage('CLICK TO PLAY', MAPS[MAP_ID].name, 600);
+      const first = () => { this.audio.init(); this.hud.clearCenter(); window.removeEventListener('pointerdown', first); };
+      window.addEventListener('pointerdown', first);
     } else {
       this.hud.showStart(true);
     }
@@ -224,10 +306,18 @@ class Game {
     window.__weather = WEATHER;
     window.THREE = THREE;
     this.config = CONFIG;
-    console.log(`[SniperValley] trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}`);
+    console.log(`[SniperValley] ${MAP_ID}: trees: ${this.forest.trees.length} (play area ${this.forest.playCount}), bushes: ${this.undergrowth.items.length}, rocks: ${this.rocks.items.length}, logs: ${this.debris.logs.length}, stumps: ${this.debris.stumps.length}, buildings: ${this.buildings.items.length}`);
   }
 
   // Ground type under a point, for footstep sounds.
+  // where the player's empty case lands: on a rock or wall they stand on, in the water, or the ground
+  casingSurface() {
+    const p = this.player;
+    if (p.inWater > 0.05) return 'water';
+    if (p.pos.y > this.terrain.heightAt(p.pos.x, p.pos.z) + 0.3) return 'rock';
+    return this.surfaceAt(p.pos.x, p.pos.z);
+  }
+
   surfaceAt(x, z) {
     const T = this.terrain;
     if (T.heightAt(x, z) < 1.2) return 'mud';
@@ -275,12 +365,49 @@ class Game {
   }
 
   onSettingsChanged(kind, value) {
-    if (kind === 'map') { this.changeMap(value); return; }
-    if (['scale', 'refl'].includes(kind)) this.resize();
-    if (kind === 'shadow') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
+    if (kind === 'map') { this.selectMap(value); return; }
+    if (['scale', 'refl', 'preset'].includes(kind)) this.resize();
+    if (kind === 'shadow' || kind === 'preset') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
+    if (kind === 'preset' && value) this.hud.centerMessage('RELOAD TO APPLY', 'MSAA AND GRASS DENSITY', 2);
     if (['msaa', 'grass'].includes(kind)) this.hud.centerMessage('RELOAD TO APPLY', '', 2);
-    if (['vmaster', 'vfx', 'vamb', 'echo'].includes(kind)) this.audio.setVolumes();
+    if (['vmaster', 'vfx', 'vamb', 'echo', 'vbody'].includes(kind)) this.audio.setVolumes();
     if (kind === 'autores' && !CONFIG.render.autoResolution) { this.dynScale = 1; this.resize(); }
+  }
+
+  // v5.2: choosing a map in the menu only marks it; the map loads when a game starts
+  // (SINGLE PLAYER, RESTART / NEW MATCH, or the LAN host's START MATCH). It used to reload at once.
+  selectMap(id) {
+    if (!MAPS[id]) return;
+    if (this.net && !this.net.isHost) {
+      this.hud.centerMessage('THE HOST CHOOSES THE MAP', '', 2);
+      this.hud.selectedMap = MAP_ID;
+      this.hud.syncAll();
+      return;
+    }
+    this.pendingMap = id === MAP_ID ? null : id;
+    this.hud.selectedMap = id;
+    this.hud.syncAll();
+    this.renderPendingMap();
+  }
+
+  // the start button says which map it will load
+  renderPendingMap() {
+    const play = document.getElementById('btn-play');
+    play.textContent = this.pendingMap ? `PLAY ${MAPS[this.pendingMap].name}` : 'SINGLE PLAYER';
+    if (this.net && this.net.isHost) this.renderLobby();
+  }
+
+  // A game is starting with another map chosen: load it (the world is built once per page load)
+  // and start right away. Returns true when a reload is under way.
+  loadPendingMap() {
+    const id = this.pendingMap;
+    if (!id || id === MAP_ID) return false;
+    if (this.net) { this.changeMap(id); return true; }
+    try { sessionStorage.setItem('sniperyard.autostart', '1'); } catch { /* ignore */ }
+    saveMapChoice(id);
+    this.hud.setLoadingMap(id);
+    this.reloadPage(`LOADING ${MAPS[id].name}`);
+    return true;
   }
 
   // The world is built once per page load, so a new map saves the choice and reloads.
@@ -298,6 +425,7 @@ class Game {
       net.s.toAll({ k: 'mapchange', map: id });
       this.setAutoNet('host');
     }
+    this.hud.setLoadingMap(id);
     this.reloadPage(`LOADING ${MAPS[id].name}`);
   }
 
@@ -306,6 +434,7 @@ class Game {
     if (!MAPS[id] || this.reloading) return;
     saveMapChoice(id);
     this.setAutoNet('join');
+    this.hud.setLoadingMap(id);
     this.reloadPage(`LOADING ${MAPS[id].name}`);
   }
 
@@ -315,6 +444,14 @@ class Game {
     const tries = (this.autoNetTries || 0) + 1;
     const steam = role === 'join' && this.lanVia === 'steam' ? { via: 'steam', code: this.steamJoinCode } : {};
     try { sessionStorage.setItem('sniperyard.autonet', JSON.stringify({ role, name: $('lan-name').value, team: $('lan-team').value, ai: $('lan-ai').value, tries, ...steam })); } catch { /* ignore */ }
+  }
+
+  takeAutostart() {
+    try {
+      const on = sessionStorage.getItem('sniperyard.autostart') === '1';
+      sessionStorage.removeItem('sniperyard.autostart');
+      return on;
+    } catch { return false; }
   }
 
   reloadPage(text) {
@@ -328,6 +465,7 @@ class Game {
   bindUI() {
     const start = (fresh) => {
       this.audio.init();
+      if (fresh && this.loadPendingMap()) return;
       if (fresh) { this.newMatch(); this.state = 'playing'; }
       this.hud.showStart(false);
       this.hud.showPause(false);
@@ -339,6 +477,9 @@ class Game {
     document.getElementById('btn-resume').addEventListener('click', () => start(false));
     document.getElementById('btn-restart').addEventListener('click', () => start(true));
     document.getElementById('btn-again').addEventListener('click', () => start(true));
+    // v5.2: back to the start screen to choose another map, mode or game
+    document.getElementById('btn-lobby').addEventListener('click', () => this.backToLobby());
+    document.getElementById('btn-lobby2').addEventListener('click', () => this.backToLobby());
     this.input.onLockChange = (locked, failed) => {
       if (failed) {
         // pointer lock unavailable: play with arrow keys
@@ -418,6 +559,7 @@ class Game {
     this.combat.projectiles.length = 0;
     this.hud.clearKillFeed();
     this.hud.showEnd(false);
+    this.skulls = [];
     this.roundOver = false;
     this.roundFinished = false;
     this.nextRoundAt = null;
@@ -598,6 +740,7 @@ class Game {
     $('btn-mpstart').addEventListener('click', () => {
       if (!this.net || !this.net.isHost) return;
       this.audio.init();
+      if (this.loadPendingMap()) return;   // everyone loads the chosen map first
       this.net.teamOf.clear();
       this.newMatch();
       this.enterNetGame();
@@ -838,6 +981,7 @@ class Game {
     $('btn-play').disabled = joined;
     // joined players play the host's map
     for (const id of ['map-quick', 's0-map', 's1-map']) $(id).disabled = joined && !S.isHost;
+    this.hud.syncMapCards();
     const hostMap = MAPS[S.hostMap] ? MAPS[S.hostMap].name : '';
     const players = `${S.players.length} PLAYER${S.players.length === 1 ? '' : 'S'}`;
     const ips = (this.lanHostIps || []).slice(0, 3).join(' OR ');
@@ -850,6 +994,7 @@ class Game {
           : desktop ? 'CONNECTED · NOBODY IS HOSTING THERE YET · YOU JOIN WHEN THEY DO' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
           : S.isHost ? (desktop ? this.hostNote(players, ips) : `YOU HOST ${MAPS[MAP_ID].name} · ${players} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`)
             : (S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH') + ping);
+    if (joined && S.isHost && this.pendingMap) $('lan-note').textContent += ` · START MATCH LOADS ${MAPS[this.pendingMap].name} FOR EVERYONE`;
     this.updateMenuButtons();
   }
 
@@ -875,12 +1020,43 @@ class Game {
 
   updateMenuButtons() {
     const authority = !this.net || this.net.isHost;
-    document.getElementById('btn-restart').style.display = authority ? '' : 'none';
-    document.getElementById('btn-leavegame').style.display = this.net ? '' : 'none';
+    const $ = (id) => document.getElementById(id);
+    $('btn-restart').style.display = authority ? '' : 'none';
+    // LOBBY: single player and the LAN host (who takes everyone back to the lobby with them);
+    // a joined player's way back is LEAVE GAME
+    $('btn-lobby').style.display = authority ? '' : 'none';
+    for (const id of ['btn-lobby', 'btn-lobby2']) $(id).textContent = !this.net ? 'LOBBY' : authority ? 'LOBBY (EVERYONE)' : 'LEAVE TO LOBBY';
+    $('btn-leavegame').style.display = this.net ? '' : 'none';
+    $('btn-leavegame').textContent = this.net && this.net.isHost ? 'END LAN GAME' : 'LEAVE TO LOBBY';
+  }
+
+  // v5.2: from a running game or the end of a match back to the start screen, to pick another
+  // map or mode. A LAN host takes the joined players along (they wait in the lobby for the next
+  // START MATCH); a joined player leaves the host's game.
+  backToLobby() {
+    if (this.net && !this.net.isHost) { this.leaveNet(); return; }
+    if (this.net) this.net.s.toAll({ k: 'lobby' });
+    this.enterLobby();
+  }
+
+  enterLobby() {
+    this.state = 'menu';
+    this.paused = false;
+    this.killcam = null;
+    this.spectating = null;
+    this.hud.setKillcam(null);
+    this.hud.clearCenter();
+    this.hud.showPause(false);
+    this.hud.showEnd(false);
+    this.hud.showStart(true);
+    this.post.uniforms.uFade.value = 0;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.renderLobby();
   }
 
   enterNetGame() {
     const host = this.net.isHost;
+    this.lanNote = '';
     this.combat.claimHits = !host;
     this.birds.authority = host;
     this.state = 'playing';
@@ -929,7 +1105,7 @@ class Game {
         const x = bx + (Math.random() - 0.5) * 24;
         const z = T.riverCenter(x) + side * (105 + Math.random() * 45) * ks;
         if (Math.abs(z) > T.halfZ - 6 || Math.abs(x) > T.halfX - 6 || T.waterDepthAt(x, z) > 0) continue;
-        if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump']).length || !far(x, z)) continue;
+        if (this.world.query(x, z, 1.5, ['tree', 'rock', 'log', 'stump', 'solid']).length || !far(x, z)) continue;
         best = { x, z };
       }
       out.push(best || { x: bx, z: T.riverCenter(bx) + side * 120 * ks });
@@ -1007,7 +1183,7 @@ class Game {
       if (c.character) c.character._first = true;   // no getting-up animation across the map
     }
     c.respawnAt = null;
-    if (c.hitbox) c.hitbox.update(c, this.terrain);
+    if (c.hitbox) c.hitbox.update(c, this.ground);
     this.birds.settleAround([c]);
   }
 
@@ -1032,8 +1208,15 @@ class Game {
     const d = Math.round(dist);
     const ff = victim.team === shooter.team;
     victim.deaths = (victim.deaths || 0) + 1;
+    if (shooter.isPlayer && victim !== shooter) {
+      // v5: a skull marks where they went down (for a few seconds)
+      const at = victim.pos.clone().add(new THREE.Vector3(0, victim.stance === 'prone' ? 0.6 : 1.3, 0));
+      this.skulls = (this.skulls || []).filter((k) => k.id !== victim.id);
+      this.skulls.push({ id: victim.id, pos: at, name: victim.name, t: 8, life: 8 });
+    }
     if (shooter.isPlayer) {
       this.hud.hitMarker(true);
+      if (CONFIG.feel.hitSound && victim !== shooter) this.audio.hitConfirm(point || victim.pos, part, dist);
       this.hud.centerMessage(ff ? 'FRIENDLY FIRE' : `${part === 'head' ? 'HEADSHOT' : 'ELIMINATED'} · ${d} m`, ff && this.tdm ? `${victim.name} · −1 FOR YOUR TEAM` : victim.name, 1.8);
     }
     if (victim.isPlayer) {
@@ -1126,7 +1309,8 @@ class Game {
     if (this.combat.fire(p, dir, this.time)) {
       p.applyRecoil();
       this.viewmodel.onFire(this.time);
-      this.audio.bolt(0.25);
+      this.audio.bolt(0.25, this.casingSurface());
+      this.feel.ownShot();
     }
   }
 
@@ -1150,6 +1334,7 @@ class Game {
       this.hud.centerMessage('ZONE STEP SKIPPED', this.zone.debugText(), 1.5);
     }
     if (input.actPressed('restart') && (this.state === 'playing' || this.state === 'ended') && authority && !this.paused) {
+      if (this.loadPendingMap()) return;
       this.hud.showEnd(false);
       this.newMatch();
       this.state = 'playing';
@@ -1184,7 +1369,7 @@ class Game {
     p.update(dt, input, this.world, this.terrain, this.time);
     p.bodyYaw = p.yaw;
     p.hitbox.update(p);
-    if (dt > 0 && p.alive && !freeze && input.actPressed && input.actPressed('fire')) this.playerFire();
+    if (dt > 0 && p.alive && !freeze && !p.climb && !p.swept && input.actPressed && input.actPressed('fire')) this.playerFire();
     if (dt > 0) {
       const authority = !this.net || this.net.isHost;
       for (const a of this.ais) { a.frozenByRound = freeze; a.update(dt, this.time); }
@@ -1193,6 +1378,7 @@ class Game {
       this.birds.update(dt, this.time, this.combatants, this.camera);
       this.zone.update(dt, this.time);
       this.applyZoneDamage(dt);
+      this.applyRiver(dt);
       this.updateCharacterTints(dt);
       this.recordAim(dt);
       if (authority) {
@@ -1225,15 +1411,34 @@ class Game {
     }
   }
 
-  applyZoneDeath(c) {
+  // Died to the zone or the river (cause). In deathmatch the authority brings them back.
+  applyZoneDeath(c, cause = 'zone') {
     c.health = 0;
     c.alive = false;
     c.deaths = (c.deaths || 0) + 1;
     c.deathTime = this.time;
     c.killedBy = null;
-    this.hud.killFeed(`ZONE ✕ <span class="${c.team === this.player.team ? 'f' : 'e'}">${c.name}</span>`);
-    if (c.isPlayer) this.hud.centerMessage('ELIMINATED BY THE ZONE', '', 3);
-    if (this.net && this.net.isHost) this.net.broadcastKill(null, c, 0, null, null, 'zone');
+    const who = `<span class="${c.team === this.player.team ? 'f' : 'e'}">${c.name}</span>`;
+    this.hud.killFeed(cause === 'river' ? `RIVER ✕ ${who}` : `ZONE ✕ ${who}`);
+    if (c.isPlayer) this.hud.centerMessage(cause === 'river' ? 'SWEPT AWAY BY THE RIVER' : 'ELIMINATED BY THE ZONE', cause === 'river' ? 'THE CURRENT IS TOO STRONG TO SWIM' : '', 3);
+    const authority = !this.net || this.net.isHost;
+    if (authority && this.tdm && !this.roundOver) this.queueRespawn(c);
+    if (this.net && this.net.isHost) this.net.broadcastKill(null, c, 0, null, null, cause);
+  }
+
+  // The river's current: drowning in the deep channel (local player; the AI stays out of it).
+  applyRiver(dt) {
+    const p = this.player;
+    if (!p.alive || !p.swept) return;
+    p.health -= (CONFIG.player.health / CONFIG.map.drownTime) * dt;
+    this.damageFlash = Math.min(1, this.damageFlash + dt * 1.5);
+    if (p.health > 0) return;
+    if (this.net && !this.net.isHost) {
+      p.health = 0;
+      if (!this.diedReported) { this.diedReported = true; this.net.sendDied(p, 'river'); }
+      return;
+    }
+    this.applyZoneDeath(p, 'river');
   }
 
   // Joined client: the host confirmed a death.
@@ -1246,7 +1451,10 @@ class Game {
       if (m.cause === 'left') {
         victim.alive = false; victim.health = 0;
         this.hud.killFeed(`<span class="${victim.team === this.player.team ? 'f' : 'e'}">${victim.name}</span> LEFT THE GAME`);
-      } else this.applyZoneDeath(victim);
+      } else {
+        this.applyZoneDeath(victim, m.cause === 'river' ? 'river' : 'zone');
+        victim.respawnAt = m.ra ?? null;
+      }
       return;
     }
     victim.alive = false;
@@ -1373,6 +1581,7 @@ class Game {
   render(dtReal) {
     this.renderer.info.reset();
     this.updateRenderSystems(dtReal);
+    this.feel.update(this.paused || this.state !== 'playing' ? 0 : dtReal, dtReal);
     this.post.uniforms.uScope.value = THREE.MathUtils.smoothstep(this.player.scopeT, 0.55, 1.0);
     this.post.render(dtReal, this.realTime);
     const p = this.player;
@@ -1389,6 +1598,8 @@ class Game {
     this.hud.localTeam = p.team;
     const others = this.combatants.filter((c) => c !== p && !c.isDummy);
     this.hud.updateMarkers(this.camera, others.filter((c) => c.team === p.team), w, h);
+    this.skulls = (this.skulls || []).filter((k) => (k.t -= dtReal) > 0);
+    this.hud.updateSkulls(this.camera, p.alive || this.spectating ? this.skulls : [], w, h);
     this.hud.updateDebugMarks(this.camera, others, w, h, this.reveal);
     const me = p.team;
     this.hud.setTeams(this.combatants.filter((c) => c.team === me && !c.isDummy), this.combatants.filter((c) => c.team !== me && !c.isDummy));
@@ -1446,6 +1657,7 @@ class Game {
       this._sph.center.set(c.pos.x, c.pos.y + 0.9, c.pos.z);
       this._sph.radius = 2.4;
       c.character.group.visible = this._frustum.intersectsSphere(this._sph);
+      if (c.character.group.visible) c.character.syncModel();
     }
   }
 
@@ -1542,7 +1754,15 @@ class Game {
     this.shadowFocus = focus;
     this.sky.updateShadow(focus, extent);
     this.forest.update(cam, focus, CONFIG.trees.shadowDistance * (extent / 120) + 20);
+    // near / far copies of the Megascans pieces, by distance scaled with the zoom
+    const zk = cam.fov / CONFIG.player.fovHip;
+    if (!this._lodFrustum) { this._lodFrustum = new THREE.Frustum(); this._lodPM = new THREE.Matrix4(); }
+    cam.updateMatrixWorld();
+    this._lodFrustum.setFromProjectionMatrix(this._lodPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    this.rocks.update(cam, zk, this._lodFrustum);
+    this.debris.update(cam, zk, this._lodFrustum);
     this.undergrowth.update(cam);
+    this.buildings.update(cam);
     this.grass.update(p.scopeT > 0.5 || (!p.alive && kc) ? focus : cam.position);
     this.water.update(this.realTime);
     // clouds drift with game time (the same for everyone in a LAN game; new clouds each round)

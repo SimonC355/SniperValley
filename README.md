@@ -16,8 +16,12 @@ network.
   - **Elimination**: nobody respawns, the play area shrinks every 40–50 s, a match is best of
     three rounds, and teams swap slopes (and sun side) between rounds.
   - **Team deathmatch**: you respawn on your team's slope; the first team to 30 kills wins.
-- Three maps of the same valley: **Valley** (5v5–20v20), **Narrow valley** (2v2–10v10) and
-  **Ravine** (small, 1v1–5v5).
+- Five maps: three sizes of the same forested valley, **Valley** (5v5–20v20), **Narrow
+  valley** (2v2–10v10) and **Ravine** (small, 1v1–5v5), plus **Tuscan Hills** (old stone
+  hamlets, cypresses and olive groves) and **Beech River** (a Nordic beech forest split by a
+  broad river).
+- Climb onto rocks and low walls, slide when you sprint, and stay out of the river: its current
+  is deadly.
 - Detection comes from scope glints, muzzle flashes, gunshots, flushed birds and water splashes.
 - The forest is alive: clouds drift over and their shadows sweep the slopes (a scope glints
   less under a cloud), gusts roll through the trees, grass and ghillie suits, needles drift
@@ -135,10 +139,14 @@ settings stay.
 | Valley | 340 × 290 m | 5v5 – 20v20 | 110 – 270 m |
 | Narrow valley | 260 × 210 m | 2v2 – 10v10 | 80 – 190 m |
 | Ravine | 200 × 150 m | 1v1 – 5v5 | 45 – 140 m |
+| Tuscan Hills | 300 × 240 m | 2v2 – 10v10 | not measured yet |
+| Beech River | 320 × 260 m | 2v2 – 10v10 | not measured yet |
 
-All three are the same forested river valley at different sizes: narrower slopes, a smaller
-river and lower ridges, with the same mountains behind. The zone also closes faster on the
-smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+The first three are the same forested river valley at different sizes: narrower slopes, a
+smaller river and lower ridges, with the same mountains behind. Tuscan Hills is a valley of old
+stone hamlets (houses and ruins block bullets; you can climb the low ruin walls), and Beech
+River a flat, rolling beech forest with a broad river between the teams. Every map ends in
+steep mountains right at its edge, so you always see where it ends. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
@@ -191,9 +199,10 @@ sensitivity, field of view, invert Y, and whether the scope opens at 2× or at t
 |---|---|
 | WASD | move |
 | Mouse | look (arrow keys if pointer lock is unavailable) |
-| Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s) |
-| Space | jump / stand up |
-| C or Ctrl | crouch |
+| Shift | sprint (also gets you up from crouch or prone) · while scoped: hold your breath (4 s; the heartbeat comes up as it runs out) |
+| Space | jump / stand up · climb onto a rock or low wall you are facing |
+| W (hold) against a rock or low wall | climb onto it (up to about 2.4 m) |
+| C or Ctrl | crouch · while sprinting: slide |
 | Z | prone |
 | Right mouse (hold) | scope: opens at 2×, slower sensitivity |
 | Mouse wheel | while scoped: zoom 2–12× (forward in, back out) |
@@ -203,7 +212,7 @@ sensitivity, field of view, invert Y, and whether the scope opens at 2× or at t
 | T | debug: skip to the next zone step (single player / LAN host) |
 | F1 | debug overlay (AI states, awareness, live reveal-event log) |
 | F2 | debug: reveal all characters |
-| Esc | pause / settings (in LAN games the match keeps running) |
+| Esc | pause / settings / LOBBY (back to the start screen; in LAN games the match keeps running) |
 
 When you are shot, the **killcam** turns toward the shooter and zooms in on them. It shows:
 
@@ -234,18 +243,33 @@ file or a list of variations:
   "bolt": "bolt.ogg", "footstep_grass": ["g1.ogg", "g2.ogg"], "footstep_forest": "f1.ogg",
   "footstep_rock": "r1.ogg", "footstep_mud": "m1.ogg", "splash": "splash.ogg",
   "impact_tree": "wood.ogg", "impact_rock": "rock.ogg", "impact_ground": "dirt.ogg",
-  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg" }
+  "impact_water": "water.ogg", "caw": ["caw1.ogg", "caw2.ogg"], "wings": "wings.ogg",
+  "breathe_in": "in.ogg", "breathe_out": "out.ogg", "heartbeat": "beat.ogg", "hit": "hit.ogg",
+  "scope_in": "up.ogg", "scope_out": "down.ogg", "zoom": "click.ogg" }
 ```
 
 Any sound you leave out stays synthesised. Use CC0 recordings, for example
 [freesound.org](https://freesound.org) filtered to *Creative Commons 0*, and list them in
 CREDITS.md.
 
+### Megascans models (optional)
+
+Quixel Megascans from Fab (glTF downloads, e.g. `nordic_forest_rock_small_..._mid.glb`) can
+dress the Valley's forest floor. Their license does not allow sharing the files, so **never
+commit them** (this repository is public):
+
+1. Put the downloaded `.glb` files in `megascans-src/` in the project folder (git-ignored, and
+   outside `public/`, so the originals don't go into every build).
+2. `npm run megascans` makes light copies (simplified, 1024 px WebP textures, a far copy) in
+   `public/assets/megascans/` and lists them in `megascans.json` with a role each (rock, log,
+   snag, uprooted, patch, mushroom; edit the file to change one).
+3. Start the game on the Valley. `?megascans=0` turns them off to compare.
+
 ## URL options
 
 `?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–20) · `?game=tdm` (team deathmatch) ·
-`?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` ·
-`?camo=0.5` · `?quality=low` · `?dummies=1` (orange shooting-range targets that show the exact
+`?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` (bullet trails) ·
+`?camo=0.5` · `?quality=low|medium|high|ultra` (graphics preset) · `?megascans=0` (without your Megascans models) · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
 (benchmark) · `?autores=0` (no auto resolution).
@@ -261,7 +285,9 @@ src/
   terrain.js     analytic valley heightfield, 1 m height grid, splat material, zone line
   water.js       river: planar reflection, fresnel, depth transparency
   trees.js       procedural conifers (LOD0/LOD1/impostor/shadow proxy) + undergrowth
-  rocks.js       procedural boulders
+  rocks.js       procedural boulders (or Higgsfield / Megascans models)
+  megascans.js   optional Megascans models from public/assets/megascans/ (npm run megascans)
+  lodinst.js     near / far copies of instanced models, culled to the view
   debris.js      fallen logs, stumps and dead branches (logs and stumps are cover)
   grass.js       instanced grass tiles around the viewer
   sky.js         sky (clouds from weather.js), sun, environment light, shadow frustum
@@ -271,7 +297,8 @@ src/
   assets.js      loads optional photoscanned textures (public/assets) in place of the bakes
   shaders.js     shared uniforms, gusts, exponential height fog, foliage material patch
   world.js       analytic raycasts / line of sight / collisions (no physics engine)
-  player.js      first-person controller, scope, sway, recoil
+  player.js      first-person controller, scope, sway, recoil, flinch
+  feel.js        suppression, breathing and heartbeat, rifle foley, scope eye box and mirage
   entity.js      shared combatant state
   hitbox.js      body capsules + ray tests
   combat.js      firing, hitscan / ballistics, hits, impacts, reveal events
@@ -280,9 +307,10 @@ src/
   events.js      reveal event bus
   birds.js       crow flocks
   zone.js        shrinking zone
-  effects.js     muzzle flash, glint, impacts, tracers
-  viewmodel.js   first-person rifle
-  audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river)
+  effects.js     muzzle flash, glint, impacts, bullet trails
+  viewmodel.js   first-person rifle, bolt cycle, the ejected case
+  audio.js       synthesised WebAudio (gunshots, impacts, footsteps, birds, wind, river, your
+                 hearing filter, breath, heartbeat, rifle foley)
   sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack
   forestsound.js songbirds, woodpecker, needle rustle and gust roar
   post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
@@ -476,3 +504,43 @@ are in [CREDITS.md](CREDITS.md).
 - **Leaving.** You leave: your friend is told and goes back to the menu. Your friend quits:
   you see *LEFT THE GAME*.
 - **If something fails,** send `steam-log.txt` from `%APPDATA%\SniperValley` (from both PCs).
+
+**5.0: player-requested updates**
+
+- **Maps.** Try *Tuscan Hills* and *Beech River* next to SINGLE PLAYER. Hide in a Tuscan ruin
+  and shoot from behind its walls; houses stop bullets.
+- **Rocks.** Walk onto a low rock; hold W against a higher one (or press Space) to climb it.
+  Lie prone on top. Shots that clear a rock on screen should not hit it.
+- **Slide.** Sprint, then press C: you slide and end up crouched. Try it downhill.
+- **Edge of the map.** Look around: on every map, mountains close off all four sides and only
+  sky shows above them. Walk to the side: you stop at the foot of the rock wall.
+- **Zone.** A new match uses the circle (toward the water) unless you choose *ends*.
+- **River.** Walk into the deep water: the current takes you downstream and you drown in a
+  few seconds (in deathmatch you respawn).
+- **Gunshot.** Fire, and let a friend (or the AI) shoot past you: a whip-crack and a long boom,
+  not a puff. Tell me if it is too loud or distorted.
+- **Kill marker.** Shoot someone: a skull marks where they fell, with the distance.
+- **Looks.** The new rifle, menus and HUD. If anything looks off (textures too bright or too
+  dark), a screenshot helps.
+
+**5.2: the small details** (best with headphones)
+
+- **Under fire.** Let the AI shoot at you and miss: the crack, a moment of muffled hearing, the
+  colour draining and the edges going soft, the aim jolting. A very close one rings your ears.
+  A bullet into the ground next to you: a thud and dirt pattering down.
+- **Breathing.** Scope in and keep still: you hear yourself breathe as the reticle rises and
+  falls. Sprint for 10 s and stop: you pant. Hold Shift while scoped: the breathing stops and
+  the heartbeat comes up as the breath runs out.
+- **The rifle.** Scope in and out (cloth, cheek), roll the zoom (clicks), fire and listen to the
+  bolt and the case landing (stand on a rock for the ringing case). Fire from the hip: the case
+  flies out to the right.
+- **The scope.** Scope in: the picture opens from a tunnel. Swing fast or walk scoped: a dark
+  crescent at the edge. Fire: the picture jumps. On a sunny day zoom 10-12× on something
+  400 m+ away: it shimmers.
+- **Prone.** Fire prone and watch the dust in front of the muzzle.
+- **Hits.** Hit someone far away: a tick, then the thump of the hit a moment later.
+- **Settings.** Try each Quality preset; tell me which one runs smoothly on your PC.
+- **Lobby.** Esc → LOBBY, pick another mode, play. Finish a match → LOBBY. In a LAN game the
+  host's LOBBY takes everyone back; START MATCH brings them all in again.
+- **Gunshot.** Fire: a shrill whip crack with a short hiss ("gu-DISHHH"), then the valley
+  answering; no long roar, no dull thud. Tell me in words what is still off.

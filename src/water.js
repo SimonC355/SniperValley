@@ -15,13 +15,14 @@ const WaterShader = {
       tDiffuse: { value: null },
       textureMatrix: { value: null },
       tNormal: { value: null },
+      tNoise: { value: null },
       tHeight: { value: null },
       uHB: { value: new THREE.Vector4() },
       uTime: { value: 0 },
       uSunDir: { value: new THREE.Vector3() },
       uSunColor: { value: new THREE.Color() },
-      uDeep: { value: new THREE.Color(0.012, 0.03, 0.028) },
-      uShallow: { value: new THREE.Color(0.06, 0.09, 0.07) },
+      uDeep: { value: new THREE.Color(0.008, 0.022, 0.02) },
+      uShallow: { value: new THREE.Color(0.05, 0.075, 0.055) },
       uSkyColor: { value: new THREE.Color(0.35, 0.45, 0.55) },
       uReflStrength: { value: 1 },
     },
@@ -42,6 +43,7 @@ const WaterShader = {
   fragmentShader: /* glsl */`
     uniform sampler2D tDiffuse;
     uniform sampler2D tNormal;
+    uniform sampler2D tNoise;     // the water bake's height (fbm noise) in alpha: foam and streaks
     uniform sampler2D tHeight;
     uniform vec4 uHB;
     uniform float uTime;
@@ -59,30 +61,50 @@ const WaterShader = {
       vec2 p = vWPos.xz;
       float bed = texture2D(tHeight, (p - uHB.xy) / uHB.zw).r;
       float depth = max(0.0, -bed);
+      float dCam = length(cameraPosition - vWPos);
+      // v5: a strong current flowing toward -X. Ripples on four scales (fine ones fade out with
+      // distance so the far water calms to a mirror instead of shimmering)
       vec2 flow = vec2(0.45, 0.04);
-      vec3 n1 = texture2D(tNormal, p / 9.0 + flow * uTime * 0.11).xyz * 2.0 - 1.0;
-      vec3 n2 = texture2D(tNormal, p / 3.7 - vec2(0.03, 0.06) * uTime + flow * uTime * 0.17).xyz * 2.0 - 1.0;
-      vec3 n3 = texture2D(tNormal, p / 23.0 + flow * uTime * 0.05).xyz * 2.0 - 1.0;
-      vec3 tn = normalize(n1 * 0.5 + n2 * 0.35 + n3 * 0.4 + vec3(0.0, 0.0, 2.2));
+      float fast = smoothstep(0.5, 2.0, depth);
+      vec3 n1 = texture2D(tNormal, p / 9.0 + flow * uTime * (0.25 + 0.3 * fast)).xyz * 2.0 - 1.0;
+      vec3 n2 = texture2D(tNormal, p / 3.7 - vec2(0.03, 0.06) * uTime + flow * uTime * (0.3 + 0.35 * fast)).xyz * 2.0 - 1.0;
+      vec3 n3 = texture2D(tNormal, p / 23.0 + flow * uTime * 0.16).xyz * 2.0 - 1.0;
+      vec3 n4 = texture2D(tNormal, p / 1.3 + vec2(0.07, -0.05) * uTime + flow * uTime * 0.8).xyz * 2.0 - 1.0;
+      float nearK = 1.0 - smoothstep(15.0, 90.0, dCam);
+      vec3 tn = normalize(n1 * 0.5 + n2 * 0.35 * (0.4 + 0.6 * nearK) + n3 * 0.4 + n4 * 0.22 * nearK + vec3(0.0, 0.0, 1.9));
       vec3 N = normalize(vec3(tn.x, tn.z, tn.y));
       vec3 V = normalize(cameraPosition - vWPos);
       float NdV = max(dot(N, V), 0.0);
       float fres = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
-      vec2 dist = tn.xy * 0.035;
+      // reflection, distorted by the ripples
+      vec2 dist = tn.xy * (0.03 + 0.02 * nearK);
       vec4 uvr = vUvR;
       uvr.xy += dist * uvr.w;
       vec3 refl = texture2DProj(tDiffuse, uvr).rgb;
       refl = mix(uSkyColor, refl, uReflStrength);
+      // a forest river is dark where it mirrors its banks at low angles
+      vec3 R = reflect(-V, N);
+      float bank = smoothstep(0.22, 0.03, R.y);
+      refl = mix(refl, refl * vec3(0.45, 0.52, 0.45) + vec3(0.01, 0.015, 0.01), bank * 0.4);
+      // water body: dark tea-green, deeper = darker; light scattered inside the wave crests
       vec3 body = mix(uShallow, uDeep, 1.0 - exp(-depth * 0.9));
+      float crest = clamp(dot(N, normalize(uSunDir + vec3(0.0, 0.3, 0.0))) - 0.82, 0.0, 1.0) * 5.0;
+      body += vec3(0.03, 0.06, 0.045) * crest * (1.0 - cloudCoverAt(vWPos) * 0.7);
       float sunR = max(dot(reflect(-uSunDir, N), V), 0.0);
-      vec3 spec = uSunColor * (pow(sunR, 380.0) * 6.0 + pow(sunR, 60.0) * 0.25) * (1.0 - cloudCoverAt(vWPos) * 0.9);
-      vec3 col = mix(body, refl, fres) + spec;
-      // shoreline foam
-      float foamN = texture2D(tNormal, p / 1.7 + uTime * 0.05).a;
-      float foam = smoothstep(0.12, 0.0, depth) * smoothstep(0.45, 0.65, foamN);
-      col = mix(col, vec3(0.55, 0.57, 0.55), foam * 0.35);
-      float alpha = clamp(1.0 - exp(-depth * 2.2), 0.0, 1.0);
-      alpha = max(alpha, fres * 0.9);
+      float sunVis = 1.0 - cloudCoverAt(vWPos) * 0.9;
+      vec3 spec = uSunColor * (pow(sunR, 600.0) * 9.0 + pow(sunR, 90.0) * 0.4 + pow(sunR, 12.0) * 0.03) * sunVis;
+      vec3 col = mix(body, refl, fres * 0.9) + spec;
+      // shoreline foam and the riverbed showing through the shallows
+      float foamN = texture2D(tNoise, p / 1.7 + flow * uTime * 0.3).a;
+      float foam = smoothstep(0.14, 0.0, depth) * smoothstep(0.45, 0.65, foamN);
+      col = mix(col, vec3(0.62, 0.64, 0.6), foam * 0.4);
+      // streaks of white water racing down the deep channel: the current is dangerous
+      float streak = smoothstep(0.66, 0.8, texture2D(tNoise, vec2(p.x / 7.0 + uTime * 0.32, p.y / 1.1 + n3.x * 0.15)).a)
+                   * smoothstep(0.8, 2.0, depth);
+      float streak2 = smoothstep(0.7, 0.82, texture2D(tNoise, vec2(p.x / 3.1 + uTime * 0.55, p.y / 0.7 + n1.y * 0.2)).a) * smoothstep(1.0, 2.2, depth) * nearK;
+      col = mix(col, vec3(0.62, 0.66, 0.64), clamp(streak * 0.22 + streak2 * 0.16, 0.0, 0.3));
+      float alpha = clamp(1.0 - exp(-depth * 2.6), 0.0, 1.0);
+      alpha = max(alpha, fres * 0.95);
       alpha = clamp(alpha + foam * 0.3, 0.0, 1.0);
       alpha *= smoothstep(0.0, 0.03, depth);
       gl_FragColor = vec4(col, alpha);
@@ -113,6 +135,7 @@ export class Water {
     const u = r.material.uniforms;
     Object.assign(u, cloudUniforms());
     u.tNormal.value = textures.water.normalMap;
+    u.tNoise.value = textures.water.map;
     u.tHeight.value = terrain.heightTexture;
     u.uHB.value = terrain.gridBounds;
     u.uSunDir.value = SHARED.uSunDirWorld.value;

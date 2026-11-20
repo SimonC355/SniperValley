@@ -47,19 +47,49 @@ photoscans from Poly Haven into `public/assets/` there.
 - **Scope**: textures only. Trees stay procedural: realistic CC0 conifer models are rare, and
   the tree system depends on its own LOD, impostor and wind setup.
 
-### Megascans (asked about, not added)
+### Megascans (export tool, assets not in the repository)
 
 Quixel Megascans now live on Epic's Fab marketplace under the Fab Standard License. That
-license allows use in any engine, web included, but Megascans are **not CC0**: most cost money
-since 2025 (assets claimed during the free period in 2024 stay yours), and the license is for
-use inside a project, not for sharing the files themselves. The brief asked for CC0 only, so
-none are in the repository.
+license allows use in any engine, web included, and selling the game, but Megascans are **not
+CC0**: most cost money since 2025 (assets claimed during the free period in 2024 stay yours), and
+the files themselves may not be shared, so they never go into this repository (it is public).
+They live in a **private** repository instead (`SniperValley-assets`); the game will load them
+from the git-ignored `public/assets/megascans/` and fall back to its own trees without them.
 
-If you want them anyway, the plan is the same as for the photoscans: you download the assets
-you own into a git-ignored folder (`public/assets/megascans/`), and a loader uses them when
-they are there and falls back to the procedural forest when they are not. Megascans 3D plants
-are made for desktop engines, so the browser build would use their lowest LODs, bake
-impostors from them, and keep our wind and collision setup.
+Some packs, among them the **European Beech** trees (17 trees: 8 forest, 1 field, 4 saplings,
+4 seedlings, 9 LODs from about 2.3 million vertices down), are offered in Unreal Engine format
+only. `scripts/megascans/` gets them out with Unreal Engine 5 on Windows:
+
+1. `powershell -ExecutionPolicy Bypass -File scripts\megascans\megascans.ps1 setup` makes an
+   empty project `SVMegascans` (Python, Editor Scripting and glTF Exporter plugins on) and opens it
+   once. Then, in Epic Games Launcher: Fab Library -> European Beech -> Add to Project.
+2. `... megascans.ps1 export` opens the project with `export_megascans.py`, which (in memory, not
+   saved) turns Nanite off, picks for every mesh the first LOD under 60 000 and under 15 000
+   vertices, writes them as `.glb` (geometry and material slots, metres), exports the textures
+   the materials use as PNG, and writes `inventory.json` (LOD vertex counts, sizes, material
+   parents, blend modes, texture/scalar/vector parameters). The script then scales the textures
+   to 2048 px. Output: `%USERPROFILE%\SniperValley-megascans\<pack>` (about 100-300 MB
+   expected for the trees). Each pack gets its own folder, so exporting another pack doesn't
+   overwrite the last one.
+3. `... megascans.ps1 upload` pushes that folder (all packs) to the private repository and
+   refuses a public one. Every folder in it goes up, one commit and push each (GitHub takes at
+   most 100 MB per file and 2 GB per push), so assets that need no Unreal export can go along in
+   folders of their own; a file over 95 MB stops it before anything is pushed. The raw Unreal
+   files (`.uasset`) are never needed: only Unreal can read them.
+
+**Ground textures** (Megascans *surfaces*: tileable photoscans with albedo, normal, roughness,
+displacement and AO maps) go the same way: Add to Project into `SVMegascans`, then
+`... megascans.ps1 export -Pack surfaces`. With no meshes in the pack, `export_megascans.py`
+exports every material instance whose path has the pack word, with its textures, to
+`surfaces/<name>/`, and lists the maps per material parameter in `inventory.json`. If nothing
+matches, the script lists the project's folders so the right `-Pack` word can be picked (it
+takes several, comma-separated). The game's ground has four slots per biome (grass, forest
+floor, rock, mud; see `SURFACES` in `src/hftextures.js`), so about 8-10 surfaces cover all five
+maps.
+
+**Not tested inside Unreal here** (no Unreal in the cloud sessions): the first run's `report.txt`
+says what worked. Next step once the files are in: a loader that builds the beech map's trees
+from the exported LODs (wind, collision and impostors from our own tree system).
 
 ## Map
 
@@ -69,9 +99,11 @@ impostors from them, and keep our wind and collision setup.
   puts north toward +Z. You spawn looking south across the valley.
 - Ridges are about 60 m above the water, roughly 175 m from the river. Slopes average about
   20°, with spurs and gullies running downhill and a terrace on each side.
-- The terrain continues as scenery beyond the play area (distant hills, impostor forest).
-  Invisible walls stop you at the play-area edge.
-- **Water:** deep water (> 0.85 m) is **impassable**. The shallow shelf slows you to 55% and
+- Since v5.1 every map ends in **mountains**: right at the edge of the play area the ground
+  rises as a steep rock wall to a jagged crest (see v5.1 below), so beyond the map you see
+  mountain and sky, no more valley or forest. You stop at the foot of the wall.
+- **Water:** deep water (> 0.85 m) was **impassable** until v5; now its current sweeps you away
+  (see v5.0 below). The shallow shelf slows you to 55% and
   every step makes a splash. A splash is a reveal event, audible to about 90 m. Optional shallow
   fords can be added with `map.fords: [x, ...]`; there are none by default, per the design
   assumption.
@@ -144,7 +176,18 @@ made all three about a quarter smaller again:
   0.2 s and is visible to 400 m with line of sight.
   - AI notice a flash within 100° of where they are looking.
   - Shots are also heard: sound arrives after `distance / 340` s, through a valley-echo convolver.
-  - Tracers are `faint` by default; set `weapon.tracers` to `'off'` or `'bright'`.
+  - **Bullet trails** (`weapon.tracers`, MATCH → Bullet trails): every shot leaves a thin
+    whitish vapour trail along its path, like the bullet trails in modern shooters. A bright
+    head runs at the bullet's speed (a hitscan shot's head arrives within 0.25 s, and its
+    impact puff waits for it); behind it the trail lingers for about 1.8 s, widening, breaking
+    up and drifting with the wind. With ballistics on it follows the real arc (drop and wind).
+    - `faint` (default): your own trail is clear, everyone else's faint, a light hint back at
+      the shooter (like the muzzle flash). `bright`: everyone's clear. `off`: none.
+    - Your own trail starts where your rifle's muzzle is drawn (the viewmodel has its own
+      camera), or just under the reticle when scoped, so you see a line from the gun to the
+      target instead of a dot under the crosshair.
+    - Drawn as camera-facing ribbons whose width stays between 1.6 and 7 pixels (a line
+      through the scope and from the side); tuning in `weapon.trail`.
 - **"You are being aimed at"**: shown when an enemy AI in aim or fire state is targeting you,
   its glint points at you (within 10°), and it has line of sight. It tells you *that* you are
   being aimed at, never *where* from. Toggle with `hud.aimedAtWarning`.
@@ -275,7 +318,9 @@ made all three about a quarter smaller again:
 | Tree trunks (the drawn shape: tapered, bent, flared at the base) | yes | yes |
 | Tree crown *core* (inner ~40% radius, where foliage is drawn dense) | yes | yes |
 | Outer needle cards | no | no (gaps you can see through are real) |
-| Rocks | yes | yes |
+| Rocks (their drawn top surface, v5) | yes | yes |
+| Buildings, ruin walls (v5) | yes | yes |
+| The mountains around the map (terrain, v5.1) | yes | yes |
 | Fallen logs, stumps | yes | yes (cover for prone players; logs block walking, but you can jump over them) |
 | Bushes, ferns | no | soften AI visibility |
 | Water surface | stops bullets (splash) | no |
@@ -472,7 +517,7 @@ made all three about a quarter smaller again:
     LAN.
   - their own zone damage (reported when it kills them).
   - **There is no cheat protection: this is for friends.**
-- **Shots** are replayed visually everywhere (muzzle flash, distance-delayed sound, tracer,
+- **Shots** are replayed visually everywhere (muzzle flash, distance-delayed sound, bullet trail,
   impacts, near-miss crack). On the host, a replayed shot also emits the shot and flash reveal
   events, so the AI reacts to human players exactly as it does in single player.
   - The host turns remote players' movement into footstep and splash events for the AI.
@@ -775,3 +820,376 @@ options. The backend also takes test commands (a friend's *Join Game*, statistic
   hits (no cheat protection), there is no host migration, and a friend who joins during a
   deathmatch waits for the next match. Joining a running deathmatch would be a good next step.
 - The Steam overlay (Shift+Tab, invites from inside the game) is off; see v0.4.0.
+
+## v5.0: player-requested updates
+
+Asked for (in Danish) as one list. Each point, how I read it and what changed.
+
+- **"Flere sten … og i dag kan man ikke kravle over dem"** (more rocks, and you can't climb
+  over them).
+  - Rock count 340 → 640 per reference area, with about 12 % placed as outcrops (a big rock with
+    2–5 smaller ones leaning on it). Rocks keep clear of trunks, lean with the slope and are sunk
+    so no side floats above the ground (the old ones did on slopes).
+  - Each rock variant gets a height map of its drawn top surface (rays straight down onto the
+    mesh, 36 × 36), baked per placed rock into an 18 × 18 world grid (`rockTopAt` in
+    `src/rocks.js`). `World.groundAt` is the terrain or the highest rock/wall/building top.
+  - The player (`_move` in `src/player.js`): an obstacle up to `stepHeight` (0.55 m) is walked
+    onto; higher blocks you (sliding along it). Holding forward against something up to
+    `climbHeight` (2.4 m) for 0.22 s, or pressing jump, climbs onto it: up first, then over the
+    edge, 0.35–0.6 s. Steps up and down are eased in the camera instead of popping.
+  - Bullets and sight lines march through the rock's footprint against the same height map
+    (they used to hit a sphere that reached well above the drawn rock, the same problem the
+    trunks had in 0.3.1). The AI still walks around rocks.
+  - Test (Narrow valley, 12 rocks 0.8–2.2 m high, walking straight at them for 4 s): on top of
+    9; the other 3 were walked around because a neighbouring rock or trunk pushed the player
+    aside.
+- **Slide.** Crouch while sprinting (and faster than walking): 9.2 m/s, slowed by 6 m/s² on
+  level ground, sped up downhill, steered a little with the mouse, ending crouched below
+  2.4 m/s (about 1.6 s and 9 m on level ground in a test). Jump ends it with a hop. It counts as
+  a loud footstep for the AI. Others see a crouched player moving fast (no new pose, so the
+  network message and hit boxes are unchanged).
+- **"Ikke noget som indikerer at banen stopper sidelæns"** (nothing shows where the map ends).
+  A dry-stone wall along the whole edge, 2.3 m (Ravine) to 2.9 m (Valley) high, with a low weir
+  across the river. **Replaced by mountains in v5.1** (below).
+- **"Default skal cirklen …"**: read as "the circle (radial zone, *toward the water*) should be
+  the default". It is, and saved settings from before 5.0 switch to it once (`zv: 5` in the
+  saved match settings).
+- **The river.** Deep water used to be a wall. Now the deep channel sweeps you downstream at
+  5 m/s (toward −X, the way the surface pattern flows, now about 2 m/s) and into the middle of
+  the channel; you can barely steer and can't scope or fire. It drowns you in 3.5 s (*RIVER ✕*
+  in the kill feed; in deathmatch you respawn as after any death). The shallows pull at you a
+  little. White water streaks show the current. On LAN/Steam the drowning player reports it,
+  like a zone death.
+- **Gunshot "like an air rifle".** Measured on the rendered buffers (48 kHz):
+
+  | | Peak | RMS 0–100 ms | RMS 0–500 ms | Crest | Audible for |
+  |---|---|---|---|---|---|
+  | old blast | −0.4 dBFS | −18.8 dB | −25.6 dB | 18.4 dB | 0.22 s |
+  | new blast | −0.3 dBFS | −7.6 dB | −12.5 dB | 7.3 dB | 2.8 s |
+
+  So the old one was a click with almost nothing behind it. The new one starts with the bullet's
+  N-wave crack (the whip), then a 3 ms blast wave, a saturated hot-gas burst, a chest thump made
+  of filtered noise (no tone, so no "bee"), tree reflections, the far slope answering at
+  0.4–0.9 s and a rumble rolling away. Distant reports are a little louder and less muffled,
+  and the near-miss crack radius is 50 m. **Untested by ear here**, as before.
+- **Tuscan Hills.** Same concept as the valleys. 2–3 hamlets per slope on flatter benches
+  (3–6 houses along the contour, sometimes a tower), plus lone farmhouses and ruins. Houses are
+  one convex solid each (walls plus gable roof: 7 planes), ruins are 4 broken walls of
+  1.1–3.6 m in pieces with gaps. Everything is drawn with one procedural masonry shader (dry
+  stone, rubble with mortar, ochre plaster falling off in patches, terracotta tiles) with a
+  derivative bump that fades out with distance. Trees: cypresses near the hamlets and on the
+  ridges, olive groves, umbrella pines; open dry-grass hillsides between the groves.
+- **Beech River.** New `lowland` terrain: the same river cross-section with a cut bank, then
+  gentle rolling ground (ridges only 8–9 m) and low wooded hills instead of mountains. A broad
+  river (12 m deep channel half-width). Beeches are a new broadleaf tree builder: a trunk that
+  forks into limbs and a dome of leafy twig cards on the crown shell with normals bent around
+  the crown's centre. Fewer, much bigger trees (7.2 m spacing), little undergrowth, a leaf-litter
+  ground texture and patches of planted spruce.
+- **Graphics** ("looks like something from ten years ago"). The biggest single difference in
+  screenshots was the first-person rifle (plain cylinders and boxes), now a detailed modern
+  rifle with stippled cerakote, anodised and blued metal, rubber and coated glass. Also: a
+  light sharpening pass (`render.sharpen`), more contrast, less fog, fuller grass. The Windows
+  build now runs `npm run assets`, so releases get the CC0 photoscans; the procedural textures
+  remain the fallback if the download fails. **The real Poly Haven API is still untested
+  from here** (blocked); CI is the first real run, and colours may need tuning
+  (`assets.adjust`).
+- **Kill marker.** Your kills get a skull at the body (head height) with the distance for 8 s,
+  clamped to the screen edge with an arrow when off screen. Only your own kills.
+- **UI.** Rounded, glassy (backdrop blur) panels in olive drab and khaki, a segmented tab bar,
+  styled selects and sliders, pill-shaped HUD pieces. Every id and class the code uses is kept.
+- **Start screen with art** (asked for afterwards: "opgradere layout med Higgsfield"). Six
+  pictures generated with Higgsfield's Z Image model (the free plan's model): key art (a second
+  try put the sniper on the right so the menu on the left doesn't cover him) and one picture per
+  map. They are WebP files in `public/ui/` (about 1.1 MB together). The menu moved to the left
+  over the key art, the map dropdown became picture cards (they drive the old, now hidden,
+  select, so the LAN rule "the host chooses the map" still greys them out), and the loading
+  screen shows the map being loaded.
+- **"Closer to 2026 than 2016"** (after upgrading Higgsfield): the user wants the existing world
+  upgraded (trees, houses, water, ghillie suit, rocks, leaves), not new objects. (A first try with
+  new landmark props was removed at once.)
+  - *Textures* (`src/hftextures.js`, files in `public/hf/`): every ground, bark and wall texture
+    and every foliage/ghillie card is a generated photo. Surfaces are made seamless (an offset
+    blend), get a height map from the high-passed luminance and a normal map from that, packed
+    like the procedural bakes (albedo + height, normal + roughness), so the existing terrain,
+    tree and rock shaders use them unchanged. Cards are generated on magenta and keyed to alpha,
+    colour-matched to the old palette (so camouflage still works) and bled into the transparent
+    texels. The photoscans (CI) still win for the conifer ground. `?hf=0` shows the old look.
+  - *Houses* (`src/models.js`, `Buildings._modelHouse`): three textured house models (farmhouse,
+    cottage, ochre village house; a tower house came out grey and was dropped), each on a stone
+    plinth that levels the slope, with a light copy beyond 90 m (effective). The collider is the
+    same convex house solid as before. Ruins stay procedural, now in photo stone.
+  - *Rocks*: three 3D rock models replace the icosphere boulders; the height maps for walking,
+    climbing and bullets are baked from the models exactly as from the old meshes.
+  - *Walls*: the masonry shader uses the photo walls with their normal maps (a derivative bump
+    from the photo's height was pixel noise, and texture reads inside the per-face branches had
+    undefined mip levels).
+  - *Water*: the mirror image skipped every near tree for speed, so the river reflected a bare
+    bank and the sky and looked milky; light copies of the near trees now stand in during the
+    reflection. Foam and white water read a real noise channel (they read a constant before), and
+    there are finer ripples near the camera.
+  - Size: about 14 MB of textures and 2.9 MB of models in the repository.
+- **Version 5.0.0** ("kald denne version 5.0"); the start screen shows *VERSION 5.0 ·
+  PLAYER-REQUESTED UPDATES*. LAN and Steam players need the same version, as before.
+- **Not done / to check on a real PC:** frame rates with the new rifle, crowns and walls; the
+  photoscans in the CI build; the new gunshot by ear; shot distances on the new maps.
+
+## v5.1: mountains around every map
+
+Asked for: "the stone wall that marks the edge should be terrain or mountains instead; you
+should not see any more of the map, just sky", and "every map must show clearly where it ends,
+closed off by mountain or terrain, whether it looks real or not".
+
+- **The mountain ring** (`Terrain._rim` in `src/terrain.js`, part of the height field, so
+  bullets, sight lines, the water reflection and the AI's line-of-sight all see it): measured
+  by the distance outside the play-area rectangle (`edgeDist`, rounded at the corners), the
+  ground rises from exactly the edge to a crest `rimHeight` above the ground there (or above
+  80% of the ridge height, so the valley ends, where the river runs out, get as high a wall),
+  `0.6 × rimHeight` further out. The profile is steepest at the foot (a cliff, about 70°) and
+  rounds off at the crest; the crest has peaks and saddles, the face buttresses and gullies,
+  and behind the crest the mountain mass keeps climbing. `rimHeight` follows the map:
+  0.21 × the map's width, 30-70 m (Ravine 32 m, Narrow 44, Tuscan 50, Beech 55, Valley 61).
+- From anywhere in the play area the mountains rise at least ~15° above the eye in every
+  direction (a horizon check in the tests), so nothing beyond them shows but sky (and, in some
+  directions, higher mountains further back).
+- **Nothing grows on them**: `isFree` now refuses everything outside the play area and keeps a
+  2.5 m strip clear at the foot; the scenery forest outside the play area is gone (thousands of
+  impostor trees fewer to draw).
+- **Look**: the terrain shader projects the rock texture on steep faces (no streaks down a
+  cliff), and darkens and warms the rock outside the play area with faint bands. Tuscany's rock
+  comes out as warm sandstone, the others as grey rock. The mesh keeps its 2 m spacing over the
+  faces and crest.
+- The river runs into the mountain wall at both ends of the valley.
+- The stone wall (`EdgeWall`) and the `wall` map setting are gone.
+
+
+## v5.2: the small details
+
+Asked for: "if you were to bring the game experience as close as possible to a sniper in Call
+of Duty or Battlefield, what would it take?", then "it must still be a sniper-only game: it's
+more the features like sound, graphics standards, hearing close shots, breathing and so on,
+all the small technical details". So no new weapons, modes or progression: only the feel.
+Most of it lives in `src/feel.js`; the sounds are in `src/audio.js` (synthesised like the
+rest; each can be replaced by a recording, see the README).
+
+- **Your hearing** is now a low-pass filter on everything from outside your head (`hearing`
+  in `audio.js`), and the sounds inside it (breath, heartbeat, ringing ears, the hit tick) go
+  to their own `body` bus that skips it (AUDIO → Breath & heartbeat sets its volume). The
+  ambience has its own duck gain.
+- **Suppression** (`Feel.nearMiss`, `Feel.nearImpact`): a bullet whose closest point to your
+  head is within `feel.suppressRadius` (6 m), or that lands that close, suppresses you by
+  k = (1 − miss/6)^0.7 (impacts: 0.85 × (1 − d/6)). It:
+  - closes the hearing filter (down to ~650 Hz at k = 1) for 0.1-0.5 s and lets it open over
+    about a second, and dips the ambience;
+  - rings your ears when the miss was under 1.6 m: a single 3.5-4.1 kHz sine fading over a few
+    seconds (one sine only: two close ones would beat, which is a buzz);
+  - jolts the aim by up to `feel.flinch` (0.3°) in a random direction, half that prone; it
+    settles in half a second, like the recoil;
+  - drains the colour, darkens and blurs the edges of the view (`uSuppress` in the final pass);
+  - wears off over `feel.suppressTime` (1.6 s); meanwhile the sway is up to 2.2× and the
+    breathing and the heart are faster (`player.stress`).
+- **The crack** now seems to come from where the shock wave left the bullet's path (0.44 × the
+  miss distance back toward the shooter, the Mach angle at 850 m/s), and a bullet within 4 m
+  also tears the air: a short broadband hiss whose source runs along the bullet's path past
+  your head in 50 ms. A bullet landing within 9 m adds a thud and a patter of dirt, needles or
+  splinters coming down. There are still no pitch sweeps or tones in the insect band
+  (100-700 Hz): see the measurements below.
+- **Breathing** follows the phase that already moves the reticle (`player.breathPhase`): an
+  inhale starts at the bottom of the swing and an exhale at the top, each lasting most of the
+  half breath. Through the scope it is quiet; after a sprint (fatigue) or out of breath it is
+  a pant you also hear unscoped. Breath is noise through a moving formant, not a tone.
+- **Heartbeat**: while you hold your breath it comes up after 0.6 s and grows as the breath
+  runs out (64 bpm calm, faster with fatigue, stress and the breath hold); also when winded or
+  under fire. "Lub-dub" is two low-passed noise thumps (94% of the energy below 700 Hz but
+  no pitch). Each beat while holding the breath scoped twitches the aim by `feel.pulse`
+  (0.00045 rad, about 4 px at 12× on a 1080p screen), the only thing that still moves it.
+- **Rifle foley**: cloth and cheek as the rifle comes up (scopeT leaves 0) and down (leaves
+  1), one detent click per zoom step. The bolt got its slides back and forward, the ejector's
+  tick and the case landing 0.7-0.85 s later where you stand (`casingSurface`: rock or a wall
+  you stand on rings with a few bounces of high inharmonic partials; forest floor ticks; grass
+  thumps; mud and water swallow it). In first person the case flies out of the ejection port
+  to the right at the end of the back stroke (`Viewmodel._updateBrass`); it lives in camera
+  space, so turning the view swings it the other way, as if it stayed in the world.
+- **Your own shot** compresses your ears: the hearing filter closes to ~4 kHz 35 ms after the
+  shot (after the onset, so the crack is untouched: the first 30 ms measure the same with and
+  without), for 50 ms, opening over 0.3 s; the ambience dips by 60%. Shots within 40 m do the
+  same, less. The view gets a small roll punch; through the scope the picture jumps (a short
+  vertical blur, `uKick`) and the eye box flashes.
+- **The scope's eye box** (`uEye` in the final pass): a real scope only shows a full picture
+  with the eye exactly behind it. The offset follows how fast the view turns (screen widths
+  per second), walking with the rifle up, and the recoil; a dark crescent closes in from the
+  side the eye has slipped toward. As the rifle comes up the picture opens from a tunnel
+  (0.22 s). GRAPHICS → Scope eye box turns it off.
+- **Heat mirage** (`uMirage`): fine wavy bands in the scope picture that boil upward and drift
+  with the crosswind (the wind's component across your line of sight, so you can read it like a
+  wind flag with ballistics on). Strength grows with the rangefinder distance (140-650 m), the
+  magnification (3-9×) and the sunshine (clouds dim it). Up to ~3 px at 1080p. GRAPHICS →
+  Heat mirage turns it off.
+- **Hits**: a tick right away (head: a crisper double tick) and the far-off thump of the hit
+  coming back at the speed of sound. AUDIO → Hit sound.
+- **Prone muzzle dust** (`Effects.blastDust`): a shot fired prone with the muzzle within 1.4 m
+  of the ground kicks up five low puffs pushed forward and to the sides. Everyone sees it (it
+  is a giveaway, as in real life); the AI doesn't use it yet.
+- **Graphics presets** (`GRAPHICS_PRESETS` in `config.js`, GRAPHICS → Quality preset and
+  `?quality=`): low (70% scale, low shadows, no AO, bloom, shafts, reflections or MSAA, 40%
+  grass), medium, high (the default look) and ultra (high shadows, 1.5× grass, pixel ratio up
+  to 2). Any change to a single option shows *custom*. MSAA and grass need a reload.
+
+**Measurements** (each sound rendered offline through the real chain; peak in dBFS; "pitch"
+is the share of 40 ms windows with a real pitch whose fundamental is in 100-700 Hz):
+
+| Sound | Peak | Pitch in 100-700 Hz | Energy below 700 Hz |
+|---|---|---|---|
+| Crack at 1 m with the air tear | −2.2 | 0% | |
+| Ringing ears | −31 | 0% (a 3.5-4.1 kHz tone) | |
+| Breath, calm in/out | −33 / −32 | 0% | 3% |
+| Breath, winded | −21 | 0% | |
+| Heartbeat, full | −18 | 0% | 94% |
+| Scope in / out, zoom click | −27 / −32 / −31 | 0% | |
+| Bolt with the case on rock | −14 | windows flagged by the high partials | 0% |
+| Hit tick + thump at 300 m | −23 | 0% | |
+| Bullet into the ground 3 m away | −8 | 0% | |
+
+The bolt (old clicks too) trips the pitch meter because its high clicks and the case's partials
+repeat at multiples of their short periods; with no energy below 700 Hz it can't sound like an
+insect. As before, **none of this has been checked by ear here**.
+
+**Tested** (headless, swiftshader): the scope-in foley and tunnel, 4 zoom clicks to 12×,
+breathing alternating in/out every 2 s through the scope with no heartbeat, the heartbeat
+coming up while holding the breath (4 beats in 3.8 s, rising strength) with no breathing and
+a 0.0004 rad twitch per beat, the eye box on a fast swing, suppression at 0.92 with a 0.08-0.12°
+flinch wearing off in 2.5 s, the own-shot kick, mirage 0.75 at 520 m and 12×, the case
+ejected to the right, the bolt getting the surface, prone dust (5 puffs), panting after a
+sprint, and no page errors. One run of the swing screenshot came out magenta; two reruns of
+the same sequence didn't, so it looks like a swiftshader glitch, but tell me if you ever see
+a pink scope picture.
+
+### v5.2, after playing it
+
+Asked for: "in a game there is no way to choose another game mode and get back to the lobby: make
+a button to the lobby both in a game and after a round", "there are lots of small specks
+glittering in the game, what are they, can we remove them?" and "the sniper sound is still
+hideous, can it sound more like a smeld (a sharp bang)?".
+
+- **LOBBY** (`backToLobby` / `enterLobby` in `main.js`): in the pause menu and on the end screen.
+  Single player: back to the start screen (state `menu`); SINGLE PLAYER starts a new match with
+  the settings chosen there. LAN host: everyone goes back (a `lobby` message; joined players stay
+  in the session and wait, and the host's next START MATCH sends the usual `round` that puts
+  them in again). Joined player: LEAVE TO LOBBY leaves the host's game (as LEAVE GAME did); the
+  host's own leave button is now END LAN GAME. The pause menu's buttons moved above the settings:
+  they were at the bottom of a long, scrolling panel, which is probably why nobody found them.
+- **The specks** were `particles.js`: needles and bark drifting down under the canopy and dust
+  motes that light up toward the sun. They are off (`render.particles`, GRAPHICS → Drifting
+  needles & dust).
+- **The gunshot** (`muzzleBlast` in `sfx.js`; the v5 one is kept as `muzzleBlastV5` for the
+  comparison): a crack and a sharp blast wave (1.6-2 ms positive phase) with a 3 ms burst of
+  bright noise, a low-mid punch over in ~80 ms and a short low thump, the ground reflection and
+  seven trunk reflections in the first 70 ms; only the first 60 ms go into a soft clipper (the
+  dense front of a real shot), the rest stays clean. The valley's echo (`_valleyIR` in
+  `audio.js`) was white noise from t = 0, which put a hiss on every shot: now it is five
+  distinct echo bursts, dulled more the later they come, and a low-passed diffuse roll that
+  starts once the shot is over. Measured through the whole chain (own shot):
+
+  | | v5 | v5.2 |
+  |---|---|---|
+  | Peak | −0.8 dBFS | −1.1 dBFS |
+  | RMS, first 100 ms | −8.1 dB | −10.9 dB |
+  | Energy in the first 100 ms | 37% | 93% |
+  | Above −20 dB of the peak until | 250 ms+ | 74 ms |
+  | First echoes | −5 / −6 dB | −15 / −19 dB |
+  | Tail (0.1-3 s) RMS | −20 dB | −36 dB |
+
+  No pitched windows in the insect band. Still **not checked by ear here**.
+- **Played, the short one was wrong too:** "still not it, it should be much more gu-DISHHH. A
+  rifle: a short, loud bang. Now it sounds like a lame, dull parlour rifle. It must be much more
+  shrill, almost like a whip cracking: dishhh." It kept most of its energy below 1 kHz (a thud), and
+  the ear compression after your own shot (a low-pass closing to ~4 kHz 35 ms after the shot)
+  cut the highs right after the crack. Now (`muzzleBlast`; the short one is `muzzleBlastShort`):
+  a crack and a very sharp blast wave (1.2-1.5 ms) with a burst of bright noise ("DI"), bright
+  noise (mostly 2-8 kHz) hissing on for ~0.4 s with 36 dense, bright trunk and ground reflections
+  in the first 150 ms ("SHHH"), and a small low thump and body under it ("gu"). Gunshots no longer
+  close the hearing filter (bullets cracking past still do), and the valley's echoes are brighter.
+
+  | Own shot, whole chain | v5 boom | short (first v5.2) | whip crack (now) |
+  |---|---|---|---|
+  | Energy above 2 kHz, crack (0-50 ms) | 34% | 15% | 66% |
+  | Energy above 2 kHz, after it (50-400 ms) | 3% | 7% | 92% |
+  | Energy in the first 100 ms | 40% | 94% | 96% |
+  | Above −20 dB of the peak until | 250 ms+ | 82 ms | 140 ms |
+  | First echoes | −7 dB | −13 dB | −18 dB |
+
+  RMS in the first 100 ms is −13 dB (the short one −11), but the energy sits where the ear is
+  most sensitive (2-5 kHz), so it should sound louder, not quieter.
+- **"Your own shot is perfect, the others' are a bit worse."** Others' shots were played slower
+  with distance (1/(1 + d/1200): 20% lower at 300 m, a dull thud), filtered hard by the air
+  (down to 2.4 kHz), drowned in echo (send up to 1.4) and dulled by the HRTF panner, which took
+  about half of the crack's highs (measured against an equal-power panner: 31% vs 56% of the
+  crack above 2 kHz at 60 m). Now: no slow-down, the air low-pass is 20 kHz / (1 + d/400) and
+  never below 4.5 kHz, the echo send is 0.35 + d/600 (at most 0.9), level 65 / (d + 35), and a
+  +6 dB shelf above 2.2 kHz makes up for the HRTF, which stays (it tells front from behind).
+
+  | Others' shot | crack above 2 kHz (before → now) | hiss above 2 kHz | echo vs. shot |
+  |---|---|---|---|
+  | 60 m | 31% → 58% | 62% → 84% | −16 → −16 dB |
+  | 150 m | 31% → 54% | 43% → 89% | −13 → −17 dB |
+  | 300 m | 53% → 56% | 41% → 84% | −9 → −16 dB |
+  | 600 m | 36% → 76% | 52% → 73% | −10 → −13 dB |
+- **"When you choose a map it loads at once; it should only load when the game starts."**
+  `selectMap` marks the map (`pendingMap`, the cards and the MATCH tab follow `hud.selectedMap`,
+  the button reads PLAY <MAP>). Starting a game (SINGLE PLAYER, RESTART / NEW MATCH, R) with
+  another map chosen saves it and reloads the page with a one-shot `sniperyard.autostart` flag in
+  sessionStorage; the new page goes straight into the match and waits for a click (the mouse
+  and the sound need a user gesture). A LAN host's START MATCH runs the old map change: everyone
+  reloads into the map and the host starts the match again once they are back.
+
+### Megascans on the Valley
+
+Asked for: "I have downloaded new glb assets into public/assets in the repository. Try to dress
+one of the maps with them and see if we get closer to something 2026 than 2016 as today."
+
+- **What came in**: twelve Quixel Megascans models from Fab (`generator: fab-model-conversion`,
+  the "mid" glTF download): two mossy rocks and a rock cluster, two flat ground rocks, a 7.8 m
+  mossy fallen trunk, a branchy log, a broken birch snag, an uprooted tree with its root plate,
+  two "fallen pine" scatters (mostly a patch of needle floor with a twig), a patch of surface
+  roots and a mushroom. 2-14k triangles each but three 2048 px textures, 9.5-17 MB per file.
+- **License**: Megascans on Fab are under the Fab Standard License, which does not allow sharing
+  the files. They were uploaded to `public/assets/` on `main` of this public repository; they
+  should come out of it (and its history) and live in a private place. Nothing of them is
+  committed on this branch: the work copies sit in the git-ignored `public/assets/megascans/`.
+- **`npm run megascans`** (`scripts/megascans/optimize.mjs`, gltf-transform + meshoptimizer +
+  sharp, dev dependencies): from `megascans-src/` (git-ignored and outside `public/`, so the
+  165 MB of originals don't go into every build; also `public/assets/megascans/source/` or loose
+  `.glb` files in `public/assets/`), skipping Windows "- Kopi" duplicates, it simplifies each model to a budget
+  for its kind (rocks, logs and uprooted trees ~2400-2600 triangles, the snag 1300, the mushroom
+  900), scales the textures to 1024 px WebP, meshopt-compresses it, and writes a far copy (about
+  a fifth of the triangles, 512 px). 12 models: 11 MB in all, 0.7-0.9 MB per near copy. It
+  writes `megascans.json` with each model's role, guessed from the name and the shape (flat
+  pieces are patches whatever the name says: the "fallen pine trees" are mostly forest floor).
+- **In the game** (`src/megascans.js`, only on maps in `megascans.maps`, now the Valley; a
+  missing folder means the game as before; `?megascans=0` compares):
+  - rocks: the mossy rock (`rock-boulder`) and the rock cluster and flat ground rock
+    (`rock-slab`) replace the generated boulders. Their tops are still baked into height maps,
+    so walking, climbing, bullets and sight lines follow the drawn rock. Flat scanned rocks lie
+    along the slope and are buried by a third of their own height (the generated rocks' fixed
+    burial buried them whole);
+  - fallen logs (`log`): fitted to the procedural logs' frame (trunk axis from the middle third
+    of the model), so their colliders are the same capsules; a scanned trunk keeps its moss on
+    top (only a little roll);
+  - stumps (`snag`): the birch snag, collider from its mid-height radius;
+  - 14 uprooted trees (`uprooted`): the root plate collides as a wide stump, the trunk as a log;
+  - 260 patches of forest floor and mushrooms at the foot of some logs and stumps: no collision,
+    no shadows, drawn within 160 m and 30 m (zoom-scaled).
+- **`LodInstances`** (`src/lodinst.js`): every frame each piece in view goes to its near copy
+  within 70 m (zoom-scaled: through a 12× scope that is 840 m) or its far copy beyond; pieces out
+  of view are not drawn (the generated rocks were all drawn, all the time). Valley, measured
+  (triangles drawn in a frame, shadow pass included): close views 3.7-3.9 M before, 1.6-1.7 M
+  now; through the scope at 6× and 12× 4.1 / 4.0 M before, 1.8 / 1.6 M now.
+- **Brightness**: "why are the pictures so dark?" Megascans are calibrated much darker than the
+  game's own textures (mean linear albedo: mossy rocks 0.024-0.055 and the uprooted tree 0.042,
+  against the game's rock 0.23, barks 0.13-0.14, forest floor 0.09), so they stood out as black
+  lumps. `npm run megascans` now measures each model's albedo (`megascans.json`), and the game
+  lifts it to a target per role (rocks 0.14-0.15, wood 0.11-0.12, patches 0.085), never darker
+  and at most 4×. The rest of the darkness in those pictures was the scene: the low afternoon sun
+  (13°), the shade under the trees, and some shots taken against the sun.
+- Not done yet: the other maps, the trees themselves (the biggest step toward a 2026 look; the
+  European Beech pack waits for its Unreal export), Megascans ground surfaces for the terrain, and
+  grass. The patches' ground colour does not always match the terrain under them.
