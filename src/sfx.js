@@ -67,7 +67,75 @@ function nWave(sr, T) {
 }
 
 // Muzzle report of a full-power sniper rifle as heard by the shooter (or anyone within a few
-// metres). Distance is applied at playback (filter, level, playback rate, reverb send).
+// metres). Distance is applied at playback (filter, level, playback rate, echo send).
+//
+// v5.2, after "the sniper sound is still hideous, can it sound more like a smeld (a sharp
+// bang)?": the v5 boom spread its energy over 3 s (a brown-noise rumble, saturated hot-gas noise,
+// 40 reflections, tanh on everything) and read as a roar with hiss. A shot heard from behind the
+// rifle is one hard, short SMACK, then the valley answering:
+//   1. the blast: the bullet's crack leaving the muzzle and a sharp blast wave (1.6-2 ms positive
+//      phase), with a 3 ms burst of bright noise for the edge;
+//   2. the punch: low-mid noise (80-900 Hz) that is over in about 80 ms, and a short low thump;
+//   3. the ground reflection (3-4 ms later, duller) and a handful of trunk reflections in the
+//      first 70 ms;
+//   4. nothing after ~0.3 s: the distinct echoes from the slopes come from the echo bus
+//      (audio.js) at playback, so far shots get more of them.
+// No saturation; no pitch sweeps or tones (they read as an insect flying past).
+export function muzzleBlast(sr, seed = 1) {
+  const r = rng(seed);
+  const out = new Float32Array(Math.floor(sr * 0.45));
+  // 1. crack and blast wave
+  const crack = nWave(sr, 0.0009 + r() * 0.0002);
+  mixInto(out, crack, 0, 0.85);
+  const Td = 0.0016 + r() * 0.0004;
+  const blast = friedlander(sr, Td, 1.3, 0.03);
+  mixInto(out, blast, Math.round(sr * 0.0003), 1.0);
+  const edge = new Float32Array(Math.floor(sr * 0.02));
+  for (let i = 0; i < edge.length; i++) edge[i] = (r() * 2 - 1) * Math.exp(-(i / sr) / 0.0028);
+  highpass(edge, sr, 1200);
+  mixInto(out, normalize(edge, 1), 0, 0.5);
+  // 2. punch: band-limited noise with a fast attack, gone in ~80 ms
+  const punch = new Float32Array(Math.floor(sr * 0.2));
+  for (let i = 0; i < punch.length; i++) {
+    const t = i / sr;
+    punch[i] = (r() * 2 - 1) * Math.min(1, t / 0.0008) * (Math.exp(-t / 0.02) * 0.8 + Math.exp(-t / 0.006) * 0.4);
+  }
+  lowpass(punch, sr, 1000); lowpass(punch, sr, 1300); highpass(punch, sr, 80);
+  mixInto(out, normalize(punch, 1), 0, 1.25);
+  const thump = new Float32Array(Math.floor(sr * 0.2));
+  for (let i = 0; i < thump.length; i++) {
+    const t = i / sr;
+    thump[i] = (r() * 2 - 1) * Math.min(1, t / 0.001) * Math.exp(-t / 0.03);
+  }
+  lowpass(thump, sr, 140); lowpass(thump, sr, 160);
+  mixInto(out, normalize(thump, 1), 0, 1.0);
+  // 3. ground reflection and a few trunks
+  const head = new Float32Array(Math.floor(sr * 0.03));
+  mixInto(head, blast, 0, 1);
+  mixInto(head, edge, 0, 0.4);
+  const dull = lowpass(Float32Array.from(head), sr, 3500);
+  mixInto(out, dull, Math.round(sr * (0.0028 + r() * 0.0012)), 0.55);
+  const far = lowpass(lowpass(Float32Array.from(head), sr, 2200), sr, 2600);
+  for (let k = 0; k < 7; k++) {
+    const t = 0.008 + Math.pow(r(), 1.4) * 0.065;
+    mixInto(out, far, Math.round(sr * t), (0.14 + r() * 0.14) * Math.exp(-t / 0.035));
+  }
+  // the first 60 ms driven a little into a soft clipper (the dense, loud front of a real shot; the
+  // rest stays clean), crossfaded so the decay is untouched
+  const k0 = Math.floor(sr * 0.045), k1 = Math.floor(sr * 0.075);
+  let m = 0; for (let i = 0; i < k1; i++) m = Math.max(m, Math.abs(out[i]));
+  for (let i = 0; i < k1; i++) {
+    const w = i < k0 ? 1 : 1 - (i - k0) / (k1 - k0);
+    const x = out[i] / m;
+    out[i] = m * (w * Math.tanh(x * 2.2) / Math.tanh(2.2) + (1 - w) * x);
+  }
+  // fade the last 40 ms (no click at the end of the buffer)
+  const n = out.length, f = Math.floor(sr * 0.04);
+  for (let i = 0; i < f; i++) out[n - 1 - i] *= i / f;
+  return normalize(out, 0.97);
+}
+
+// The v5 report (kept for comparison in tests, see muzzleBlast below).
 //
 // v5, after "it sounds like a puff from an air rifle": the old blast was a 1.3 ms click with a
 // small sine body, so almost all of its peak was in a click and there was little energy behind
@@ -79,7 +147,7 @@ function nWave(sr, T) {
 //      and a low rumble rolling away for ~2.5 s.
 // Everything is driven into a soft saturator so the loudness (RMS) is many times the old one at
 // the same peak. Still no pitch sweeps anywhere (they read as an insect flying past).
-export function muzzleBlast(sr, seed = 1) {
+export function muzzleBlastV5(sr, seed = 1) {
   const r = rng(seed);
   const len = 3.2;
   const out = new Float32Array(Math.floor(sr * len));
@@ -137,29 +205,6 @@ export function muzzleBlast(sr, seed = 1) {
   // soft saturation: loud and dense, peaks rounded (the master bus clips softly as well)
   for (let i = 0; i < out.length; i++) out[i] = Math.tanh(out[i] * 1.25);
   return normalize(out, 0.97);
-}
-
-// The old (0.2–0.4) blast, kept for comparison in tests (`muzzleBlastOld`).
-export function muzzleBlastOld(sr, seed = 1) {
-  const r = rng(seed);
-  const out = new Float32Array(Math.floor(sr * 1.6));
-  const Td = 0.0013 + r() * 0.0005;
-  const blast = friedlander(sr, Td, 0.9, 0.03);
-  mixInto(out, blast, 0, 1.0);
-  mixInto(out, lowpass(Float32Array.from(blast), sr, 5000), Math.round(sr * (0.0042 + r() * 0.0015)), 0.6);
-  const nz = new Float32Array(Math.floor(sr * 0.06));
-  for (let i = 0; i < nz.length; i++) nz[i] = (r() * 2 - 1) * Math.exp(-(i / sr) / 0.008);
-  highpass(nz, sr, 700);
-  mixInto(out, nz, 0, 0.55);
-  const body = new Float32Array(Math.floor(sr * 0.35));
-  const f1 = 62 + r() * 10, f2 = 140 + r() * 30;
-  for (let i = 0; i < body.length; i++) {
-    const t = i / sr;
-    body[i] = Math.sin(2 * Math.PI * f1 * t) * Math.exp(-t / 0.07) * 0.6 + Math.sin(2 * Math.PI * f2 * t) * Math.exp(-t / 0.03) * 0.3;
-  }
-  for (let i = 0; i < Math.min(body.length, sr * 0.002); i++) body[i] *= i / (sr * 0.002);
-  mixInto(out, body, 0, 0.5);
-  return normalize(out, 0.95);
 }
 
 // Supersonic crack of a passing bullet. `miss` (metres from the bullet path) lengthens the

@@ -4,6 +4,7 @@
 // box that follows the camera, so it costs almost nothing.
 import * as THREE from 'three';
 import { SHARED } from './shaders.js';
+import { CONFIG } from './config.js';
 
 const COUNT = 2400;
 const NEEDLE_SHARE = 0.62;
@@ -156,6 +157,8 @@ export class ForestParticles {
     u.uFade.value = 1 - THREE.MathUtils.smoothstep(scopeT, 0.1, 0.5);
     renderer.getDrawingBufferSize(this._size);
     u.uPx.value = this._size.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
-    this.points.visible = u.uFade.value > 0.01;
+    // v5.2: off by default (GRAPHICS → Drifting needles & dust): players read the glittering
+    // motes as noise on the screen
+    this.points.visible = CONFIG.render.particles && u.uFade.value > 0.01;
   }
 }

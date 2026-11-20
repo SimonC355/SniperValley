@@ -1062,3 +1062,40 @@ ejected to the right, the bolt getting the surface, prone dust (5 puffs), pantin
 sprint, and no page errors. One run of the swing screenshot came out magenta; two reruns of
 the same sequence didn't, so it looks like a swiftshader glitch, but tell me if you ever see
 a pink scope picture.
+
+### v5.2, after playing it
+
+Asked for: "in a game there is no way to choose another game mode and get back to the lobby: make
+a button to the lobby both in a game and after a round", "there are lots of small specks
+glittering in the game, what are they, can we remove them?" and "the sniper sound is still
+hideous, can it sound more like a smeld (a sharp bang)?".
+
+- **LOBBY** (`backToLobby` / `enterLobby` in `main.js`): in the pause menu and on the end screen.
+  Single player: back to the start screen (state `menu`); SINGLE PLAYER starts a new match with
+  the settings chosen there. LAN host: everyone goes back (a `lobby` message; joined players stay
+  in the session and wait, and the host's next START MATCH sends the usual `round` that puts
+  them in again). Joined player: LEAVE TO LOBBY leaves the host's game (as LEAVE GAME did); the
+  host's own leave button is now END LAN GAME. The pause menu's buttons moved above the settings:
+  they were at the bottom of a long, scrolling panel, which is probably why nobody found them.
+- **The specks** were `particles.js`: needles and bark drifting down under the canopy and dust
+  motes that light up toward the sun. They are off (`render.particles`, GRAPHICS → Drifting
+  needles & dust).
+- **The gunshot** (`muzzleBlast` in `sfx.js`; the v5 one is kept as `muzzleBlastV5` for the
+  comparison): a crack and a sharp blast wave (1.6-2 ms positive phase) with a 3 ms burst of
+  bright noise, a low-mid punch over in ~80 ms and a short low thump, the ground reflection and
+  seven trunk reflections in the first 70 ms; only the first 60 ms go into a soft clipper (the
+  dense front of a real shot), the rest stays clean. The valley's echo (`_valleyIR` in
+  `audio.js`) was white noise from t = 0, which put a hiss on every shot: now it is five
+  distinct echo bursts, dulled more the later they come, and a low-passed diffuse roll that
+  starts once the shot is over. Measured through the whole chain (own shot):
+
+  | | v5 | v5.2 |
+  |---|---|---|
+  | Peak | −0.8 dBFS | −1.1 dBFS |
+  | RMS, first 100 ms | −8.1 dB | −10.9 dB |
+  | Energy in the first 100 ms | 37% | 93% |
+  | Above −20 dB of the peak until | 250 ms+ | 74 ms |
+  | First echoes | −5 / −6 dB | −15 / −19 dB |
+  | Tail (0.1-3 s) RMS | −20 dB | −36 dB |
+
+  No pitched windows in the insect band. Still **not checked by ear here**.

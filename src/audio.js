@@ -72,7 +72,7 @@ export class AudioSystem {
       b.getChannelData(0).set(data);
       return b;
     };
-    this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));   // v5: whip-crack + heavy boom
+    this.blasts = [11, 23, 37].map((sd) => toBuffer(muzzleBlast(ctx.sampleRate, sd)));   // v5.2: a short, hard smack
     this.cracks = [[1.5, 5], [6, 17], [16, 29]].map(([miss, sd]) => ({ miss, bufs: [sd, sd + 1].map((k) => toBuffer(supersonicCrack(ctx.sampleRate, k, miss))) }));
     this.cawBufs = [41, 42, 43, 44, 45, 46].map((sd) => toBuffer(crowCaw(ctx.sampleRate, sd)));
     this.samples = {};
@@ -176,20 +176,32 @@ export class AudioSystem {
   }
 
   // Impulse response: diffuse decay plus discrete slope reflections.
+  // The valley answering a shot (v5.2): distinct, dulled echoes off the slopes and the valley
+  // ends, and a low diffuse roll between them that starts once the shot itself is over. (It was
+  // white noise from t = 0, which laid a hiss over every shot.)
   _valleyIR() {
-    const ctx = this.ctx;
-    const len = Math.floor(ctx.sampleRate * 3.2);
-    const b = ctx.createBuffer(2, len, ctx.sampleRate);
+    const ctx = this.ctx, sr = ctx.sampleRate;
+    const len = Math.floor(sr * 3.2);
+    const b = ctx.createBuffer(2, len, sr);
+    const lp = (d, hz) => { const a = Math.exp(-2 * Math.PI * hz / sr); let y = 0; for (let i = 0; i < d.length; i++) { y = (1 - a) * d[i] + a * y; d[i] = y; } };
+    const peakTo = (d, p) => { let m = 0; for (const v of d) m = Math.max(m, Math.abs(v)); if (m > 0) for (let i = 0; i < d.length; i++) d[i] *= p / m; };
     for (let ch = 0; ch < 2; ch++) {
       const d = b.getChannelData(ch);
       for (let i = 0; i < len; i++) {
-        const t = i / ctx.sampleRate;
-        d[i] = (Math.random() * 2 - 1) * Math.exp(-t * 1.6) * 0.18 * Math.min(1, t * 30);
+        const t = i / sr;
+        const rise = Math.min(1, Math.max(0, (t - 0.06) / 0.2));
+        d[i] = (Math.random() * 2 - 1) * Math.exp(-t / 0.55) * rise;
       }
-      // reflections from the slopes and valley ends
-      for (const [t0, a] of [[0.28, 0.7], [0.52, 0.55], [0.95, 0.4], [1.45, 0.28], [2.1, 0.16]]) {
-        const s0 = Math.floor((t0 + ch * 0.013) * ctx.sampleRate);
-        for (let k = 0; k < 2400 && s0 + k < len; k++) d[s0 + k] += (Math.random() * 2 - 1) * a * Math.exp(-k / 500);
+      lp(d, 900); lp(d, 1200);
+      peakTo(d, 0.07);
+      // the echoes: compact bursts (a few ms), duller the further they travelled
+      for (const [t0, a, hz] of [[0.3, 0.75, 2400], [0.55, 0.55, 2000], [0.98, 0.4, 1600], [1.5, 0.26, 1300], [2.15, 0.15, 1100]]) {
+        const s0 = Math.floor((t0 + ch * 0.013 + (Math.random() - 0.5) * 0.01) * sr);
+        const burst = new Float32Array(Math.floor(sr * 0.06));
+        for (let k = 0; k < burst.length; k++) burst[k] = (Math.random() * 2 - 1) * Math.exp(-k / (sr * 0.006));
+        lp(burst, hz); lp(burst, hz * 1.3);
+        peakTo(burst, a);
+        for (let k = 0; k < burst.length && s0 + k < len; k++) d[s0 + k] += burst[k];
       }
     }
     return b;
@@ -269,7 +281,7 @@ export class AudioSystem {
     else out.connect(this._panner(pos)).connect(this.master);
     // send to the valley echo (relatively stronger for distant shots)
     const send = ctx.createGain();
-    send.gain.value = own ? 0.45 : Math.min(1.4, 0.4 + d / 300);
+    send.gain.value = own ? 0.4 : Math.min(1.4, 0.4 + d / 300);
     out.connect(send).connect(this.echo);
     const air = ctx.createBiquadFilter();
     air.type = 'lowpass';

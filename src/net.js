@@ -263,6 +263,14 @@ export class LanGame {
       if (!this.isHost && from === this.s.hostId) g.followHostMap(d.map);
       return;
     }
+    // the host went back to the lobby: wait there for its next START MATCH (a new 'round')
+    if (d.k === 'lobby') {
+      if (!this.isHost && from === this.s.hostId && g.state !== 'menu') {
+        g.lanNote = 'THE HOST WENT BACK TO THE LOBBY · WAITING FOR THE NEXT MATCH';
+        g.enterLobby();
+      }
+      return;
+    }
     // a joined client ignores game traffic until the host has put it into a round
     if (!this.isHost && d.k !== 'round' && (!this.roundId || g.roundId !== this.roundId)) return;
     switch (d.k) {

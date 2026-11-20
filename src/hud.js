@@ -152,6 +152,7 @@ export class HUD {
           <label>Grass density (reload)</label><input id="set-grass" type="range" min="0" max="1.5" step="0.1">
           <label>Scope eye box</label><select id="set-eyebox">${opt([['1', 'on (dark edge when the eye is off the scope)'], ['0', 'off']])}</select>
           <label>Heat mirage</label><select id="set-mirage">${opt([['1', 'on (shimmer at long range)'], ['0', 'off']])}</select>
+          <label>Drifting needles &amp; dust</label><select id="set-particles">${opt([['0', 'off'], ['1', 'on (motes light up toward the sun)']])}</select>
         </div>
         <div class="note">Graphics settings are saved on this computer. <a href="?bench" class="link">Run the benchmark</a> to measure frame rates on this PC.</div>
       </div>
@@ -197,15 +198,15 @@ export class HUD {
     </div>`);
     this.pauseScreen = make('pausescreen', `<div class="panel">
       <h1>PAUSED</h1>
-      <div class="sub">CLICK RESUME TO RE-LOCK THE MOUSE</div>
+      <div class="sub">CLICK RESUME TO RE-LOCK THE MOUSE · LOBBY: CHOOSE ANOTHER MAP OR MODE</div>
+      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-lobby">LOBBY</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button><button id="btn-quit2" class="desk quit">QUIT</button></div>
       ${settings.replace(/id="set-/g, 'id="s1-')}
-      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button><button id="btn-quit2" class="desk quit">QUIT</button></div>
     </div>`);
     this.endScreen = make('endscreen', `<div class="panel">
       <h1 id="end-title">VICTORY</h1>
       <div class="sub" id="end-sub"></div>
       <div class="stats" id="end-stats"></div>
-      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button><button id="btn-quit3" class="desk">QUIT</button></div>
+      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button><button id="btn-lobby2">LOBBY</button><button id="btn-quit3" class="desk">QUIT</button></div>
     </div>`);
     this.loading = document.createElement('div');
     this.loading.id = 'loading';
@@ -306,6 +307,7 @@ export class HUD {
         g('hitsnd').value = C.feel.hitSound ? '1' : '0';
         g('eyebox').value = C.feel.scopeShadow ? '1' : '0';
         g('mirage').value = C.feel.mirage ? '1' : '0';
+        g('particles').value = C.render.particles ? '1' : '0';
         g('preset').value = currentPreset();
         g('preset').querySelector('option[value="custom"]').disabled = currentPreset() !== 'custom';
         for (const k in fmt) { const el = g(`${k}-v`); if (el) el.textContent = fmt[k](g(k).value); }
@@ -347,6 +349,7 @@ export class HUD {
       on('hitsnd', (v) => { C.feel.hitSound = v === '1'; });
       on('eyebox', (v) => { C.feel.scopeShadow = v === '1'; });
       on('mirage', (v) => { C.feel.mirage = v === '1'; });
+      on('particles', (v) => { C.render.particles = v === '1'; });
       // a preset sets every graphics option at once (MSAA and grass after a reload)
       g('preset').addEventListener('change', () => {
         const P = GRAPHICS_PRESETS[g('preset').value];

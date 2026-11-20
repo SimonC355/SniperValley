@@ -405,6 +405,9 @@ class Game {
     document.getElementById('btn-resume').addEventListener('click', () => start(false));
     document.getElementById('btn-restart').addEventListener('click', () => start(true));
     document.getElementById('btn-again').addEventListener('click', () => start(true));
+    // v5.2: back to the start screen to choose another map, mode or game
+    document.getElementById('btn-lobby').addEventListener('click', () => this.backToLobby());
+    document.getElementById('btn-lobby2').addEventListener('click', () => this.backToLobby());
     this.input.onLockChange = (locked, failed) => {
       if (failed) {
         // pointer lock unavailable: play with arrow keys
@@ -943,12 +946,43 @@ class Game {
 
   updateMenuButtons() {
     const authority = !this.net || this.net.isHost;
-    document.getElementById('btn-restart').style.display = authority ? '' : 'none';
-    document.getElementById('btn-leavegame').style.display = this.net ? '' : 'none';
+    const $ = (id) => document.getElementById(id);
+    $('btn-restart').style.display = authority ? '' : 'none';
+    // LOBBY: single player and the LAN host (who takes everyone back to the lobby with them);
+    // a joined player's way back is LEAVE GAME
+    $('btn-lobby').style.display = authority ? '' : 'none';
+    for (const id of ['btn-lobby', 'btn-lobby2']) $(id).textContent = !this.net ? 'LOBBY' : authority ? 'LOBBY (EVERYONE)' : 'LEAVE TO LOBBY';
+    $('btn-leavegame').style.display = this.net ? '' : 'none';
+    $('btn-leavegame').textContent = this.net && this.net.isHost ? 'END LAN GAME' : 'LEAVE TO LOBBY';
+  }
+
+  // v5.2: from a running game or the end of a match back to the start screen, to pick another
+  // map or mode. A LAN host takes the joined players along (they wait in the lobby for the next
+  // START MATCH); a joined player leaves the host's game.
+  backToLobby() {
+    if (this.net && !this.net.isHost) { this.leaveNet(); return; }
+    if (this.net) this.net.s.toAll({ k: 'lobby' });
+    this.enterLobby();
+  }
+
+  enterLobby() {
+    this.state = 'menu';
+    this.paused = false;
+    this.killcam = null;
+    this.spectating = null;
+    this.hud.setKillcam(null);
+    this.hud.clearCenter();
+    this.hud.showPause(false);
+    this.hud.showEnd(false);
+    this.hud.showStart(true);
+    this.post.uniforms.uFade.value = 0;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.renderLobby();
   }
 
   enterNetGame() {
     const host = this.net.isHost;
+    this.lanNote = '';
     this.combat.claimHits = !host;
     this.birds.authority = host;
     this.state = 'playing';

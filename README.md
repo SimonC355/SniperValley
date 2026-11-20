@@ -212,7 +212,7 @@ sensitivity, field of view, invert Y, and whether the scope opens at 2× or at t
 | T | debug: skip to the next zone step (single player / LAN host) |
 | F1 | debug overlay (AI states, awareness, live reveal-event log) |
 | F2 | debug: reveal all characters |
-| Esc | pause / settings (in LAN games the match keeps running) |
+| Esc | pause / settings / LOBBY (back to the start screen; in LAN games the match keeps running) |
 
 When you are shot, the **killcam** turns toward the shooter and zooms in on them. It shows:
 
@@ -525,3 +525,6 @@ are in [CREDITS.md](CREDITS.md).
 - **Prone.** Fire prone and watch the dust in front of the muzzle.
 - **Hits.** Hit someone far away: a tick, then the thump of the hit a moment later.
 - **Settings.** Try each Quality preset; tell me which one runs smoothly on your PC.
+- **Lobby.** Esc → LOBBY, pick another mode, play. Finish a match → LOBBY. In a LAN game the
+  host's LOBBY takes everyone back; START MATCH brings them all in again.
+- **Gunshot.** Fire: one hard, short bang and then the valley answering, no long roar.

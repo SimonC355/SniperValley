@@ -47,6 +47,7 @@ export const CONFIG = {
     reflections: true,
     sunShafts: true,       // screen-space light shafts when looking toward the sun
     autoResolution: true,  // lower the resolution (down to 60%) when frames take longer than ~17 ms
+    particles: false,      // v5.2: needles drifting down and dust motes in the sun (off: they glittered like noise)
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
     grain: 0.03,
