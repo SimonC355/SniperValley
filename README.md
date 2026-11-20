@@ -252,11 +252,24 @@ Any sound you leave out stays synthesised. Use CC0 recordings, for example
 [freesound.org](https://freesound.org) filtered to *Creative Commons 0*, and list them in
 CREDITS.md.
 
+### Megascans models (optional)
+
+Quixel Megascans from Fab (glTF downloads, e.g. `nordic_forest_rock_small_..._mid.glb`) can
+dress the Valley's forest floor. Their license does not allow sharing the files, so **never
+commit them** (this repository is public):
+
+1. Put the downloaded `.glb` files in `megascans-src/` in the project folder (git-ignored, and
+   outside `public/`, so the originals don't go into every build).
+2. `npm run megascans` makes light copies (simplified, 1024 px WebP textures, a far copy) in
+   `public/assets/megascans/` and lists them in `megascans.json` with a role each (rock, log,
+   snag, uprooted, patch, mushroom; edit the file to change one).
+3. Start the game on the Valley. `?megascans=0` turns them off to compare.
+
 ## URL options
 
 `?map=valley|narrow|ravine` · `?mode=radial` · `?team=3` (1–20) · `?game=tdm` (team deathmatch) ·
 `?kills=30` (kills to win) · `?ff=0` (friendly fire off) · `?ballistics=1` · `?tracers=off|faint|bright` (bullet trails) ·
-`?camo=0.5` · `?quality=low|medium|high|ultra` (graphics preset) · `?dummies=1` (orange shooting-range targets that show the exact
+`?camo=0.5` · `?quality=low|medium|high|ultra` (graphics preset) · `?megascans=0` (without your Megascans models) · `?dummies=1` (orange shooting-range targets that show the exact
 hitboxes) · `?autostart` (skip the menu) · `?photo=0` (procedural textures even if photoscans
 are downloaded) · `?shafts=0` (no light shafts) · `?rounds=3` (rounds to win) · `?bench`
 (benchmark) · `?autores=0` (no auto resolution).
@@ -272,7 +285,9 @@ src/
   terrain.js     analytic valley heightfield, 1 m height grid, splat material, zone line
   water.js       river: planar reflection, fresnel, depth transparency
   trees.js       procedural conifers (LOD0/LOD1/impostor/shadow proxy) + undergrowth
-  rocks.js       procedural boulders
+  rocks.js       procedural boulders (or Higgsfield / Megascans models)
+  megascans.js   optional Megascans models from public/assets/megascans/ (npm run megascans)
+  lodinst.js     near / far copies of instanced models, culled to the view
   debris.js      fallen logs, stumps and dead branches (logs and stumps are cover)
   grass.js       instanced grass tiles around the viewer
   sky.js         sky (clouds from weather.js), sun, environment light, shadow frustum

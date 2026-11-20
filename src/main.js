@@ -19,6 +19,7 @@ import { Forest, Undergrowth } from './trees.js';
 import { Rocks } from './rocks.js';
 import { Buildings } from './buildings.js';
 import { loadHouseModels, loadRockModels } from './models.js';
+import { loadMegascans } from './megascans.js';
 import { loadGhillieModel } from './ghilliemodel.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
@@ -116,7 +117,24 @@ class Game {
     await nextFrame();
     // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
     // (and the leafy 3D ghillie suit, which every character clones)
-    const [houseModels, rockModels] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadGhillieModel()]);
+    const [houseModels, rockModels, megascans] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadMegascans(MAP_ID), loadGhillieModel()]);
+    // v5.2: Megascans rocks (your own Fab downloads) replace the generated boulders on this map
+    this.megascans = megascans;
+    let rocksIn = rockModels;
+    if (megascans && (megascans['rock-boulder'] || megascans['rock-slab'])) {
+      const used = new Set();
+      const pick = (list, i) => {
+        const m = list && list[i % list.length];
+        if (!m || used.has(m)) return null;
+        used.add(m);
+        const parts = m.near;
+        parts.far = m.far;
+        return parts;
+      };
+      const b = megascans['rock-boulder'], sl = megascans['rock-slab'];
+      rocksIn = { boulder: pick(b || sl, 0), slab: pick(sl || b, 0), block: pick(sl || b, 1) };
+      for (const k of Object.keys(rocksIn)) if (!rocksIn[k]) delete rocksIn[k];
+    }
     this.buildings = new Buildings(scene, terrain, this.textures, CONFIG.seed, houseModels);
 
     this.hud.setLoading('GROWING THE FOREST');
@@ -125,8 +143,8 @@ class Game {
     terrain.bakeSplat(this.forest.buildCanopyGrid());
     scene.add(terrain.buildMesh(this.textures));
     this.undergrowth = new Undergrowth(scene, terrain, this.forest, this.textures, CONFIG.seed);
-    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed, rockModels);
-    this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed);
+    this.rocks = new Rocks(scene, terrain, this.forest, this.textures, CONFIG.seed, rocksIn);
+    this.debris = new Debris(scene, terrain, this.forest, this.textures, CONFIG.seed, megascans);
     this.grass = new Grass(scene, terrain, this.textures);
     this.particles = new ForestParticles(scene, terrain);
 
@@ -1736,6 +1754,13 @@ class Game {
     this.shadowFocus = focus;
     this.sky.updateShadow(focus, extent);
     this.forest.update(cam, focus, CONFIG.trees.shadowDistance * (extent / 120) + 20);
+    // near / far copies of the Megascans pieces, by distance scaled with the zoom
+    const zk = cam.fov / CONFIG.player.fovHip;
+    if (!this._lodFrustum) { this._lodFrustum = new THREE.Frustum(); this._lodPM = new THREE.Matrix4(); }
+    cam.updateMatrixWorld();
+    this._lodFrustum.setFromProjectionMatrix(this._lodPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    this.rocks.update(cam, zk, this._lodFrustum);
+    this.debris.update(cam, zk, this._lodFrustum);
     this.undergrowth.update(cam);
     this.buildings.update(cam);
     this.grass.update(p.scopeT > 0.5 || (!p.alive && kc) ? focus : cam.position);

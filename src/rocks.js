@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, smoothstep } from './noise.js';
 import { fitParts } from './models.js';
+import { LodInstances } from './lodinst.js';
 
 function buildRockGeometry(seed, shape = 0) {
   const g = new THREE.IcosahedronGeometry(1, 3);
@@ -143,18 +144,19 @@ export class Rocks {
     const variants = shapes.map((sh, i) => buildRockGeometry(seed + i * 13 + 3, sh));
     // v5: photoreal scanned-style boulders where the models are there (round boulder, flat slab,
     // tall block), each fitted to the unit size of the procedural rock it replaces
-    const modelMats = [];
+    // v5.2: Megascans rocks come with a light far copy (parts.far), drawn at a distance
+    const modelMats = [], farParts = [];
     if (models) {
       const byShape = ['boulder', 'slab', 'block'];
       const fitted = {};
       for (const [name, parts] of Object.entries(models)) {
-        const p = parts[0];
-        fitParts([p], 'r', name === 'slab' ? 1.25 : 1.0, -0.3);
-        fitted[name] = p;
+        const p = parts[0], f = parts.far ? parts.far[0] : null;
+        fitParts([p], 'r', name === 'slab' ? 1.25 : 1.0, -0.3, f ? [f] : null);
+        fitted[name] = { p, f };
       }
       shapes.forEach((sh, i) => {
-        const p = fitted[byShape[sh]] || fitted.boulder;
-        if (p) { variants[i] = p.geo; modelMats[i] = p.mat; }
+        const m = fitted[byShape[sh]] || fitted.boulder;
+        if (m) { variants[i] = m.p.geo; modelMats[i] = m.p.mat; farParts[i] = m.f; }
       });
     }
     this.local = variants.map((g) => localHeightMap(g));
@@ -229,7 +231,7 @@ float rRough = mix(nx.a * bw.x + ny.a * bw.y + nz.a * bw.z, 0.95, moss);
       // lean with the slope (mostly), turned and tilted a little at random
       const nrm = terrain.normalAt(x, z);
       const q = new THREE.Quaternion().setFromUnitVectors(up, nrm);
-      q.slerp(qi, 0.35);
+      q.slerp(qi, farParts[v] ? 0.08 : 0.35);   // a flat scanned rock lies along the slope
       q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.rng.float(-0.12, 0.12), this.rng.float(0, Math.PI * 2), this.rng.float(-0.12, 0.12))));
       // sunk so no side floats above a slope: the bottom goes below the lowest ground under it
       let hmin = h;
@@ -237,7 +239,12 @@ float rRough = mix(nx.a * bw.x + ny.a * bw.y + nz.a * bw.z, 0.95, moss);
         const a = (k / 8) * Math.PI * 2;
         hmin = Math.min(hmin, terrain.heightAt(x + Math.cos(a) * R * 0.7, z + Math.sin(a) * R * 0.7));
       }
-      const y = Math.min(h - s * (0.28 + 0.1 * (L.top - 0.5)), hmin - 0.12 - s * L.bottom * 0.85);
+      // v5.2: a scanned (Megascans) rock is often low and flat: bury a third of its own height,
+      // not the fixed share the tall generated rocks get (that buried the flat ones whole)
+      // (the generated ones also go below the lowest ground around them; a flat scanned rock lies
+      // along the slope instead, so it only goes down a little)
+      const y = farParts[v] ? h - s * ((L.top - L.bottom) * 0.3 + L.bottom) - (h - hmin) * 0.12
+        : Math.min(h - s * (0.28 + 0.1 * (L.top - 0.5)), hmin - 0.12 - s * L.bottom * 0.85);
       const it = { x, z, y, s, v, quat: q, radius: s * 0.85, R };
       this.items.push(it);
       return true;
@@ -279,10 +286,21 @@ float rRough = mix(nx.a * bw.x + ny.a * bw.y + nz.a * bw.z, 0.95, moss);
       if (this.rng.next() > p * 0.5) continue;
       place(x, z, size(), this.rng.int(0, 5));
     }
+    this.lods = [];
     this.meshes = variants.map((g, vi) => {
       const list = this.items.filter((it) => it.v === vi);
-      const m = new THREE.InstancedMesh(g, modelMats[vi] || mat, Math.max(1, list.length));
       const mm = new THREE.Matrix4();
+      if (farParts[vi]) {
+        const mats = [];
+        list.forEach((it) => {
+          mm.compose(new THREE.Vector3(it.x, it.y, it.z), it.quat, new THREE.Vector3(it.s, it.s, it.s));
+          mats.push(...mm.elements);
+          bakeWorldTop(it, this.local[vi], mm);
+        });
+        if (list.length) this.lods.push(new LodInstances(scene, { geo: g, mat: modelMats[vi] }, farParts[vi], mats, { nearDist: CONFIG.megascans.nearDist }));
+        return null;
+      }
+      const m = new THREE.InstancedMesh(g, modelMats[vi] || mat, Math.max(1, list.length));
       list.forEach((it, i) => {
         mm.compose(new THREE.Vector3(it.x, it.y, it.z), it.quat, new THREE.Vector3(it.s, it.s, it.s));
         m.setMatrixAt(i, mm);
@@ -296,4 +314,7 @@ float rRough = mix(nx.a * bw.x + ny.a * bw.y + nz.a * bw.z, 0.95, moss);
       return m;
     });
   }
+
+  // near / far copies of the Megascans rocks (k: the zoom's distance scale)
+  update(camera, k, frustum) { for (const l of this.lods) l.update(camera, k, frustum); }
 }

@@ -118,6 +118,17 @@ export const CONFIG = {
     branches: 2000,        // dead branches (visual only, drawn within ~70 m)
   },
 
+  // v5.2: Megascans models (your own Fab downloads, made light with `npm run megascans`; see
+  // src/megascans.js). Used on these maps when public/assets/megascans/ has them; ?megascans=0
+  // turns them off to compare.
+  megascans: {
+    enabled: true,
+    maps: ['valley'],
+    nearDist: 70,          // m (zoom-scaled) where the near copy gives way to the far one
+    patches: 260,          // flat pieces of forest floor (twigs, roots, dirt) on the Valley
+    uprooted: 14,          // fallen trees with their root plate (big cover)
+  },
+
   // ---------------------------------------------------------------- vegetation
   trees: {
     playAreaCount: 2600,   // approx number of trees inside the playable area
@@ -437,6 +448,7 @@ try {
   if (q.get('photo')) CONFIG.assets.photo = q.get('photo') !== '0';
   if (q.get('shafts')) CONFIG.render.sunShafts = q.get('shafts') !== '0';
   if (q.get('autores')) CONFIG.render.autoResolution = q.get('autores') !== '0';
+  if (q.get('megascans')) CONFIG.megascans.enabled = q.get('megascans') !== '0';
   if (q.get('rounds')) CONFIG.match.roundsToWin = Math.max(1, parseInt(q.get('rounds'), 10) || 2);
   if (GRAPHICS_PRESETS[q.get('quality')]) Object.assign(CONFIG.render, GRAPHICS_PRESETS[q.get('quality')]);
 } catch (e) { /* ignore */ }

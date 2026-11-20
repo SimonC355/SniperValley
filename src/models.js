@@ -8,9 +8,9 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 
 let loader = null;
 
-function url(file) {
+function url(file, dir = 'models') {
   const base = (import.meta.env && import.meta.env.BASE_URL) || '/';
-  return `${base}models/${file}`;
+  return `${base}${dir}/${file}`;
 }
 
 // Quantised (meshopt / KHR_mesh_quantization) attributes become plain floats, so the geometry
@@ -32,13 +32,13 @@ function dequantize(g) {
 }
 
 // A model as a list of { geo, mat } in its own space (node transforms applied), or null.
-export async function loadModel(file) {
+export async function loadModel(file, dir = 'models') {
   if (!loader) {
     loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
   }
   try {
-    const gltf = await loader.loadAsync(url(file));
+    const gltf = await loader.loadAsync(url(file, dir));
     gltf.scene.updateMatrixWorld(true);
     const parts = [];
     gltf.scene.traverse((o) => {

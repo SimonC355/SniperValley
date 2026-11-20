@@ -4,6 +4,8 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, clamp, lerp, smoothstep } from './noise.js';
+import { partsBox, transformParts } from './models.js';
+import { LodInstances } from './lodinst.js';
 
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
 const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _d = new THREE.Vector3();
@@ -216,14 +218,89 @@ function buildBranch(seed, L) {
   return G.build();
 }
 
+// ---- Megascans pieces (v5.2): fitted to the same frames as the procedural ones
+
+// vertices of a part as [x, y, z] triples
+function verts(part) { return part.geo.attributes.position.array; }
+
+// Turn so the long horizontal side runs along x (near and far copies alike).
+function alongX(near, far) {
+  const size = partsBox([near]).getSize(new THREE.Vector3());
+  if (size.z > size.x) transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeRotationY(Math.PI / 2));
+}
+
+// A fallen trunk like the procedural logs: x from 0 to L along the trunk, the trunk's axis (the
+// middle third's centre) at y = z = 0. Returns { L, r }.
+function fitLog(near, far) {
+  alongX(near, far);
+  const b = partsBox([near]), L = b.max.x - b.min.x;
+  const P = verts(near);
+  let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let i = 0; i < P.length; i += 3) {
+    const u = (P[i] - b.min.x) / L;
+    if (u < 0.33 || u > 0.67) continue;
+    y0 = Math.min(y0, P[i + 1]); y1 = Math.max(y1, P[i + 1]); z0 = Math.min(z0, P[i + 2]); z1 = Math.max(z1, P[i + 2]);
+  }
+  const r = Math.max(0.06, Math.min(y1 - y0, z1 - z0) / 2);
+  transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeTranslation(-b.min.x, -(y0 + y1) / 2, -(z0 + z1) / 2));
+  return { L, r };
+}
+
+// Standing on its base (a stump, a snag): centred in x/z on the trunk, base at y = 0. { H, r }.
+function fitStanding(near, far) {
+  const b = partsBox([near]), H = b.max.y - b.min.y;
+  const P = verts(near);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let i = 0; i < P.length; i += 3) {
+    const v = (P[i + 1] - b.min.y) / H;
+    if (v < 0.3 || v > 0.7) continue;
+    x0 = Math.min(x0, P[i]); x1 = Math.max(x1, P[i]); z0 = Math.min(z0, P[i + 2]); z1 = Math.max(z1, P[i + 2]);
+  }
+  const r = Math.max(0.08, ((x1 - x0) + (z1 - z0)) / 4);
+  transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeTranslation(-(x0 + x1) / 2, -b.min.y, -(z0 + z1) / 2));
+  return { H, r };
+}
+
+// A fallen tree with its root plate: the plate (the taller end) at x = 0, the trunk along +x,
+// bottom at y = 0, centred in z. { L, plate: { x, r, top }, trunk: { x0, y, r } }.
+function fitUprooted(near, far) {
+  alongX(near, far);
+  let b = partsBox([near]);
+  const L = b.max.x - b.min.x;
+  const P = verts(near);
+  const endTop = (u0, u1) => { let t = -Infinity; for (let i = 0; i < P.length; i += 3) { const u = (P[i] - b.min.x) / L; if (u >= u0 && u <= u1) t = Math.max(t, P[i + 1]); } return t; };
+  if (endTop(0.8, 1) > endTop(0, 0.2)) transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeRotationY(Math.PI));
+  b = partsBox([near]);
+  transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeTranslation(-b.min.x, -b.min.y, -(b.min.z + b.max.z) / 2));
+  b = partsBox([near]);
+  const Q = verts(near);
+  let pTop = 0, pz = 0, ty0 = Infinity, ty1 = -Infinity, tz0 = Infinity, tz1 = -Infinity, px1 = 0;
+  for (let i = 0; i < Q.length; i += 3) {
+    const u = Q[i] / L;
+    if (u < 0.3) { pTop = Math.max(pTop, Q[i + 1]); pz = Math.max(pz, Math.abs(Q[i + 2])); px1 = Math.max(px1, Q[i]); }
+    if (u > 0.55 && u < 0.8) { ty0 = Math.min(ty0, Q[i + 1]); ty1 = Math.max(ty1, Q[i + 1]); tz0 = Math.min(tz0, Q[i + 2]); tz1 = Math.max(tz1, Q[i + 2]); }
+  }
+  return { L, plate: { x: px1 * 0.45, r: Math.max(0.5, Math.min(pz, px1) * 0.8), top: pTop }, trunk: { x0: px1 * 0.8, y: (ty0 + ty1) / 2, r: Math.max(0.1, Math.min(ty1 - ty0, tz1 - tz0) / 2) } };
+}
+
+// Lying flat on the ground (a patch of forest floor, a mushroom): centred, base at y = 0.
+function fitFlat(near, far) {
+  const b = partsBox([near]);
+  transformParts([near, ...(far ? [far] : [])], new THREE.Matrix4().makeTranslation(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2));
+  const s = b.getSize(new THREE.Vector3());
+  return { R: Math.max(s.x, s.z) / 2 };
+}
+
 export class Debris {
-  constructor(scene, terrain, forest, textures, seed) {
+  // ms: Megascans models by role (megascans.js) or null for the procedural logs and stumps
+  constructor(scene, terrain, forest, textures, seed, ms = null) {
     const D = CONFIG.debris;
     this.terrain = terrain;
     this.forest = forest;
     this.rng = new RNG(seed + 301);
     this.logs = [];     // { a, b, r } for colliders
     this.stumps = [];   // { x, z, y, top, r }
+    this.uprooted = []; // v5.2: { x, z, yaw } of the Megascans uprooted trees
     this.group = new THREE.Group();
     this.group.name = 'debris';
     scene.add(this.group);
@@ -240,30 +317,77 @@ if (-mvPosition.z > 70.0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
     };
     twigMat.customProgramCacheKey = () => 'twig';
 
-    // ---- logs
+    this.lods = [];
+    const msLod = (v, opts) => { if (v.mats.length) this.lods.push(new LodInstances(this.group, v.near, v.far, v.mats, { nearDist: CONFIG.megascans.nearDist, ...opts })); };
+    const msPart = (m) => ({ near: { geo: m.near[0].geo, mat: m.near[0].mat }, far: m.far ? { geo: m.far[0].geo, mat: m.far[0].mat } : null });
+
+    // ---- logs (v5.2: Megascans fallen trunks where they are there)
     const logVariants = [];
-    for (let k = 0; k < 6; k++) {
-      const L = lerp(3.2, 9.5, k / 5) * this.rng.float(0.9, 1.1);
-      const r = lerp(0.17, 0.36, (k % 3) / 2) * this.rng.float(0.9, 1.1);
-      logVariants.push({ L, r, geo: buildLog(seed + 400 + k, L, r), mats: [] });
+    if (ms && ms.log) {
+      for (const m of ms.log) {
+        const { L, r } = fitLog(m.near[0], m.far && m.far[0]);
+        logVariants.push({ L, r, ms: true, ...msPart(m), mats: [] });
+      }
+    } else {
+      for (let k = 0; k < 6; k++) {
+        const L = lerp(3.2, 9.5, k / 5) * this.rng.float(0.9, 1.1);
+        const r = lerp(0.17, 0.36, (k % 3) / 2) * this.rng.float(0.9, 1.1);
+        logVariants.push({ L, r, geo: buildLog(seed + 400 + k, L, r), mats: [] });
+      }
     }
     for (let i = 0, tries = 0; i < D.logs && tries < D.logs * 40; tries++) {
       const v = logVariants[this.rng.int(0, logVariants.length - 1)];
       if (this._placeLog(v)) i++;
     }
-    for (const v of logVariants) this._instanced(v.geo, [barkMat, woodMat], v.mats, true);
+    for (const v of logVariants) if (v.ms) msLod(v); else this._instanced(v.geo, [barkMat, woodMat], v.mats, true);
 
-    // ---- stumps
+    // ---- stumps (v5.2: Megascans snags)
     const stumpVariants = [];
-    for (let k = 0; k < 3; k++) {
-      const H = lerp(0.3, 0.8, k / 2), r = lerp(0.2, 0.32, this.rng.next());
-      stumpVariants.push({ H, r, geo: buildStump(seed + 450 + k, H, r), mats: [] });
+    if (ms && ms.snag) {
+      for (const m of ms.snag) {
+        const { H, r } = fitStanding(m.near[0], m.far && m.far[0]);
+        stumpVariants.push({ H, r, ms: true, ...msPart(m), mats: [] });
+      }
+    } else {
+      for (let k = 0; k < 3; k++) {
+        const H = lerp(0.3, 0.8, k / 2), r = lerp(0.2, 0.32, this.rng.next());
+        stumpVariants.push({ H, r, geo: buildStump(seed + 450 + k, H, r), mats: [] });
+      }
     }
     for (let i = 0, tries = 0; i < D.stumps && tries < D.stumps * 40; tries++) {
       const v = stumpVariants[this.rng.int(0, stumpVariants.length - 1)];
       if (this._placeStump(v)) i++;
     }
-    for (const v of stumpVariants) this._instanced(v.geo, [barkMat, woodMat], v.mats, true);
+    for (const v of stumpVariants) if (v.ms) msLod(v); else this._instanced(v.geo, [barkMat, woodMat], v.mats, true);
+
+    // ---- v5.2 Megascans only: uprooted trees (big cover), patches of forest floor, mushrooms
+    if (ms && ms.uprooted) {
+      const vs = ms.uprooted.map((m) => ({ ...fitUprooted(m.near[0], m.far && m.far[0]), ...msPart(m), mats: [] }));
+      for (let i = 0, tries = 0; i < CONFIG.megascans.uprooted && tries < 4000; tries++) {
+        if (this._placeUprooted(vs[this.rng.int(0, vs.length - 1)])) i++;
+      }
+      for (const v of vs) msLod(v);
+    }
+    if (ms && ms.patch) {
+      const vs = ms.patch.map((m) => ({ ...fitFlat(m.near[0], m.far && m.far[0]), ...msPart(m), mats: [] }));
+      for (let i = 0, tries = 0; i < CONFIG.megascans.patches && tries < CONFIG.megascans.patches * 30; tries++) {
+        if (this._placeFlat(vs[this.rng.int(0, vs.length - 1)], 0.25, this.rng.float(0.8, 1.3))) i++;
+      }
+      for (const v of vs) msLod(v, { nearDist: 45, maxDist: 160, shadows: false });
+    }
+    if (ms && ms.mushroom) {
+      const vs = ms.mushroom.map((m) => ({ ...fitFlat(m.near[0], m.far && m.far[0]), ...msPart(m), mats: [] }));
+      // at the foot of some logs and stumps, where they would grow
+      const spots = [...this.logs.map((l) => [l.a.x, l.a.z]), ...this.logs.map((l) => [l.b.x, l.b.z]), ...this.stumps.map((t) => [t.x, t.z])];
+      for (const [x, z] of spots) {
+        if (!this.rng.chance(0.3)) continue;
+        for (let k = this.rng.int(1, 3); k > 0; k--) {
+          const a = this.rng.float(0, Math.PI * 2), d = this.rng.float(0.3, 0.9);
+          this._putFlat(vs[this.rng.int(0, vs.length - 1)], x + Math.cos(a) * d, z + Math.sin(a) * d, this.rng.float(0.8, 1.6));
+        }
+      }
+      for (const v of vs) msLod(v, { nearDist: 30, maxDist: 30, shadows: false });
+    }
 
     // ---- branches
     const branchVariants = [];
@@ -351,7 +475,8 @@ if (-mvPosition.z > 70.0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
     }
     _d.set(bx - ax, yb - ya, bz - az).normalize();
     _q.setFromUnitVectors(X, _d);
-    _q2.setFromAxisAngle(X, this.rng.float(0, Math.PI * 2));
+    // a scanned trunk keeps its moss on top (a little roll); a procedural one turns freely
+    _q2.setFromAxisAngle(X, v.ms ? this.rng.float(-0.12, 0.12) : this.rng.float(0, Math.PI * 2));
     _q.multiply(_q2);
     _m.compose(_p.set(ax, ya, az), _q, _s.setScalar(s));
     v.mats.push(..._m.elements);
@@ -376,6 +501,62 @@ if (-mvPosition.z > 70.0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
     this.stumps.push({ x: p.x, z: p.z, y, top: y + v.H * s + 0.05, r: v.r * s * 1.15 });
     return true;
   }
+
+  // v5.2: an uprooted tree: its root plate stands up at one end, the trunk lies along the ground.
+  // Colliders: the trunk as a log, the plate as a wide stump.
+  _placeUprooted(v) {
+    const p = this._spot(0.25);
+    if (!p) return false;
+    const T = this.terrain;
+    const s = this.rng.float(0.9, 1.3);
+    const L = v.L * s;
+    const yaw = this.rng.float(0, Math.PI * 2);
+    const dx = Math.cos(yaw), dz = Math.sin(yaw);
+    const ax = p.x - dx * L / 2, az = p.z - dz * L / 2, bx = p.x + dx * L / 2, bz = p.z + dz * L / 2;
+    if (!T.inPlayArea(ax, az, 2) || !T.inPlayArea(bx, bz, 2)) return false;
+    for (const t of this._treesNear(p.x, p.z, L / 2 + 3)) {
+      const u = clamp(((t.x - ax) * dx + (t.z - az) * dz) / L, 0, 1);
+      const qx = ax + dx * L * u - t.x, qz = az + dz * L * u - t.z;
+      if (qx * qx + qz * qz < (t.trunkR + v.plate.r * s + 0.5) ** 2) return false;
+    }
+    for (const o of this.logs) if ((o.mx - p.x) ** 2 + (o.mz - p.z) ** 2 < ((o.len + L) / 2 + 2) ** 2 * 0.5) return false;
+    const ya = T.heightAt(ax, az), yb = T.heightAt(bx, bz);
+    if (Math.abs(yb - ya) > L * 0.35) return false;
+    _d.set(bx - ax, yb - ya, bz - az).normalize();
+    _q.setFromUnitVectors(X, _d);
+    _m.compose(_p.set(ax, ya - 0.15 * s, az), _q, _s.setScalar(s));
+    v.mats.push(..._m.elements);
+    // colliders in world space
+    const at = (x, y) => new THREE.Vector3(x, y, 0).applyMatrix4(_m);
+    const a = at(v.trunk.x0, v.trunk.y), b = at(v.L, v.trunk.y);
+    this.logs.push({ a, b, r: v.trunk.r * s, mx: p.x, mz: p.z, len: a.distanceTo(b) });
+    const c = at(v.plate.x, 0);
+    this.stumps.push({ x: c.x, z: c.z, y: ya, top: ya + v.plate.top * s * 0.9, r: v.plate.r * s });
+    this.uprooted.push({ x: p.x, z: p.z, yaw });
+    return true;
+  }
+
+  // v5.2: a flat piece (forest floor, mushrooms) lying on the ground under the canopy
+  _placeFlat(v, minDensity, s) {
+    const p = this._spot(minDensity);
+    if (!p) return false;
+    for (const t of this._treesNear(p.x, p.z, v.R * s + 1)) if ((t.x - p.x) ** 2 + (t.z - p.z) ** 2 < (t.trunkR + v.R * s * 0.6) ** 2) return false;
+    this._putFlat(v, p.x, p.z, s);
+    return true;
+  }
+
+  _putFlat(v, x, z, s) {
+    const T = this.terrain;
+    const n = T.normalAt(x, z);
+    _q.setFromUnitVectors(_d.set(0, 1, 0), n);
+    _q2.setFromAxisAngle(_d.set(0, 1, 0), this.rng.float(0, Math.PI * 2));
+    _q.multiply(_q2);
+    _m.compose(_p.set(x, T.heightAt(x, z) - 0.03 * s, z), _q, _s.setScalar(s));
+    v.mats.push(..._m.elements);
+  }
+
+  // near / far copies of the Megascans pieces (k: the zoom's distance scale)
+  update(camera, k, frustum) { for (const l of this.lods) l.update(camera, k, frustum); }
 
   _placeBranch(v) {
     const p = this._spot(0.2);

@@ -1140,3 +1140,49 @@ hideous, can it sound more like a smeld (a sharp bang)?".
   sessionStorage; the new page goes straight into the match and waits for a click (the mouse
   and the sound need a user gesture). A LAN host's START MATCH runs the old map change: everyone
   reloads into the map and the host starts the match again once they are back.
+
+### Megascans on the Valley
+
+Asked for: "I have downloaded new glb assets into public/assets in the repository. Try to dress
+one of the maps with them and see if we get closer to something 2026 than 2016 as today."
+
+- **What came in**: twelve Quixel Megascans models from Fab (`generator: fab-model-conversion`,
+  the "mid" glTF download): two mossy rocks and a rock cluster, two flat ground rocks, a 7.8 m
+  mossy fallen trunk, a branchy log, a broken birch snag, an uprooted tree with its root plate,
+  two "fallen pine" scatters (mostly a patch of needle floor with a twig), a patch of surface
+  roots and a mushroom. 2-14k triangles each but three 2048 px textures, 9.5-17 MB per file.
+- **License**: Megascans on Fab are under the Fab Standard License, which does not allow sharing
+  the files. They were uploaded to `public/assets/` on `main` of this public repository; they
+  should come out of it (and its history) and live in a private place. Nothing of them is
+  committed on this branch: the work copies sit in the git-ignored `public/assets/megascans/`.
+- **`npm run megascans`** (`scripts/megascans/optimize.mjs`, gltf-transform + meshoptimizer +
+  sharp, dev dependencies): from `megascans-src/` (git-ignored and outside `public/`, so the
+  165 MB of originals don't go into every build; also `public/assets/megascans/source/` or loose
+  `.glb` files in `public/assets/`), skipping Windows "- Kopi" duplicates, it simplifies each model to a budget
+  for its kind (rocks, logs and uprooted trees ~2400-2600 triangles, the snag 1300, the mushroom
+  900), scales the textures to 1024 px WebP, meshopt-compresses it, and writes a far copy (about
+  a fifth of the triangles, 512 px). 12 models: 11 MB in all, 0.7-0.9 MB per near copy. It
+  writes `megascans.json` with each model's role, guessed from the name and the shape (flat
+  pieces are patches whatever the name says: the "fallen pine trees" are mostly forest floor).
+- **In the game** (`src/megascans.js`, only on maps in `megascans.maps`, now the Valley; a
+  missing folder means the game as before; `?megascans=0` compares):
+  - rocks: the mossy rock (`rock-boulder`) and the rock cluster and flat ground rock
+    (`rock-slab`) replace the generated boulders. Their tops are still baked into height maps,
+    so walking, climbing, bullets and sight lines follow the drawn rock. Flat scanned rocks lie
+    along the slope and are buried by a third of their own height (the generated rocks' fixed
+    burial buried them whole);
+  - fallen logs (`log`): fitted to the procedural logs' frame (trunk axis from the middle third
+    of the model), so their colliders are the same capsules; a scanned trunk keeps its moss on
+    top (only a little roll);
+  - stumps (`snag`): the birch snag, collider from its mid-height radius;
+  - 14 uprooted trees (`uprooted`): the root plate collides as a wide stump, the trunk as a log;
+  - 260 patches of forest floor and mushrooms at the foot of some logs and stumps: no collision,
+    no shadows, drawn within 160 m and 30 m (zoom-scaled).
+- **`LodInstances`** (`src/lodinst.js`): every frame each piece in view goes to its near copy
+  within 70 m (zoom-scaled: through a 12× scope that is 840 m) or its far copy beyond; pieces out
+  of view are not drawn (the generated rocks were all drawn, all the time). Valley, measured
+  (triangles drawn in a frame, shadow pass included): close views 3.7-3.9 M before, 1.6-1.7 M
+  now; through the scope at 6× and 12× 4.1 / 4.0 M before, 1.8 / 1.6 M now.
+- Not done yet: the other maps, the trees themselves (the biggest step toward a 2026 look; the
+  European Beech pack waits for its Unreal export), Megascans ground surfaces for the terrain, and
+  grass. The patches' ground colour does not always match the terrain under them.

@@ -5,6 +5,14 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
+- **Megascans on the Valley (optional, your own downloads).** With Quixel Megascans models
+  from Fab made light by `npm run megascans`, the Valley's forest floor uses them: mossy rocks
+  and rock clusters (you can still climb them), a mossy fallen trunk and a branchy log, broken
+  birch snags, uprooted trees with their root plate (big cover), patches of twigs, roots and
+  dirt, and mushrooms at the foot of logs and stumps. Every piece has a light copy for a
+  distance, and only what is in view is drawn: the Valley draws less than half the triangles it
+  did. The Fab license does not allow sharing the files, so they are not in this repository;
+  without them the game looks as before.
 - **Choosing a map no longer loads it at once.** A map card only marks the map (the button says
   PLAY <MAP>); it loads when you start the game, and you go straight into it. In a LAN game the
   host's START MATCH loads it for everyone.

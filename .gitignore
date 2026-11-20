@@ -10,6 +10,7 @@ public/assets/assets.json
 
 # Megascans (Fab license, not CC0): keep your own downloads out of git
 public/assets/megascans/
+megascans-src/
 
 # packed program (npm run exe)
 release/
