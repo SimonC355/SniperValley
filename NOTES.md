@@ -1133,3 +1133,10 @@ hideous, can it sound more like a smeld (a sharp bang)?".
   | 150 m | 31% → 54% | 43% → 89% | −13 → −17 dB |
   | 300 m | 53% → 56% | 41% → 84% | −9 → −16 dB |
   | 600 m | 36% → 76% | 52% → 73% | −10 → −13 dB |
+- **"When you choose a map it loads at once; it should only load when the game starts."**
+  `selectMap` marks the map (`pendingMap`, the cards and the MATCH tab follow `hud.selectedMap`,
+  the button reads PLAY <MAP>). Starting a game (SINGLE PLAYER, RESTART / NEW MATCH, R) with
+  another map chosen saves it and reloads the page with a one-shot `sniperyard.autostart` flag in
+  sessionStorage; the new page goes straight into the match and waits for a click (the mouse
+  and the sound need a user gesture). A LAN host's START MATCH runs the old map change: everyone
+  reloads into the map and the host starts the match again once they are back.

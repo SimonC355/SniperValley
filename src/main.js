@@ -269,6 +269,15 @@ class Game {
     } else if (this.params.has('autostart')) {
       this.state = 'playing';
       this.input.fallback = true;
+    } else if (this.takeAutostart()) {
+      // the page reloaded to load the map a game was started on: play at once (the mouse and
+      // the sound need a click: a reload is no user gesture)
+      this.newMatch();
+      this.state = 'playing';
+      this.hud.showStart(false);
+      this.hud.centerMessage('CLICK TO PLAY', MAPS[MAP_ID].name, 600);
+      const first = () => { this.audio.init(); this.hud.clearCenter(); window.removeEventListener('pointerdown', first); };
+      window.addEventListener('pointerdown', first);
     } else {
       this.hud.showStart(true);
     }
@@ -338,13 +347,49 @@ class Game {
   }
 
   onSettingsChanged(kind, value) {
-    if (kind === 'map') { this.changeMap(value); return; }
+    if (kind === 'map') { this.selectMap(value); return; }
     if (['scale', 'refl', 'preset'].includes(kind)) this.resize();
     if (kind === 'shadow' || kind === 'preset') this.sky.applyShadowQuality(CONFIG.render.shadowQuality);
     if (kind === 'preset' && value) this.hud.centerMessage('RELOAD TO APPLY', 'MSAA AND GRASS DENSITY', 2);
     if (['msaa', 'grass'].includes(kind)) this.hud.centerMessage('RELOAD TO APPLY', '', 2);
     if (['vmaster', 'vfx', 'vamb', 'echo', 'vbody'].includes(kind)) this.audio.setVolumes();
     if (kind === 'autores' && !CONFIG.render.autoResolution) { this.dynScale = 1; this.resize(); }
+  }
+
+  // v5.2: choosing a map in the menu only marks it; the map loads when a game starts
+  // (SINGLE PLAYER, RESTART / NEW MATCH, or the LAN host's START MATCH). It used to reload at once.
+  selectMap(id) {
+    if (!MAPS[id]) return;
+    if (this.net && !this.net.isHost) {
+      this.hud.centerMessage('THE HOST CHOOSES THE MAP', '', 2);
+      this.hud.selectedMap = MAP_ID;
+      this.hud.syncAll();
+      return;
+    }
+    this.pendingMap = id === MAP_ID ? null : id;
+    this.hud.selectedMap = id;
+    this.hud.syncAll();
+    this.renderPendingMap();
+  }
+
+  // the start button says which map it will load
+  renderPendingMap() {
+    const play = document.getElementById('btn-play');
+    play.textContent = this.pendingMap ? `PLAY ${MAPS[this.pendingMap].name}` : 'SINGLE PLAYER';
+    if (this.net && this.net.isHost) this.renderLobby();
+  }
+
+  // A game is starting with another map chosen: load it (the world is built once per page load)
+  // and start right away. Returns true when a reload is under way.
+  loadPendingMap() {
+    const id = this.pendingMap;
+    if (!id || id === MAP_ID) return false;
+    if (this.net) { this.changeMap(id); return true; }
+    try { sessionStorage.setItem('sniperyard.autostart', '1'); } catch { /* ignore */ }
+    saveMapChoice(id);
+    this.hud.setLoadingMap(id);
+    this.reloadPage(`LOADING ${MAPS[id].name}`);
+    return true;
   }
 
   // The world is built once per page load, so a new map saves the choice and reloads.
@@ -383,6 +428,14 @@ class Game {
     try { sessionStorage.setItem('sniperyard.autonet', JSON.stringify({ role, name: $('lan-name').value, team: $('lan-team').value, ai: $('lan-ai').value, tries, ...steam })); } catch { /* ignore */ }
   }
 
+  takeAutostart() {
+    try {
+      const on = sessionStorage.getItem('sniperyard.autostart') === '1';
+      sessionStorage.removeItem('sniperyard.autostart');
+      return on;
+    } catch { return false; }
+  }
+
   reloadPage(text) {
     this.reloading = true;
     if (document.pointerLockElement) document.exitPointerLock();
@@ -394,6 +447,7 @@ class Game {
   bindUI() {
     const start = (fresh) => {
       this.audio.init();
+      if (fresh && this.loadPendingMap()) return;
       if (fresh) { this.newMatch(); this.state = 'playing'; }
       this.hud.showStart(false);
       this.hud.showPause(false);
@@ -668,6 +722,7 @@ class Game {
     $('btn-mpstart').addEventListener('click', () => {
       if (!this.net || !this.net.isHost) return;
       this.audio.init();
+      if (this.loadPendingMap()) return;   // everyone loads the chosen map first
       this.net.teamOf.clear();
       this.newMatch();
       this.enterNetGame();
@@ -921,6 +976,7 @@ class Game {
           : desktop ? 'CONNECTED · NOBODY IS HOSTING THERE YET · YOU JOIN WHEN THEY DO' : 'NOBODY IS HOSTING YET · HOST A GAME, FRIENDS JOIN FROM THEIR BROWSERS')
           : S.isHost ? (desktop ? this.hostNote(players, ips) : `YOU HOST ${MAPS[MAP_ID].name} · ${players} · THE MATCH TAB SETS MAP, TEAM SIZE, ROUNDS AND ZONE`)
             : (S.inGame ? 'MATCH IN PROGRESS · YOU JOIN AT THE NEXT ROUND' : 'WAITING FOR THE HOST TO START THE MATCH') + ping);
+    if (joined && S.isHost && this.pendingMap) $('lan-note').textContent += ` · START MATCH LOADS ${MAPS[this.pendingMap].name} FOR EVERYONE`;
     this.updateMenuButtons();
   }
 
@@ -1260,6 +1316,7 @@ class Game {
       this.hud.centerMessage('ZONE STEP SKIPPED', this.zone.debugText(), 1.5);
     }
     if (input.actPressed('restart') && (this.state === 'playing' || this.state === 'ended') && authority && !this.paused) {
+      if (this.loadPendingMap()) return;
       this.hud.showEnd(false);
       this.newMatch();
       this.state = 'playing';

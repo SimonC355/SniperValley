@@ -5,6 +5,9 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
+- **Choosing a map no longer loads it at once.** A map card only marks the map (the button says
+  PLAY <MAP>); it loads when you start the game, and you go straight into it. In a LAN game the
+  host's START MATCH loads it for everyone.
 - **Back to the lobby.** A LOBBY button in the pause menu (Esc) and on the end screen takes you
   back to the start screen to pick another map or mode. In a LAN game the host takes everyone
   along: they wait in the lobby until the host starts the next match. Joined players get LEAVE

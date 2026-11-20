@@ -234,13 +234,15 @@ export class HUD {
     const C = CONFIG;
     const fmt = { sens: (v) => `${(+v).toFixed(2)}×`, ssens: (v) => `${(+v).toFixed(2)}×`, fov: (v) => `${v}°`, scale: (v) => `${Math.round(v * 100)}%`,
       vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%`, vbody: (v) => `${Math.round(v * 100)}%` };
-    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; this.syncMapCards(); };
+    // v5.2: choosing a map only marks it (selectedMap); it loads when the game starts
+    if (!this.selectedMap) this.selectedMap = MAP_ID;
+    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = this.selectedMap; this.syncMapCards(); };
     this.syncAll = syncAll;
     $('map-quick').addEventListener('change', () => onChange('map', $('map-quick').value));
     // the map cards drive the (hidden) quick map select, so LAN rules apply to both
     document.querySelectorAll('#map-cards .mapcard').forEach((c) => c.addEventListener('click', () => {
       const sel = $('map-quick');
-      if (sel.disabled || c.dataset.map === MAP_ID) return;
+      if (sel.disabled || c.dataset.map === this.selectedMap) return;
       sel.value = c.dataset.map;
       document.querySelectorAll('#map-cards .mapcard').forEach((x) => x.classList.toggle('on', x === c));
       sel.dispatchEvent(new Event('change'));
@@ -272,7 +274,7 @@ export class HUD {
         }));
       };
       const sync = () => {
-        g('map').value = MAP_ID;
+        g('map').value = this.selectedMap;
         if (![...g('team').options].some((o) => o.value === String(C.teams.size))) g('team').add(new Option(`${C.teams.size}v${C.teams.size}`, String(C.teams.size)));
         g('team').value = String(C.teams.size);
         g('gmode').value = C.match.mode;
@@ -373,8 +375,8 @@ export class HUD {
   syncMapCards() {
     const locked = $('map-quick').disabled;
     document.querySelectorAll('#map-cards .mapcard').forEach((c) => {
-      c.classList.toggle('on', c.dataset.map === MAP_ID);
-      c.disabled = locked && c.dataset.map !== MAP_ID;
+      c.classList.toggle('on', c.dataset.map === this.selectedMap);
+      c.disabled = locked && c.dataset.map !== this.selectedMap;
     });
   }
 
