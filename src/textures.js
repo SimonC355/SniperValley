@@ -390,6 +390,113 @@ void main() {
 }
 `;
 
+// ----------------------------------------------------------------- v5.2 stylized (Ravine)
+// Painted, calm surfaces in the spirit of Fortnite / Apex: two or three clean tones blended by
+// soft, broad noise, a few large brush-like blotches, almost no fine detail (and gentle height,
+// so the baked normal maps stay soft). Colours are linear (the targets are sRGB).
+const S_GRASS_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 2.0, vec2(2.0), 3, 1.0);
+  float n2 = pfbm(uv * 5.0, vec2(5.0), 2, 7.0);
+  vec3 a = vec3(0.085, 0.26, 0.035), b = vec3(0.19, 0.42, 0.05), c = vec3(0.32, 0.46, 0.07);
+  vec3 col = mix(a, b, smoothstep(-0.3, 0.35, n1));
+  col = mix(col, c, smoothstep(0.25, 0.6, n2) * 0.6);
+  // soft brush strokes: long, wide, few
+  vec3 st = strokes(uv, 10.0, 1.0, 0.22, 3.0, 1.2, 1.2);
+  col *= 0.94 + 0.12 * st.x;
+  return vec4(col, 0.35 + 0.2 * n1 + 0.15 * st.x);
+}
+`;
+const S_FOREST_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 2.5, vec2(2.5), 3, 2.0);
+  float n2 = pfbm(uv * 6.0, vec2(6.0), 2, 12.0);
+  vec3 soil = vec3(0.2, 0.105, 0.04), soil2 = vec3(0.3, 0.17, 0.06), moss = vec3(0.12, 0.26, 0.04);
+  vec3 col = mix(soil, soil2, smoothstep(-0.3, 0.4, n1));
+  col = mix(col, moss, smoothstep(0.15, 0.5, n2) * 0.55);
+  vec3 st = strokes(uv, 14.0, 1.1, 0.16, 5.0, 0.0, 6.28);
+  col *= 0.92 + 0.14 * st.x;
+  return vec4(col, 0.4 + 0.25 * n1);
+}
+`;
+const S_ROCK_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  // big flat facets (cells) in two cool greys, light edges
+  vec3 w = pworley(uv * 4.0, vec2(4.0), 3.0);
+  float n1 = pfbm(uv * 3.0, vec2(3.0), 3, 4.0);
+  vec3 a = vec3(0.1, 0.095, 0.095), b = vec3(0.19, 0.175, 0.16);
+  vec3 col = mix(a, b, w.z * 0.7 + 0.15 + 0.2 * n1);
+  float edge = smoothstep(0.08, 0.0, w.y - w.x);
+  col = mix(col, b * 1.15, edge * 0.35);
+  return vec4(col, 0.5 + 0.3 * (w.y - w.x) + 0.1 * n1);
+}
+`;
+const S_MUD_FRAG = /* glsl */`
+vec4 bake(vec2 uv) {
+  float n1 = pfbm(uv * 3.0, vec2(3.0), 3, 6.0);
+  // a light, warm sandy bank (the stylized rivers are lined with it)
+  float n2 = pfbm(uv * 8.0, vec2(8.0), 2, 9.0);
+  vec3 col = mix(vec3(0.3, 0.22, 0.13), vec3(0.42, 0.33, 0.2), smoothstep(-0.3, 0.4, n1));
+  col *= 0.94 + 0.1 * smoothstep(0.1, 0.5, n2);
+  return vec4(col, 0.4 + 0.2 * n1);
+}
+`;
+const S_BARK_FRAG = /* glsl */`
+uniform vec3 uColA;
+uniform vec3 uColB;
+vec4 bake(vec2 uv) {
+  // a few broad vertical bands, like a painted trunk
+  float n = pfbm(vec2(uv.x * 6.0, uv.y * 1.5), vec2(6.0, 1.5), 3, 8.0);
+  float band = smoothstep(-0.15, 0.25, n);
+  vec3 col = mix(uColA, uColB, band);
+  return vec4(col, 0.3 + 0.4 * band);
+}
+`;
+
+// Brighter, more saturated, a little posterised: the drawn foliage cards and ghillie strips in
+// the stylized look.
+function stylizeCanvas(c, sat = 1.45, gain = 1.18) {
+  const g = c.getContext('2d');
+  const im = g.getImageData(0, 0, c.width, c.height);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i], gg = d[i + 1], b = d[i + 2];
+    const l = 0.3 * r + 0.59 * gg + 0.11 * b;
+    r = (l + (r - l) * sat) * gain; gg = (l + (gg - l) * sat) * gain; b = (l + (b - l) * sat) * gain;
+    // posterise lightly: 12 steps per channel
+    d[i] = Math.max(0, Math.min(255, Math.round(r / 21) * 21));
+    d[i + 1] = Math.max(0, Math.min(255, Math.round(gg / 21) * 21));
+    d[i + 2] = Math.max(0, Math.min(255, Math.round(b / 21) * 21));
+  }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+
+// A vertical colour ramp (bottom to top) for the solid stylized tree crowns: each tier of a
+// crown runs from the dark colour at its rim to the light one at its top.
+export function rampTexture(stops) {
+  const H = 64;
+  const d = new Uint8Array(4 * H * 4);
+  for (let y = 0; y < H; y++) {
+    const t = y / (H - 1);
+    let k = 0;
+    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+    const [t0, c0] = stops[k], [t1, c1] = stops[k + 1];
+    const u = Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+    for (let x = 0; x < 4; x++) {
+      const o = (y * 4 + x) * 4;
+      for (let ch = 0; ch < 3; ch++) d[o + ch] = Math.round(c0[ch] + (c1[ch] - c0[ch]) * u);
+      d[o + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(d, 4, H, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export class TextureBaker {
   constructor(renderer) {
     this.renderer = renderer;
@@ -842,9 +949,10 @@ function drawGhillie(rng, w, h) {
 }
 
 // biome: 'conifer' | 'tuscany' | 'beech' (v5): the ground, bark and leaf textures of the map.
-export function createTextures(renderer, seed = 1, biome = 'conifer') {
+export function createTextures(renderer, seed = 1, biome = 'conifer', style = 'realistic') {
   const baker = new TextureBaker(renderer);
   const t = {};
+  if (style === 'stylized') return createStylizedTextures(baker, seed);
   const GR = biome === 'beech' ? BEECHGRASS_FRAG : biome === 'tuscany' ? DRYGRASS_FRAG : GRASS_FRAG;
   const FO = biome === 'beech' ? LEAFLITTER_FRAG : biome === 'tuscany' ? DRYSOIL_FRAG : FOREST_FRAG;
   t.grass = baker.bakeMaterial(GR, { seed: seed + 1, normalStrength: 2.5, roughBase: 0.9, roughVar: 0.1 });
@@ -892,5 +1000,40 @@ export function createTextures(renderer, seed = 1, biome = 'conifer') {
     }), [18, 32, 16]);
     t.leaves = t.oliveLeaves;   // macchia shrubs
   }
+  return t;
+}
+
+// v5.2: the textures of the stylized look (Ravine). Same slots as the realistic ones, so every
+// system works unchanged; trees use rampTexture crowns (trees.js).
+function createStylizedTextures(baker, seed) {
+  const t = {};
+  t.grass = baker.bakeMaterial(S_GRASS_FRAG, { seed: seed + 1, normalStrength: 0.8, roughBase: 0.95, roughVar: 0.05 });
+  t.forest = baker.bakeMaterial(S_FOREST_FRAG, { seed: seed + 2, normalStrength: 0.9, roughBase: 0.95, roughVar: 0.05 });
+  t.rock = baker.bakeMaterial(S_ROCK_FRAG, { seed: seed + 3, normalStrength: 1.0, roughBase: 0.9, roughVar: 0.08 });
+  t.mud = baker.bakeMaterial(S_MUD_FRAG, { seed: seed + 4, normalStrength: 0.7, roughBase: 0.85, roughVar: 0.1 });
+  t.barkSpruce = baker.bakeMaterial(S_BARK_FRAG, {
+    size: 256, seed: seed + 5, normalStrength: 1.2, roughBase: 0.95, roughVar: 0.05,
+    uniforms: { uColA: { value: new THREE.Color(0.09, 0.045, 0.02) }, uColB: { value: new THREE.Color(0.2, 0.1, 0.04) } },
+  });
+  t.barkPine = baker.bakeMaterial(S_BARK_FRAG, {
+    size: 256, seed: seed + 6, normalStrength: 1.2, roughBase: 0.95, roughVar: 0.05,
+    uniforms: { uColA: { value: new THREE.Color(0.2, 0.07, 0.025) }, uColB: { value: new THREE.Color(0.36, 0.14, 0.05) } },
+  });
+  t.water = baker.bakeMaterial(WATER_FRAG, { size: 512, seed: seed + 7, normalStrength: 3, srgb: false });
+  t.macro = baker.bakeData(MACRO_FRAG, 512, seed + 8);
+  t.macro.wrapS = t.macro.wrapT = THREE.RepeatWrapping;
+  const rng = new RNG(seed + 99);
+  t.spray = dataTextureFromCanvas(stylizeCanvas(drawSpray(rng, 512, 256, {
+    mass: [20, 70, 30], needles: [[30, 96, 40], [40, 112, 46], [24, 84, 36], [56, 128, 52]], young: [120, 170, 60],
+  })), [26, 80, 34]);
+  t.pine = dataTextureFromCanvas(stylizeCanvas(drawPineTufts(rng, 512, 256)), [70, 120, 40]);
+  t.fern = dataTextureFromCanvas(stylizeCanvas(drawFern(rng, 256, 512)), [70, 130, 40]);
+  t.leaves = dataTextureFromCanvas(stylizeCanvas(drawLeaves(rng, 512, 512)), [70, 120, 36]);
+  t.ghillie = dataTextureFromCanvas(stylizeCanvas(drawGhillie(rng, 512, 512), 1.3, 1.1), [190, 190, 180]);
+  // solid crowns: rim (dark) to top (light)
+  t.crownSpruce = rampTexture([[0, [18, 62, 44]], [0.55, [34, 104, 58]], [1, [86, 156, 70]]]);
+  t.crownFir = rampTexture([[0, [26, 74, 36]], [0.55, [52, 124, 50]], [1, [122, 178, 70]]]);
+  t.crownPine = rampTexture([[0, [40, 86, 34]], [0.5, [80, 138, 46]], [1, [150, 190, 72]]]);
+  t.crownBush = rampTexture([[0, [30, 70, 26]], [0.5, [66, 126, 40]], [1, [128, 176, 60]]]);
   return t;
 }

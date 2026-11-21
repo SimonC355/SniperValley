@@ -315,6 +315,77 @@ function buildConifer(variantName, lod, seed) {
   return { trunk: trunkB.build(), leaves: isSnag ? null : leafB.build(), height: H, radius: V.R };
 }
 
+// --------------------------------------------------------------------------- v5.2 stylized
+// The stylized look (Ravine): solid crowns with a clear silhouette instead of alpha cards.
+// Spruce and fir: stacked tiers, each a cone with a jagged, drooping rim, shaded by a colour
+// ramp from the dark rim to the light top (rampTexture in textures.js) and lit with soft,
+// rounded normals; their size follows the same crown profile as the realistic trees, so sight
+// lines and bullets meet the same crown. Pine: a round crown of a few soft lumps. Dead snags are
+// built as before. A crown is a few hundred triangles; there are no alpha cards to sort or test.
+const STYLIZED_CROWN = { spruce: 'crownSpruce', fir: 'crownFir', pine: 'crownPine' };
+
+function buildStylized(variantName, lod, seed) {
+  const V = VARIANTS[variantName];
+  if (!STYLIZED_CROWN[variantName]) return buildConifer(variantName, lod, seed);
+  const rng = new RNG(seed);
+  const trunkB = new GeoBuilder(), leafB = new GeoBuilder();
+  const H = V.H;
+  buildTrunk(trunkB, H, V.r0 * 1.1, lod === 0 ? 7 : 5, lod === 0 ? 4 : 2, rng, seed * 0.37, 0.98, 0.12);
+  const yb = H * V.crownBase, crownH = H - yb;
+  const S = lod === 0 ? 14 : lod === 1 ? 10 : 7;
+  if (V.profile === 'round') {
+    // lumps: one on top, a ring of smaller ones below it
+    const n = lod === 0 ? 6 : lod === 1 ? 5 : 4;
+    const ico = new THREE.IcosahedronGeometry(1, lod === 0 ? 2 : 1);
+    const P = ico.attributes.position;
+    for (let b = 0; b < n; b++) {
+      const top = b === 0;
+      const a = (b / (n - 1)) * Math.PI * 2 + rng.float(-0.3, 0.3);
+      const c = top ? new THREE.Vector3(0, yb + crownH * 0.66, 0)
+        : new THREE.Vector3(Math.cos(a) * V.R * 0.55, yb + crownH * rng.float(0.32, 0.5), Math.sin(a) * V.R * 0.55);
+      const r = V.R * (top ? 0.72 : rng.float(0.5, 0.6));
+      const base = leafB.pos.length / 3;
+      for (let i = 0; i < P.count; i++) {
+        _n.set(P.getX(i), P.getY(i), P.getZ(i)).normalize();
+        const k = 1 + 0.08 * Math.sin(_n.x * 7 + _n.z * 5 + b);
+        _v.set(c.x + _n.x * r * k, c.y + _n.y * r * 0.78 * k, c.z + _n.z * r * k);
+        leafB.vert(_v, _n, 0.5, clamp(0.5 + _n.y * 0.5, 0, 1), 0.62 + 0.38 * (_n.y * 0.5 + 0.5));
+      }
+      for (let i = 0; i < P.count; i += 3) leafB.tri(base + i, base + i + 1, base + i + 2);
+    }
+    ico.dispose();
+    return { trunk: trunkB.build(), leaves: leafB.build(), height: H, radius: V.R };
+  }
+  const N = V.profile === 'fir' ? (lod === 0 ? 5 : lod === 1 ? 4 : 3) : (lod === 0 ? 6 : lod === 1 ? 5 : 4);
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N;
+    const y0 = yb + t0 * crownH * 0.94;
+    const y1 = yb + Math.min(1.03, (i + 1.45) / N) * crownH;
+    const R = Math.max(0.45, V.R * crownRadius(V.profile, t0 + 0.02) * 1.08);
+    const rot = rng.float(0, Math.PI * 2);
+    const rim = [], mid = [];
+    for (let k = 0; k <= S; k++) {
+      const a = rot + (k / S) * Math.PI * 2;
+      const kk = k % S;
+      const tip = kk % 2 === 0;
+      const rr = R * (tip ? 1.0 : 0.8) * (0.95 + 0.1 * Math.sin(kk * 2.3 + i));
+      const ca = Math.cos(a), sa = Math.sin(a);
+      _n.set(ca, 0.55, sa).normalize();
+      rim.push(leafB.vert(_v.set(ca * rr, y0 - (tip ? R * 0.12 : 0), sa * rr), _n, k / S, 0, 0.66));
+      _n.set(ca, 1.0, sa).normalize();
+      mid.push(leafB.vert(_v.set(ca * R * 0.6, lerp(y0, y1, 0.42), sa * R * 0.6), _n, k / S, 0.5, 0.86));
+    }
+    const apex = leafB.vert(_v.set(0, y1, 0), _up.set(0, 1, 0), 0.5, 1, 1.0);
+    const under = leafB.vert(_v.set(0, y0 + (y1 - y0) * 0.16, 0), _n.set(0, -1, 0), 0.5, 0.04, 0.4);
+    for (let k = 0; k < S; k++) {
+      leafB.tri(rim[k], mid[k], rim[k + 1]); leafB.tri(rim[k + 1], mid[k], mid[k + 1]);
+      leafB.tri(mid[k], apex, mid[k + 1]);
+      leafB.tri(rim[k + 1], under, rim[k]);
+    }
+  }
+  return { trunk: trunkB.build(), leaves: leafB.build(), height: H, radius: V.R };
+}
+
 // --------------------------------------------------------------------------- impostors
 
 const BAKE_VERT = /* glsl */`
@@ -461,7 +532,8 @@ export class Forest {
     this.variants = {};
     for (const name of VARIANT_NAMES) {
       const V = VARIANTS[name];
-      const build = V.broadleaf ? buildBroadleaf : buildConifer;
+      const stylized = CONFIG.map.style === 'stylized' && STYLIZED_CROWN[name] && T[STYLIZED_CROWN[name]];
+      const build = V.broadleaf ? buildBroadleaf : stylized ? buildStylized : buildConifer;
       const lod0 = build(name, 0, variantSeed(name));
       const lod1 = build(name, 1, variantSeed(name));
       const lod2 = build(name, 2, variantSeed(name));
@@ -470,7 +542,11 @@ export class Forest {
       });
       patchFoliage(barkMat, { sway: 0.0025, flutter: 0, translucency: 0, noFlip: false, key: 'bark' });
       let leafMat = null;
-      if (V.tex) {
+      if (stylized) {
+        // solid crown: the colour ramp as its map (opaque), soft light, a little sway
+        leafMat = new THREE.MeshStandardMaterial({ map: T[STYLIZED_CROWN[name]], side: THREE.DoubleSide, vertexColors: true, roughness: 0.92 });
+        patchFoliage(leafMat, { sway: 0.003, flutter: 0, translucency: 0.12, key: 'crown' });
+      } else if (V.tex) {
         leafMat = new THREE.MeshStandardMaterial({
           map: T[V.tex], alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.82,
           alphaToCoverage: CONFIG.render.msaa > 0,
@@ -486,7 +562,7 @@ export class Forest {
         alphaToCoverage: CONFIG.render.msaa > 0,
       });
       patchFoliage(impMat, { sway: 0.003, flutter: 0, translucency: 0.35, billboard: true, noFlip: false, key: 'impostor' });
-      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
+      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(stylized ? T[STYLIZED_CROWN[name]] : T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
     }
   }
 
@@ -768,6 +844,28 @@ function buildShrub(lod, rng) {
   return B.build();
 }
 
+// v5.2 stylized: a bush of a few soft lumps (no alpha cards), shaded by a colour ramp.
+function buildStylizedShrub(lod, rng) {
+  const B = new GeoBuilder();
+  const ico = new THREE.IcosahedronGeometry(1, lod === 0 ? 1 : 0);
+  const P = ico.attributes.position;
+  const n = lod === 0 ? 4 : 2;
+  for (let b = 0; b < n; b++) {
+    const a = (b / n) * Math.PI * 2 + rng.float(-0.4, 0.4);
+    const c = b === 0 ? new THREE.Vector3(0, 0.55, 0) : new THREE.Vector3(Math.cos(a) * 0.38, rng.float(0.35, 0.45), Math.sin(a) * 0.38);
+    const r = b === 0 ? 0.55 : rng.float(0.38, 0.46);
+    const base = B.pos.length / 3;
+    for (let i = 0; i < P.count; i++) {
+      _n.set(P.getX(i), P.getY(i), P.getZ(i)).normalize();
+      _v.set(c.x + _n.x * r, Math.max(0.02, c.y + _n.y * r * 0.85), c.z + _n.z * r);
+      B.vert(_v, _n, 0.5, clamp((_v.y) / 1.1, 0, 1), 0.65 + 0.35 * (_n.y * 0.5 + 0.5));
+    }
+    for (let i = 0; i < P.count; i += 3) B.tri(base + i, base + i + 1, base + i + 2);
+  }
+  ico.dispose();
+  return B.build();
+}
+
 export class Undergrowth {
   constructor(scene, terrain, forest, textures, seed) {
     this.terrain = terrain;
@@ -782,11 +880,15 @@ export class Undergrowth {
     fernTex.rotation = -Math.PI / 2;
     const fernMat = new THREE.MeshStandardMaterial({ map: fernTex, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.85, alphaToCoverage: CONFIG.render.msaa > 0 });
     patchFoliage(fernMat, { sway: 0.05, flutter: 0.03, translucency: 0.7, key: 'fern' });
-    const shrubMat = new THREE.MeshStandardMaterial({ map: textures.leaves, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.8, alphaToCoverage: CONFIG.render.msaa > 0 });
-    patchFoliage(shrubMat, { sway: 0.04, flutter: 0.025, translucency: 0.6, key: 'shrub' });
+    const solidBush = CONFIG.map.style === 'stylized' && textures.crownBush;
+    const shrubMat = solidBush
+      ? new THREE.MeshStandardMaterial({ map: textures.crownBush, vertexColors: true, roughness: 0.92 })
+      : new THREE.MeshStandardMaterial({ map: textures.leaves, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.8, alphaToCoverage: CONFIG.render.msaa > 0 });
+    patchFoliage(shrubMat, solidBush ? { sway: 0.02, flutter: 0, translucency: 0.12, key: 'bush' } : { sway: 0.04, flutter: 0.025, translucency: 0.6, key: 'shrub' });
+    const shrub = solidBush ? buildStylizedShrub : buildShrub;
     const types = [
       { name: 'fern', lod0: buildFern(0, this.rng), lod1: buildFern(1, this.rng), mat: fernMat, radius: 0.9 },
-      { name: 'shrub', lod0: buildShrub(0, this.rng), lod1: buildShrub(1, this.rng), mat: shrubMat, radius: 0.8 },
+      { name: 'shrub', lod0: shrub(0, this.rng), lod1: shrub(1, this.rng), mat: shrubMat, radius: 0.8 },
     ];
     this.types = types;
     this.items = [];

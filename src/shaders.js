@@ -91,6 +91,15 @@ export function installHeightFog() {
 #ifdef USE_FOG
   gl_FragColor.rgb = heightFog(gl_FragColor.rgb, vFogWorldPos);
 #endif`;
+  // Stylized look: matte surfaces (ground, rocks, bark, cloth) don't mirror the sky. Seen at a
+  // low angle the sky reflection turned the sandy river banks into blue-grey glass; glossy things
+  // (the rifle, the scope) keep it. The soft light from the sky (irradiance) is untouched.
+  if (CONFIG.map.style === 'stylized' && !C.lights_fragment_maps.includes('STYLIZED_MATTE')) {
+    C.lights_fragment_maps += /* glsl */`
+#if defined( RE_IndirectSpecular ) && defined( STANDARD )
+  radiance *= mix(1.0, 0.15, smoothstep(0.35, 0.75, roughnessFactor)); // STYLIZED_MATTE
+#endif`;
+  }
 }
 
 // Patch a MeshStandardMaterial used for alpha-cut foliage cards:

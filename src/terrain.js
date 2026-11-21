@@ -308,6 +308,7 @@ export class Terrain {
   }
 
   _patchMaterial(mat, T) {
+    const STYLIZED = CONFIG.map.style === 'stylized';
     const uniforms = {
       tGrassA: { value: T.grass.map }, tGrassN: { value: T.grass.normalMap },
       tForestA: { value: T.forest.map }, tForestN: { value: T.forest.normalMap },
@@ -399,10 +400,12 @@ albedo = mix(albedo, albedo * vec3(1.18, 1.08, 0.75), smoothstep(0.55, 0.8, macr
   float mtn = smoothstep(0.0, 12.0, e);
   float strata = 0.9 + 0.08 * sin(vWPos.y * 0.45 + macro2.g * 9.0 + macro.r * 6.0) + (macro.g - 0.5) * 0.3;
   albedo = mix(albedo, albedo * vec3(0.74, 0.7, 0.64) * strata, mtn * bw.z);
+  // stylized: grass on the mountains deeper and cooler, so the far slopes don't streak lime
+  albedo = mix(albedo, albedo * vec3(0.62, 0.74, 0.7), mtn * bw.x * ${STYLIZED ? '1.0' : '0.0'});
 }
-// wetness near the waterline
+// wetness near the waterline (stylized: a light sandy bank, barely darker and not glossy)
 float wet = 1.0 - smoothstep(-0.05, 0.75, vWPos.y);
-albedo *= mix(1.0, 0.55, wet);
+albedo *= mix(1.0, ${STYLIZED ? '0.8' : '0.55'}, wet);
 // zone: tint outside
 float dCur = zoneDist(wxz, uZoneCur);
 float inPlay = step(abs(wxz.x), uZoneHalfLen + 0.5) * step(abs(wxz.y), ${(CONFIG.map.width / 2 + 0.5).toFixed(1)});
@@ -411,7 +414,7 @@ albedo = mix(albedo, albedo * vec3(1.25, 0.55, 0.5), outside * 0.55);
 diffuseColor.rgb = albedo;
 vec4 nmix = sampleNT(tGrassN, uvG, macro2.g) * bw.x + sampleNT(tForestN, uvF, macro2.g) * bw.y
           + sampleNT(tRockN, uvR + vec2(vWPos.y * 0.1), macro2.g) * bw.z + sampleNT(tMudN, uvM, macro2.g) * bw.w;
-float tRough = mix(nmix.a, 0.28, wet);
+float tRough = mix(nmix.a, ${STYLIZED ? '0.85' : '0.28'}, wet);
 `)
         .replace('#include <roughnessmap_fragment>', `float roughnessFactor = tRough;`)
         .replace('#include <normal_fragment_maps>', `

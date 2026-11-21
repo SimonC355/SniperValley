@@ -97,13 +97,15 @@ class Game {
 
     this.hud.setLoading('BAKING TEXTURES');
     await nextFrame();
-    this.textures = createTextures(renderer, CONFIG.seed, CONFIG.map.biome);
+    this.textures = createTextures(renderer, CONFIG.seed, CONFIG.map.biome, CONFIG.map.style);
     // v5: photoreal textures made with Higgsfield (ground, barks, foliage, ghillie strips)
     this.hud.setLoading('LOADING TEXTURES');
-    this.hfSlots = await loadHFTextures(renderer, this.textures, CONFIG.map.biome);
+    // (the stylized look keeps its own painted textures)
+    const stylized = CONFIG.map.style === 'stylized';
+    this.hfSlots = stylized ? [] : await loadHFTextures(renderer, this.textures, CONFIG.map.biome);
     this.hud.setLoading('LOADING PHOTOSCANNED TEXTURES');
     // the beech and Tuscan maps keep their own ground (leaf litter, dry grass) and barks
-    this.photoSlots = await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
+    this.photoSlots = stylized ? [] : await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
 
     this.hud.setLoading('SHAPING THE VALLEY');
     await nextFrame();
@@ -117,7 +119,7 @@ class Game {
     await nextFrame();
     // 3D house and boulder models made with Higgsfield (procedural ones if the files are missing)
     // (and the leafy 3D ghillie suit, which every character clones)
-    const [houseModels, rockModels, megascans] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, loadRockModels(), loadMegascans(MAP_ID), loadGhillieModel()]);
+    const [houseModels, rockModels, megascans] = await Promise.all([CONFIG.map.biome === 'tuscany' ? loadHouseModels() : null, stylized ? null : loadRockModels(), stylized ? null : loadMegascans(MAP_ID), loadGhillieModel()]);
     // v5.2: Megascans rocks (your own Fab downloads) replace the generated boulders on this map
     this.megascans = megascans;
     let rocksIn = rockModels;
@@ -151,6 +153,13 @@ class Game {
     this.hud.setLoading('FILLING THE RIVER');
     await nextFrame();
     this.water = new Water(scene, terrain, this.textures, renderer);
+    if (stylized) {
+      // turquoise water, a bluer sky in it
+      const u = this.water.uniforms;
+      u.uDeep.value.setRGB(0.0, 0.085, 0.1);
+      u.uShallow.value.setRGB(0.05, 0.27, 0.27);
+      u.uSkyColor.value.setRGB(0.42, 0.6, 0.8);
+    }
     // Reflections skip grass, undergrowth and full-detail trees (the far bank dominates the mirror image).
     this.water.hideDuringReflection.push(this.grass.group, this.undergrowth.group, this.debris.group, terrain.mesh, this.particles.points);
     const reflTerrain = terrain.buildReflectionMesh();

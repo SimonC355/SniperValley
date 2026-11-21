@@ -8,8 +8,8 @@ import { RNG, Simplex, smoothstep } from './noise.js';
 import { fitParts } from './models.js';
 import { LodInstances } from './lodinst.js';
 
-function buildRockGeometry(seed, shape = 0) {
-  const g = new THREE.IcosahedronGeometry(1, 3);
+function buildRockGeometry(seed, shape = 0, detail = 3) {
+  const g = new THREE.IcosahedronGeometry(1, detail);
   const n = new Simplex(seed);
   const pos = g.attributes.position;
   const v = new THREE.Vector3();
@@ -141,7 +141,15 @@ export class Rocks {
     this.rng = new RNG(seed + 51);
     const noise = new Simplex(seed + 53);
     const shapes = [0, 0, 1, 2, 0, 1];
-    const variants = shapes.map((sh, i) => buildRockGeometry(seed + i * 13 + 3, sh));
+    // v5.2 stylized look: fewer, bigger facets, each lit flat (chunky, readable rocks)
+    const stylized = CONFIG.map.style === 'stylized';
+    const variants = shapes.map((sh, i) => {
+      const g = buildRockGeometry(seed + i * 13 + 3, sh, stylized ? 2 : 3);
+      if (!stylized) return g;
+      const f = g.toNonIndexed();
+      f.computeVertexNormals();
+      return f;
+    });
     // v5: photoreal scanned-style boulders where the models are there (round boulder, flat slab,
     // tall block), each fitted to the unit size of the procedural rock it replaces
     // v5.2: Megascans rocks come with a light far copy (parts.far), drawn at a distance

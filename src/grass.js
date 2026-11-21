@@ -144,10 +144,14 @@ vec3 gcol = textureLod(tGrassA, vBaseXZ / uGrassTile, 3.0).rgb;
 vec4 mac = texture(tMacro, vBaseXZ / 47.0);
 gcol *= 0.82 + 0.36 * mac.r;
 float lum = dot(gcol, vec3(0.3, 0.6, 0.1));
-gcol = mix(vec3(lum), gcol, 1.25);
+gcol = max(mix(vec3(lum), gcol, 1.25), 0.0);   // (very saturated grass would go below 0 in blue)
 // v5: darker roots, brighter tips that dry out a little, more variety between blades
 vec3 tipCol = mix(gcol, vec3(lum) * vec3(1.25, 1.15, 0.7), 0.35);
-diffuseColor.rgb = mix(gcol, tipCol, smoothstep(0.55, 1.0, vT) * vShade) * mix(0.42, 1.25, vT) * (0.8 + 0.4 * vShade);`)
+// with MSAA a blade thinner than a pixel is shaded at the pixel centre, outside the blade, where
+// vT and vShade run past 0..1: unclamped, the colour went negative (green most) and the resolve
+// left single magenta pixels flickering along thin blades
+float bt = clamp(vT, 0.0, 1.0), bs = clamp(vShade, 0.0, 1.0);
+diffuseColor.rgb = mix(gcol, tipCol, smoothstep(0.55, 1.0, bt) * bs) * mix(0.42, 1.25, bt) * (0.8 + 0.4 * bs);`)
         .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
     };
     this.material = mat;

@@ -349,8 +349,9 @@ void main() {
     col.r = texture2D(tDiffuse, duv + cao).r;
     col.g = texture2D(tDiffuse, duv).g;
     col.b = texture2D(tDiffuse, duv - cao).b;
+    col = max(col, 0.0);
   } else {
-    col = texture2D(tDiffuse, uv).rgb;
+    col = max(texture2D(tDiffuse, uv).rgb, 0.0);
     // v5: light sharpening (an unsharp mask limited to a share of the pixel's own brightness,
     // so edges get crisper without halos)
     if (uSharpen > 0.001) {
@@ -474,8 +475,9 @@ export class PostFX {
       uniforms: {
         tDiffuse: { value: null },
         uExposure: { value: CONFIG.render.exposure },
-        uVignette: { value: CONFIG.render.vignette },
-        uGrain: { value: CONFIG.render.grain },
+        // the stylized look: clean picture (no grain), a softer vignette, little sharpening
+        uVignette: { value: CONFIG.map.style === 'stylized' ? 0.16 : CONFIG.render.vignette },
+        uGrain: { value: CONFIG.map.style === 'stylized' ? 0 : CONFIG.render.grain },
         uTime: { value: 0 },
         uScope: { value: 0 },
         uAspect: { value: 1 },
@@ -485,7 +487,7 @@ export class PostFX {
         uFade: { value: 0 },
         uReticleOffset: { value: new THREE.Vector2() },
         uGrade: { value: new THREE.Vector3(CONFIG.grade.saturation, CONFIG.grade.contrast, CONFIG.grade.warmth) },
-        uSharpen: { value: CONFIG.render.sharpen ?? 0.6 },
+        uSharpen: { value: CONFIG.map.style === 'stylized' ? 0.25 : CONFIG.render.sharpen ?? 0.6 },
         uSuppress: { value: 0 },
         uKick: { value: 0 },
         uEye: { value: new THREE.Vector3() },

@@ -474,7 +474,7 @@ export const MAPS = {
     map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70], style: 'stylized',
     map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
   },
   tuscany: {
@@ -505,6 +505,7 @@ export const MAP_ID = (() => {
   CONFIG.map.biome = P.biome;
   CONFIG.map.terrain = P.terrain;
   CONFIG.map.farHills = P.farHills;
+  CONFIG.map.style = P.style || 'realistic';
   const k = (P.map.length * P.map.width) / (440 * 380);
   CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
   // beech forests are open underneath; Tuscany's hillsides are drier and more open
@@ -524,6 +525,17 @@ export const MAP_ID = (() => {
     Object.assign(CONFIG.sun, { elevation: 21, azimuth: 230, intensity: 3.5, color: 0xffe9cc });
     Object.assign(CONFIG.fog, { color: 0xb8c5c1, density: 0.0021 });
     CONFIG.grade.saturation = 1.1;
+  }
+  // v5.2 stylized look (Ravine): a high, clean sun, lifted shadows, a blue sky and blue air in
+  // the distance, strong but clean colour; painted textures instead of photos (textures.js),
+  // solid tiered trees (trees.js), faceted rocks (rocks.js), turquoise water (main.js)
+  if (CONFIG.map.style === 'stylized') {
+    Object.assign(CONFIG.sun, { elevation: 36, azimuth: 214, intensity: 3.0, color: 0xfff0d6, ambient: 0.55, hemi: { sky: 0xe4ecf2, ground: 0x6a7a40, intensity: 1.6 } });
+    Object.assign(CONFIG.fog, { color: 0xa3c6e6, density: 0.0012, heightFalloff: 0.02, sunScatter: 0.25 });
+    Object.assign(CONFIG.sky, { turbidity: 2.0, rayleigh: 2.2, mieCoefficient: 0.002, cloudCover: 0.3 });
+    Object.assign(CONFIG.grade, { saturation: 1.28, contrast: 1.03, warmth: 0.05, shafts: 0.2 });
+    Object.assign(CONFIG.weather, { cloudCover: 0.25, cloudShadow: 0.4 });
+    CONFIG.assets.photo = false;
   }
 }
 

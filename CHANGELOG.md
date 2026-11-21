@@ -5,6 +5,16 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
+- **The Ravine in a new, stylized look.** The Ravine is the first map drawn in the direction the
+  game is heading: stylized and readable, with strong colours, instead of chasing photo realism.
+  Spruces and firs are stacked tiers of jagged cones and the pines round, puffy crowns, all in
+  solid colours that go from dark at the rim to light at the top; bushes are solid, rounded
+  clumps; rocks have big flat facets; the grass is a saturated green with painted strokes, the
+  river a clear turquoise between light sandy banks, under a clear sky with a warm sun. A
+  ghillie suit still stands out by its shape, not by its texture. The other maps look as before.
+- **No more flickering pink pixels in the grass.** Grass blades thinner than a pixel left single
+  magenta pixels along their edges with antialiasing on (every map). Those may be some of the
+  "glittering specks" you saw.
 - **Megascans on the Valley (optional, your own downloads).** With Quixel Megascans models
   from Fab made light by `npm run megascans`, the Valley's forest floor uses them: mossy rocks
   and rock clusters (you can still climb them), a mossy fallen trunk and a branchy log, broken

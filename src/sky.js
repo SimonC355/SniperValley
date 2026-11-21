@@ -99,7 +99,10 @@ export class SkySystem {
     scene.add(sun.target);
     this.applyShadowQuality(CONFIG.render.shadowQuality);
 
-    const hemi = new THREE.HemisphereLight(0x9fb4c8, 0x2a2416, 0.25);
+    // the stylized look takes most of its fill from here (a neutral sky, a green bounce) and less
+    // from the deep-blue sky map, which turned warm sand and rock grey-blue in the shade
+    const H = CONFIG.sun.hemi || { sky: 0x9fb4c8, ground: 0x2a2416, intensity: 0.25 };
+    const hemi = new THREE.HemisphereLight(H.sky, H.ground, H.intensity);
     scene.add(hemi);
     this.hemi = hemi;
   }

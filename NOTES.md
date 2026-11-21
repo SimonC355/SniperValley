@@ -1193,3 +1193,46 @@ one of the maps with them and see if we get closer to something 2026 than 2016 a
 - Not done yet: the other maps, the trees themselves (the biggest step toward a 2026 look; the
   European Beech pack waits for its Unreal export), Megascans ground surfaces for the terrain, and
   grass. The patches' ground colour does not always match the terrain under them.
+
+### A stylized Ravine
+
+Asked for: "my vision of Battlefield-like graphics is unrealistic and doesn't fit where we are.
+Will you redo a map, the Ravine. Away from photorealism, heavy PBR materials with many maps and
+high asset complexity; toward stylized / semi-stylized like Fortnite, Apex or Overwatch: a clear
+silhouette, strong colours, simpler materials that still look good, a more gamey and forgiving
+look, better performance and faster iteration. Still natural: water, trees, crows, a man in a
+ghillie suit, stumps, rocks."
+
+- **`style: 'stylized'`** on the map (`MAPS.ravine` in `config.js`, `CONFIG.map.style`). The
+  rest of the game reads it; every system works the same, only how things are drawn changes.
+  - Light: sun at 36° (warm, 3.0), clear sky (turbidity 2), thin blue fog, saturation 1.28. The
+    fill comes mostly from a neutral sky / green-bounce hemisphere light (1.6) and less from the
+    sky's environment map (0.55): the deep-blue sky map turned warm sand and rock grey-blue in
+    the shade.
+  - Matte: rough surfaces (ground, rocks, bark, cloth) no longer mirror the sky
+    (`STYLIZED_MATTE` in `shaders.js`, roughness 0.35-0.75 fades the reflection to 15%). Seen at a
+    low angle, the sky reflection turned the flat river banks into blue-grey glass. Glossy things
+    (rifle, scope) keep it.
+  - No photo, Higgsfield, Megascans or rock-model textures; the textures are baked painted
+    versions (`createStylizedTextures` in `textures.js`): broad blotches and a few soft brush
+    strokes, almost no fine detail, soft normals. Grass saturated green, forest floor warm soil
+    and moss, rock in two cool greys with light facet edges, the banks light warm sand, barks in
+    broad bands. The drawn foliage and ghillie textures get more saturation and 12-step
+    posterising (`stylizeCanvas`).
+  - Trees (`buildStylized` in `trees.js`): spruce and fir are 4-6 stacked tiers, each a cone with
+    a jagged, drooping rim; pines are 4-6 round lumps. Solid, opaque meshes (no alpha cards),
+    coloured from a 4 × 64 colour ramp (`rampTexture`: dark at the rim, light at the top) and a
+    little ambient occlusion in the vertex colours; LODs have fewer tiers and segments. Same
+    trunks, colliders and sight-line profiles as before. Snags keep their old shape.
+  - Bushes: solid clumps of 3-5 lumps (`buildStylizedShrub`) instead of alpha cards.
+  - Rocks: the same generated shapes with less detail and flat facets (non-indexed normals).
+  - Water: turquoise (deep 0, 0.085, 0.1; shallow 0.05, 0.27, 0.27). Post: softer vignette, no
+    grain, less sharpening.
+- **Grass fix (every map)**: with MSAA a blade thinner than a pixel is shaded at the pixel's
+  centre, outside the blade, where the blade's height (`vT`) runs below 0. The colour went
+  negative (green most), and the resolve left single magenta pixels along thin blades: 10-20 per
+  frame in the stylized Ravine, a few on the other maps. `vT` and `vShade` are clamped to 0..1.
+- Not done yet: the far mountains still show the bright grass in streaks (cooled a little), the
+  canyon's end walls are flat grey rock, the ghillie suit is the same model (stronger colours
+  only), the rifle is the realistic one, and
+  the stumps and logs only got the painted bark.
