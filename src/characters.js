@@ -220,17 +220,182 @@ function buildGeometry(seed, light = false) {
   return g;
 }
 
+// ---------------------------------------------------------------- stylized suit
+// The stylized look (Ravine): the same skeleton and poses, but instead of hundreds of alpha-cut
+// strips the suit is solid, jagged layers like the stylized trees: skirts of drooping points
+// around every body part, dark at the root and light at the tips, a pointed hood with a fringe
+// that leaves the face open, a long jagged cape down the back and a few leaf tufts sticking up.
+// The points move in the wind like the strips did (aSway grows toward the tips).
+const lin = (c) => c.map((v) => ((v / 255 + 0.055) / 1.055) ** 2.4);
+const S_SUIT = [[52, 84, 34], [70, 100, 40], [88, 110, 46], [98, 94, 52], [60, 92, 48], [108, 122, 58], [78, 72, 40]].map(lin);
+const S_LEAF = [[118, 158, 58], [138, 168, 66], [100, 140, 48], [150, 160, 70]].map(lin);
+const S_BODY = { head: lin([74, 70, 46]), handR: lin([46, 42, 32]), handL: lin([46, 42, 32]), footR: lin([58, 44, 30]), footL: lin([58, 44, 30]) };
+const S_BODY_DEFAULT = lin([40, 48, 26]);
+const FRONT_Z = -1;   // the character faces -z
+
+function buildStylizedGeometry(seed) {
+  const rng = new RNG(seed);
+  const boneIndex = Object.fromEntries(BONES.map((b, i) => [b[0], i]));
+  const pos = [], nrm = [], uv = [], col = [], skinI = [], skinW = [], sway = [];
+  const idxBody = [], idxStrip = [];
+  const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const push = (p, nn, c, bi, sw) => {
+    pos.push(p.x, p.y, p.z); nrm.push(nn.x, nn.y, nn.z); uv.push(0.5, 0.5); col.push(c[0], c[1], c[2]);
+    skinI.push(bi, 0, 0, 0); skinW.push(1, 0, 0, 0); sway.push(sw);
+    return pos.length / 3 - 1;
+  };
+  const rest = {};
+  for (const [name, parent, x, y, z] of BONES) rest[name] = new THREE.Vector3(x, y, z).add(parent ? rest[parent] : new THREE.Vector3());
+  const shade = (c, k) => [Math.min(1, c[0] * k), Math.min(1, c[1] * k), Math.min(1, c[2] * k)];
+  // One layer: a ring at height yTop around (cx, cz) with radii rx / rz, hanging down into
+  // `segs` jagged points of length L (each ±), flaring out by `flare` at the rim.
+  // skip(x, z): leave out the points in that direction; len(x, z): scale a point's length.
+  const tier = (bi, cx, cz, yTop, rx, rz, L, flare, segs, color, { skip = null, len = null, swayMul = 1 } = {}) => {
+    const ph = rng.float(0, Math.PI * 2);
+    const ang = [], notchL = [];
+    for (let i = 0; i <= segs; i++) { ang.push(ph + (i / segs) * Math.PI * 2); notchL.push(L * rng.float(0.4, 0.55)); }
+    notchL[segs] = notchL[0];
+    const dk = shade(color, 0.5), md = shade(color, 0.82), lt = shade(color, 1.18);
+    const at = (a, down, out) => {
+      const x = Math.cos(a), z = Math.sin(a);
+      return new THREE.Vector3(cx + x * (rx + out), yTop - down, cz + z * (rz + out));
+    };
+    const nrmAt = (a) => n.set(Math.cos(a), 0.4, Math.sin(a)).normalize().clone();
+    for (let i = 0; i < segs; i++) {
+      const a0 = ang[i], a1 = ang[i + 1], am = (a0 + a1) / 2;
+      const mx = Math.cos(am), mz = Math.sin(am);
+      if (skip && skip(mx, mz)) continue;
+      const k = len ? len(mx, mz) : 1;
+      const Lp = L * rng.float(0.85, 1.3) * k;
+      const t0 = push(at(a0, 0, 0), nrmAt(a0), dk, bi, 0);
+      const t1 = push(at(a1, 0, 0), nrmAt(a1), dk, bi, 0);
+      const n0 = push(at(a0, notchL[i] * k, flare * 0.5), nrmAt(a0), md, bi, 0.5 * swayMul);
+      const n1 = push(at(a1, notchL[i + 1] * k, flare * 0.5), nrmAt(a1), md, bi, 0.5 * swayMul);
+      const pt = push(at(am + rng.float(-0.1, 0.1), Lp, flare), nrmAt(am), lt, bi, swayMul);
+      idxStrip.push(t0, n0, pt, t0, pt, t1, t1, pt, n1);
+    }
+  };
+  // a leaf sticking out: root, two sides, tip
+  const leaf = (bi, root, dir, side, L, W, c) => {
+    const nn = new THREE.Vector3().crossVectors(side, dir).normalize();
+    const r = push(root, nn, shade(c, 0.6), bi, 0);
+    const l = push(root.clone().addScaledVector(dir, L * 0.45).addScaledVector(side, -W / 2), nn, c, bi, 0.6);
+    const t = push(root.clone().addScaledVector(dir, L), nn, shade(c, 1.15), bi, 1.2);
+    const rr = push(root.clone().addScaledVector(dir, L * 0.45).addScaledVector(side, W / 2), nn, c, bi, 0.6);
+    idxStrip.push(r, l, t, r, t, rr);
+  };
+  const pick = (P) => P[rng.int(0, P.length - 1)];
+  for (const part of PARTS) {
+    const bi = boneIndex[part.bone];
+    const o = rest[part.bone];
+    const a = new THREE.Vector3(...part.a), b = new THREE.Vector3(...part.b);
+    const sx = part.sx || 1, sz = part.sz || 1;
+    // ---- body (seen at the face, hands, boots and between the layers)
+    const cap = new THREE.CapsuleGeometry(part.r, Math.max(0.001, a.distanceTo(b)), 3, 8);
+    const axis = new THREE.Vector3().subVectors(b, a);
+    const q = new THREE.Quaternion();
+    if (axis.lengthSq() > 1e-6) q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.clone().normalize());
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const cp = cap.attributes.position, cn = cap.attributes.normal;
+    const base = pos.length / 3;
+    const bc = S_BODY[part.bone] || S_BODY_DEFAULT;
+    for (let i = 0; i < cp.count; i++) {
+      v.fromBufferAttribute(cp, i); n.fromBufferAttribute(cn, i);
+      v.x *= sx; v.z *= sz;
+      v.applyQuaternion(q).add(mid).add(o);
+      n.applyQuaternion(q);
+      push(v, n, bc, bi, 0);
+    }
+    for (const i of cap.index.array) idxBody.push(base + i);
+    // ---- layers (in the rest pose every part hangs straight down, so the layers hang along -y)
+    const top = Math.max(a.y, b.y) + o.y, bot = Math.min(a.y, b.y) + o.y, span = top - bot;
+    const cx = o.x + mid.x, cz = o.z + mid.z;
+    const rx = part.r * sx * 1.05, rz = part.r * sz * 1.05;
+    const torso = part.bone === 'hips' || part.bone === 'spine' || part.bone === 'chest';
+    if (part.hood) {
+      const hc = o.clone().add(a);
+      // a face in olive camo paint with dark goggles, under the hood's brim
+      for (const ex of [-0.043, 0.043]) {
+        const lens = new THREE.SphereGeometry(1, 10, 6);
+        const lp = lens.attributes.position, ln = lens.attributes.normal, lb = pos.length / 3;
+        for (let i = 0; i < lp.count; i++) {
+          v.fromBufferAttribute(lp, i).multiply(new THREE.Vector3(0.034, 0.027, 0.018)).add(hc).add(new THREE.Vector3(ex, 0.018, FRONT_Z * (part.r * sz - 0.006)));
+          push(v, n.fromBufferAttribute(ln, i), lin([20, 26, 24]), bi, 0);
+        }
+        for (const i of lens.index.array) idxBody.push(lb + i);
+      }
+      // pointed hood: a cone from above the head to the brow, shorter over the face
+      tier(bi, hc.x, hc.z + 0.01, hc.y + part.r + 0.09, 0.015, 0.015, 0.17, 0.16, 9, pick(S_SUIT),
+        { len: (x, z) => (z * FRONT_Z > 0.5 ? 0.62 : 1), swayMul: 0.5 });
+      // a fringe from the temples down onto the shoulders, open in front of the face
+      tier(bi, hc.x, hc.z + 0.01, hc.y + 0.05, part.r * 1.05, part.r * 1.1, 0.27, 0.1, 10, pick(S_SUIT),
+        { skip: (x, z) => z * FRONT_Z > 0.42 });
+      for (let i = 0; i < 4; i++) {
+        const ang = rng.float(0, Math.PI * 2);
+        const out = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
+        if (out.z * FRONT_Z > 0.3) out.z = -out.z;
+        const root = hc.clone().add(new THREE.Vector3(out.x * 0.05, part.r + 0.04, out.z * 0.05));
+        const dir = new THREE.Vector3(0, 1, 0).addScaledVector(out, rng.float(0.4, 0.9)).normalize();
+        leaf(bi, root, dir, new THREE.Vector3().crossVectors(dir, out).normalize(), rng.float(0.16, 0.26), rng.float(0.07, 0.1), pick(S_LEAF));
+      }
+      continue;
+    }
+    if (!part.strips) continue;   // hands
+    if (/foot/.test(part.bone)) continue;   // boots
+    if (torso) {
+      const L = part.bone === 'hips' ? 0.27 : 0.23;
+      const yT = part.bone === 'chest' ? top + part.r * 0.75 : top + part.r * 0.3;
+      tier(bi, cx, cz, yT, rx * (part.bone === 'chest' ? 0.95 : 1), rz, L, 0.06, 12, pick(S_SUIT));
+      tier(bi, cx, cz, (top + bot) / 2, rx * 1.04, rz * 1.04, L * 0.95, 0.07, 12, pick(S_SUIT));
+    } else {
+      const L = part.bone.startsWith('thigh') ? 0.2 : part.bone.startsWith('shin') ? 0.16 : part.bone.startsWith('upper') ? 0.15 : 0.12;
+      const fl = L * 0.4;
+      tier(bi, cx, cz, top + 0.02, rx, rz, L, fl, 8, pick(S_SUIT));
+      tier(bi, cx, cz, top - span * 0.5, rx * 1.04, rz * 1.04, L * (part.bone.startsWith('shin') ? 0.8 : 1), fl, 8, pick(S_SUIT));
+    }
+  }
+  // the cape: long points down the back, from the shoulders to below the hips
+  const chestI = boneIndex.chest, chestO = rest.chest;
+  tier(chestI, chestO.x, chestO.z + 0.02, chestO.y + 0.26, 0.22, 0.17, 0.62, 0.08, 10, pick(S_SUIT),
+    { skip: (x, z) => z * FRONT_Z > -0.15, swayMul: 1.3 });
+  // leaf tufts on the shoulders and the upper back
+  for (let i = 0; i < 9; i++) {
+    const sideK = rng.chance(0.5) ? 1 : -1;
+    const back = i >= 6;
+    const root = chestO.clone().add(new THREE.Vector3(back ? rng.float(-0.12, 0.12) : sideK * rng.float(0.14, 0.22), 0.27 + rng.float(-0.02, 0.03), back ? 0.12 : rng.float(-0.03, 0.08)));
+    const out = back ? new THREE.Vector3(rng.float(-0.4, 0.4), 0, 1).normalize() : new THREE.Vector3(sideK, 0, rng.float(-0.1, 0.5)).normalize();
+    const dir = new THREE.Vector3(0, 1, 0).addScaledVector(out, rng.float(0.5, 1.1)).normalize();
+    leaf(chestI, root, dir, new THREE.Vector3().crossVectors(dir, out).normalize(), rng.float(0.18, 0.3), rng.float(0.07, 0.11), pick(S_LEAF));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinI, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinW, 4));
+  g.setAttribute('aSway', new THREE.Float32BufferAttribute(sway, 1));
+  g.setIndex([...idxBody, ...idxStrip]);
+  g.addGroup(0, idxBody.length, 0);
+  g.addGroup(idxBody.length, idxStrip.length, 1);
+  g.computeBoundingSphere();
+  return g;
+}
+
 const GEO_CACHE = [];
 function getGeometry(i, light = false) {
-  const k = (i % 3) + (light ? 3 : 0);
-  if (!GEO_CACHE[k]) GEO_CACHE[k] = buildGeometry(101 + (k % 3) * 17, light);
+  const stylized = CONFIG.map.style === 'stylized';
+  const k = (i % 3) + (stylized ? 6 : light ? 3 : 0);
+  if (!GEO_CACHE[k]) GEO_CACHE[k] = stylized ? buildStylizedGeometry(211 + (k % 3) * 17) : buildGeometry(101 + (k % 3) * 17, light);
   return GEO_CACHE[k];
 }
 
 function buildRifle() {
   const g = new THREE.Group();
-  const metal = new THREE.MeshStandardMaterial({ color: 0x151614, metalness: 0.6, roughness: 0.5 });
-  const wood = new THREE.MeshStandardMaterial({ color: 0x35331f, roughness: 0.9 });
+  // stylized: a clean olive stock and a lighter grey barrel and scope that read at a distance
+  const stylized = CONFIG.map.style === 'stylized';
+  const metal = new THREE.MeshStandardMaterial(stylized ? { color: 0x34383a, metalness: 0.3, roughness: 0.55 } : { color: 0x151614, metalness: 0.6, roughness: 0.5 });
+  const wood = new THREE.MeshStandardMaterial({ color: stylized ? 0x5c5a36 : 0x35331f, roughness: 0.9 });
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.65, 6), metal);
   barrel.rotation.x = Math.PI / 2;
   barrel.position.z = -0.5;
@@ -306,10 +471,16 @@ export class GhillieCharacter {
   constructor(scene, textures, { index = 0, armbandColor = null } = {}) {
     this.scene = scene;
     // v5: the leafy 3D suit made with Higgsfield, when its model file is there
-    const use3d = hasGhillieModel();
+    // (the stylized look has its own solid, layered suit)
+    this.stylized = CONFIG.map.style === 'stylized';
+    const use3d = !this.stylized && hasGhillieModel();
     const geo = getGeometry(index, use3d);
-    this.bodyMat = new THREE.MeshStandardMaterial({ color: 0x0d0d09, roughness: 0.95 });
-    this.stripMat = new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+    this.bodyMat = this.stylized
+      ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })
+      : new THREE.MeshStandardMaterial({ color: 0x0d0d09, roughness: 0.95 });
+    this.stripMat = this.stylized
+      ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.9 })
+      : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
     // per-character motion for the strands (world space): smoothed velocity, turn rate, bob
     this.motion = { uVel: { value: new THREE.Vector3() }, uTurn: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uBob: { value: 0 }, uDroop: { value: use3d ? 1 : 0 } };
     this.stripMat.customProgramCacheKey = () => 'ghillie';
@@ -506,7 +677,9 @@ gl_Position = projectionMatrix * mvPosition;`);
     m.uBob.value = moving ? Math.sin(this.walkPhase * 2) * 0.02 * sw : 0;
     // camo tint
     this.tint.lerp(this.tintTarget, 1 - Math.exp(-dt * 0.8));
-    this.stripMat.color.copy(this.tint);
+    // (stylized: the suit keeps most of its own colour, the ground only shifts it a little)
+    if (this.stylized) this.stripMat.color.copy(this.tint).lerp(_white, 0.55);
+    else this.stripMat.color.copy(this.tint);
     this.modelDirty = true;
   }
 

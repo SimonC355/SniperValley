@@ -148,7 +148,8 @@ stone hamlets (houses and ruins block bullets; you can climb the low ruin walls)
 River a flat, rolling beech forest with a broad river between the teams. Every map ends in
 steep mountains right at its edge, so you always see where it ends. The Ravine is drawn in a
 stylized look (solid, tiered trees, strong colours, faceted rocks, a turquoise river with sandy
-banks): the first map in the direction the graphics are heading. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+banks, and snipers in solid, layered leaf suits with goggles): the first map in the direction the
+graphics are heading. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)

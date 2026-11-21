@@ -12,6 +12,11 @@ Each version's section becomes the notes of its release on GitHub (see
   clumps; rocks have big flat facets; the grass is a saturated green with painted strokes, the
   river a clear turquoise between light sandy banks, under a clear sky with a warm sun. A
   ghillie suit still stands out by its shape, not by its texture. The other maps look as before.
+  The snipers match it there: the suit is solid, jagged layers of olive and moss green (dark at
+  the root, light at the tips) with a pointed hood, a long jagged cape down the back and a few
+  leaves sticking up, a face in olive camo paint with dark goggles, and a clean olive rifle.
+  Your own sleeves and the wrap on your rifle are the same leaves. Poses, hit boxes and how the
+  suit moves in the wind are unchanged.
 - **No more flickering pink pixels in the grass.** Grass blades thinner than a pixel left single
   magenta pixels along their edges with antialiasing on (every map). Those may be some of the
   "glittering specks" you saw.

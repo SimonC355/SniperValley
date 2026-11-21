@@ -1228,11 +1228,26 @@ ghillie suit, stumps, rocks."
   - Rocks: the same generated shapes with less detail and flat facets (non-indexed normals).
   - Water: turquoise (deep 0, 0.085, 0.1; shallow 0.05, 0.27, 0.27). Post: softer vignette, no
     grain, less sharpening.
+- **The snipers** (asked for: "in the Ravine the character may also change to match"):
+  `buildStylizedGeometry` in `characters.js`, same skeleton, poses, hit boxes and wind shader.
+  - Every body part gets two skirts of jagged points (like the trees' tiers): a ring on the part
+    at the top, 8-12 points hanging down 0.12-0.27 m and flaring out, colour from 0.5× at the
+    root to 1.18× at the tips, in seven olive / moss / khaki tones; `aSway` grows toward the tips,
+    so they move in the wind and trail behind like the strips did.
+  - Hood: a cone of points from above the head to the brow (shorter over the face) and a fringe
+    from the temples onto the shoulders, open in front. Face: olive camo paint and two dark
+    goggle lenses. A cape of long points down the back (0.62 m), and 13 solid leaves sticking up
+    from the hood, shoulders and back.
+  - Solid and opaque (no alpha cards, no texture): the body capsules carry their own colours
+    (boots, gloves, face). The camouflage tint from the ground still applies, at 45% (the suit
+    keeps most of its own colour).
+  - Rifle: olive stock, grey barrel and scope. First person: the sleeves and the wrap on the
+    rifle are pointed leaves in the same tones (a little lighter for the first-person light).
+  - No 3D suit model (`ghillie.glb`) on stylized maps; the stylized suit is always used.
 - **Grass fix (every map)**: with MSAA a blade thinner than a pixel is shaded at the pixel's
   centre, outside the blade, where the blade's height (`vT`) runs below 0. The colour went
   negative (green most), and the resolve left single magenta pixels along thin blades: 10-20 per
   frame in the stylized Ravine, a few on the other maps. `vT` and `vShade` are clamped to 0..1.
 - Not done yet: the far mountains still show the bright grass in streaks (cooled a little), the
-  canyon's end walls are flat grey rock, the ghillie suit is the same model (stronger colours
-  only), the rifle is the realistic one, and
+  canyon's end walls are flat grey rock, the first-person rifle is the realistic one, and
   the stumps and logs only got the painted bark.
