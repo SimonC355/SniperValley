@@ -23,7 +23,7 @@ const WALLS = { wallDry: 'wall-dry', wallRubble: 'wall-rubble' };
 // and the beech leaf litter a red-orange carpet; real ones are straw, ochre and brown.
 const TONE = {
   tuscany: { grass: { saturation: 0.84, gain: [0.97, 0.98, 0.98] }, forest: { saturation: 0.82, gain: [0.95, 1, 1.02] } },
-  beech: { forest: { saturation: 0.55, gain: [0.84, 0.97, 0.88] } },
+  beech: { forest: { saturation: 0.62, gain: [0.9, 0.98, 0.8] } },
 };
 // metres per repeat on the terrain (barks use the trunk's own uv)
 const TILE = { grass: 2.6, forest: 2.4, rock: 3.2, mud: 2.2, wallDry: 2.4, wallRubble: 2.0 };

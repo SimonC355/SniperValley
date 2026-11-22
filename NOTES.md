@@ -1425,8 +1425,8 @@ themselves, weakest points first.
   sRGB (0.71, 0.56, 0.38) for the dry grass and (0.57, 0.32, 0.20) for the leaf litter.
   - Tuscany: grass saturation 0.84, soil 0.82. Its drier patches are bleached instead of
     yellowed.
-  - Beech River: litter saturation 0.55 with gain (0.84, 0.97, 0.88): a dull brown, as old
-    litter is under a green summer canopy.
+  - Beech River: litter saturation 0.62 with gain (0.9, 0.98, 0.8): a warm, dull brown, as old
+    litter is under a green summer canopy (0.55 read grey, like gravel).
 - **Tuscany's dry grass** (`SHAPES.dry` in `grass.js`): 7 blades per clump (5).
   - Five are thin floppy blades, 0.95 cm wide (4 cm) and drooping twice as much.
   - Two are taller stems (5 segments) that swell into a 1.4 cm seed head near the top and nod.
