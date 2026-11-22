@@ -1228,26 +1228,61 @@ ghillie suit, stumps, rocks."
   - Rocks: the same generated shapes with less detail and flat facets (non-indexed normals).
   - Water: turquoise (deep 0, 0.085, 0.1; shallow 0.05, 0.27, 0.27). Post: softer vignette, no
     grain, less sharpening.
-- **The snipers** (asked for: "in the Ravine the character may also change to match"):
-  `buildStylizedGeometry` in `characters.js`, same skeleton, poses, hit boxes and wind shader.
-  - Every body part gets two skirts of jagged points (like the trees' tiers): a ring on the part
-    at the top, 8-12 points hanging down 0.12-0.27 m and flaring out, colour from 0.5× at the
-    root to 1.18× at the tips, in seven olive / moss / khaki tones; `aSway` grows toward the tips,
-    so they move in the wind and trail behind like the strips did.
-  - Hood: a cone of points from above the head to the brow (shorter over the face) and a fringe
-    from the temples onto the shoulders, open in front. Face: olive camo paint and two dark
-    goggle lenses. A cape of long points down the back (0.62 m), and 13 solid leaves sticking up
-    from the hood, shoulders and back.
-  - Solid and opaque (no alpha cards, no texture): the body capsules carry their own colours
-    (boots, gloves, face). The camouflage tint from the ground still applies, at 45% (the suit
-    keeps most of its own colour).
-  - Rifle: olive stock, grey barrel and scope. First person: the sleeves and the wrap on the
-    rifle are pointed leaves in the same tones (a little lighter for the first-person light).
-  - No 3D suit model (`ghillie.glb`) on stylized maps; the stylized suit is always used.
+- **The snipers** (asked for: "in the Ravine the character may also change to match"; then "the
+  map is getting there, but the person still isn't: give it a new go with all the effort you
+  can"). The first try (solid jagged skirts on capsules) read as a bush on sticks; the second
+  is a sculpted figure:
+  - **Sculpted from distance fields** (`sculpt.js`): round cones, ellipsoids, rounded boxes, tori,
+    and shells that follow another surface (vest panels, belt, goggle strap), blended with
+    smooth unions (k = 2-60 mm) and carved with smooth subtractions, like clay. Each piece is
+    its own closed surface with its own resolution (body 15 mm, face 4.8 mm, gloves 4 mm,
+    goggles 4.2 mm...), so they meet in crisp seams like real cloth and gear.
+  - **Meshing**: narrow-band surface nets (a 4× coarser grid first; only coarse cells within
+    1.25 cell diagonals of the surface are refined), one Newton step onto the true surface,
+    normals from the field's gradient. Then meshoptimizer's `simplifyWithAttributes` (colour,
+    camo, roughness and gear weight count as error, so colour edges stay) down to 1 mm of error
+    near (LOD0) and 5 mm far (LOD1): about 190 000 → 26 000 → 4 800 triangles, leaves included.
+  - **Shading baked per vertex**: ambient occlusion from the whole figure's field (two scales:
+    creases 1-4 cm and cavities 6-13 cm; half strength on the face, which sits deep in the hood),
+    roughness, and two masks. `aCamo` 1 = woodland camo and 2 = face paint, both drawn by the
+    shader from the bind-pose position so they are crisp at any mesh density and stick to the
+    body. `aGear` = the per-sniper gear colour (`sniperparts.js`). Plus a soft rim light (fresnel
+    0.22).
+  - **Rig**: modelled in an A-pose (arms 0.8 rad out, legs 0.1) so no two limbs blend; the
+    skeleton is bound in that pose (`BIND_POSE`) and the game's poses replace it. Skin weights:
+    each bone's distance to the point (from its own shapes) falls off over 2 cm beyond the
+    nearest bone, then two smoothing passes over the mesh, the top 4 kept. Leg bones only weigh on
+    their own side. The face, eyes, goggles and gloves are rigid on their bone; the knee pads are
+    on the shins, the boots on shin and foot; the mantle only follows the torso, neck, head and
+    upper arms (a cape that follows the thighs swung through the body when kneeling).
+  - **The ghillie** (`sniperFoliage`): leaves are folded along the midrib (two halves, each
+    shaded flat) with a slight curl, dark at the root (0.5× and the root's occlusion) to light
+    and a little warmer at the tip, 14% dry. They grow on the mantle (everything facing away
+    from the body, 360), the hood (flowing back, the face and goggles kept clear, 70) and the
+    outer and back sides of the limbs (150, pointing down the limb), at least 3 cm apart, lifted
+    10-35° off the surface. Each takes its root's skin weights and sways (`aSway`) with the
+    existing wind shader. Then 44 jute strands from the cape's hem and the shoulders, six grass
+    tufts and the radio's antenna. Far away: 40% of them, as flat diamonds.
+  - **Rifle**: sculpted the same way (stock, scope, suppressor, bipod, burlap wraps, leaves),
+    near and far versions; the bolt handle is a separate piece so first person can work it. The
+    hands follow it by the existing two-bone IK, which now also runs for the stylized snipers.
+    Standing and crouching (not aiming) they carry it across the body (`SCULPT_RIFLE`).
+  - **First person**: the same rifle, raised 8 mm and moved 4.5 cm forward so its scope sits where
+    the old one's did (on the eye when aiming) and the stock clears the camera, the same
+    gloves (the right fist round the pistol grip, the left hand cupped under the fore-end) on
+    camo sleeves with leaves. The viewmodel's lights take the map's sun and sky colours; the
+    leaves are lit the same on both sides.
+  - **Variation**: per sniper index, one of four gear colours, a camo offset (the blobs fall
+    elsewhere) and one of four leaf tones.
+  - **Cost**: built once per load in a worker (`sniperworker.js`) that starts before the
+    terrain; about 1.5-2.3 s on one core (the sniper 1-1.8 s, the rifle 0.25 s, first person
+    0.3 s), so it finishes while the world is built. Plain arrays come back without copying.
+    Without workers it is built on the main thread; without WebAssembly (no simplifier) the
+    photoreal suit is used. LOD switch at distance × tan(fov / 2) > 4.6 m (back below 4.0):
+    without the scope up to 6.6 m, through it at 6× up to about 40 m (12×: about 80 m).
 - **Grass fix (every map)**: with MSAA a blade thinner than a pixel is shaded at the pixel's
   centre, outside the blade, where the blade's height (`vT`) runs below 0. The colour went
   negative (green most), and the resolve left single magenta pixels along thin blades: 10-20 per
   frame in the stylized Ravine, a few on the other maps. `vT` and `vShade` are clamped to 0..1.
 - Not done yet: the far mountains still show the bright grass in streaks (cooled a little), the
-  canyon's end walls are flat grey rock, the first-person rifle is the realistic one, and
-  the stumps and logs only got the painted bark.
+  canyon's end walls are flat grey rock, and the stumps and logs only got the painted bark.

@@ -21,6 +21,7 @@ import { Buildings } from './buildings.js';
 import { loadHouseModels, loadRockModels } from './models.js';
 import { loadMegascans } from './megascans.js';
 import { loadGhillieModel } from './ghilliemodel.js';
+import { prepareStylizedSniper } from './characters.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
 import { World } from './world.js';
@@ -106,6 +107,9 @@ class Game {
     this.hud.setLoading('LOADING PHOTOSCANNED TEXTURES');
     // the beech and Tuscan maps keep their own ground (leaf litter, dry grass) and barks
     this.photoSlots = stylized ? [] : await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
+
+    // the stylized sniper is sculpted and dressed in a worker while the world is built
+    const sniperPrep = stylized ? prepareStylizedSniper() : null;
 
     this.hud.setLoading('SHAPING THE VALLEY');
     await nextFrame();
@@ -205,6 +209,11 @@ class Game {
       if (this.net && (shooter === this.player || this.net.isHost)) this.net.sendFire(shooter, origin, dir, time);
     };
     this.combat.onClaim = (shooter, victim, part, point, dist) => { if (this.net) this.net.sendClaim(shooter, victim, part, point, dist); };
+    if (sniperPrep) {
+      this.hud.setLoading('DRESSING THE SNIPERS');
+      const pieces = await sniperPrep;
+      this.sniperStats = pieces && pieces.stats;   // (build times, shown by the tests)
+    }
     this.viewmodel = new Viewmodel(this.vmScene, this.vmCamera, this.textures, scene.environment);
     // Your own bullet trail starts where your rifle's muzzle is drawn (the viewmodel has its own
     // camera), or under the reticle when scoped, so it reads as a line from the gun to the target
@@ -1666,7 +1675,7 @@ class Game {
       this._sph.center.set(c.pos.x, c.pos.y + 0.9, c.pos.z);
       this._sph.radius = 2.4;
       c.character.group.visible = this._frustum.intersectsSphere(this._sph);
-      if (c.character.group.visible) c.character.syncModel();
+      if (c.character.group.visible) { c.character.syncModel(); c.character.updateLod(cam); }
     }
   }
 

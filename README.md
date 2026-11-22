@@ -148,8 +148,8 @@ stone hamlets (houses and ruins block bullets; you can climb the low ruin walls)
 River a flat, rolling beech forest with a broad river between the teams. Every map ends in
 steep mountains right at its edge, so you always see where it ends. The Ravine is drawn in a
 stylized look (solid, tiered trees, strong colours, faceted rocks, a turquoise river with sandy
-banks, and snipers in solid, layered leaf suits with goggles): the first map in the direction the
-graphics are heading. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+banks, and sculpted stylized snipers in leafy ghillie capes, with their own rifle): the first map
+in the direction the graphics are heading. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
@@ -306,6 +306,11 @@ src/
   hitbox.js      body capsules + ray tests
   combat.js      firing, hitscan / ballistics, hits, impacts, reveal events
   characters.js  procedural ghillie suits, skeleton, poses
+  sculpt.js      signed-distance sculpting: shapes, smooth blends, surface-nets mesher, occlusion
+  stylizedsniper.js  the stylized (Ravine) sniper, rifle and first-person arms, sculpted and
+                 simplified to two levels of detail, with leaves; plain arrays
+  sniperworker.js    builds those in a worker while the map loads
+  sniperparts.js     turns them into geometry; their material (camo, face paint, gear colour)
   ai.js          sniper spots, AI state machine and perception
   events.js      reveal event bus
   birds.js       crow flocks

@@ -7,6 +7,8 @@ import { CONFIG } from './config.js';
 import { FX_TEX } from './effects.js';
 import { RNG } from './noise.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RIFLE_SCOPE_Y, RIFLE_BORE_Y, BOLT_AT } from './stylizedsniper.js';
+import { stylizedPieces, sniperBodyMaterial } from './sniperparts.js';
 
 const _up = new THREE.Vector3(), _g = new THREE.Vector3(), _xAxis = new THREE.Vector3(1, 0, 0);
 
@@ -95,19 +97,6 @@ function cyl(r0, r1, len, seg = 16) {
   return g;
 }
 
-// Stylized look: a pointed leaf (root, side, tip, side), dark at the root and light at the tip,
-// in the suit's olive and moss greens (linear).
-// (a little lighter than on the characters: the first-person light is dimmer)
-const VM_LEAF = [[74, 116, 46], [96, 136, 54], [118, 146, 60], [128, 124, 68], [140, 158, 74]].map((c) => c.map((v) => ((v / 255 + 0.055) / 1.055) ** 2.4));
-function pushLeaf(pos, uv, col, idx, root, left, tip, right, c) {
-  const b = pos.length / 3;
-  pos.push(...root, ...left, ...tip, ...right);
-  uv.push(0.5, 1, 0, 0.5, 0.5, 0, 1, 0.5);
-  const sh = (k) => [Math.min(1, c[0] * k), Math.min(1, c[1] * k), Math.min(1, c[2] * k)];
-  col.push(...sh(0.55), ...c, ...sh(1.2), ...c);
-  idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-}
-
 export class Viewmodel {
   constructor(vmScene, vmCamera, textures, environment) {
     this.scene = vmScene;
@@ -119,6 +108,15 @@ export class Viewmodel {
     vmScene.add(this.sun);
     this.hemi = new THREE.HemisphereLight(0x9fb4c8, 0x2a2416, 0.5);
     vmScene.add(this.hemi);
+    // the stylized look: the world's own soft sky light and clean sun, so the rifle and the
+    // sleeves have the same colours as the snipers out there
+    if (CONFIG.map.style === 'stylized' && CONFIG.sun.hemi) {
+      this.sun.color.setHex(CONFIG.sun.color);
+      this.hemi.color.setHex(CONFIG.sun.hemi.sky);
+      this.hemi.groundColor.setHex(CONFIG.sun.hemi.ground);
+      this.hemi.intensity = 1.1;
+      vmScene.environmentIntensity = 0.4;
+    }
 
     // v5: a modern precision rifle in a chassis (it used to be a handful of plain cylinders).
     // Materials: cerakote (stippled), black anodised aluminium, blued steel, rubber and
@@ -131,11 +129,19 @@ export class Viewmodel {
     const rubber = new THREE.MeshStandardMaterial({ color: 0x141513, roughness: 0.92, metalness: 0, bumpMap: stipple, bumpScale: 1.2 });
     const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x06101a, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, emissive: 0x03100c, emissiveIntensity: 0.6, sheen: 1, sheenColor: 0x2a6a50 });
     const gloveMat = new THREE.MeshStandardMaterial({ color: 0x2f2c21, roughness: 0.88, bumpMap: stipple, bumpScale: 1.5 });
-    // stylized look: solid pointed leaves (the suit's layers) instead of burlap strips
-    this.stylized = CONFIG.map.style === 'stylized';
+    // stylized look: the sculpted sniper's rifle, sleeves, gloves and solid folded leaves
+    const pieces = CONFIG.map.style === 'stylized' ? stylizedPieces() : null;
+    this.stylized = !!pieces;
     const stripMat = this.stylized
       ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.9 })
       : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.4, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+    // (leaves: both sides lit like the front, as if the light came through them)
+    if (this.stylized) {
+      stripMat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>',
+          THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+      };
+    }
 
     const rifle = new THREE.Group();
     this.rifle = rifle;
@@ -227,14 +233,35 @@ export class Viewmodel {
     this.bolt = bolt;
     rifle.add(bolt);
 
-    // burlap strips wrapped on stock and forend
+    // stylized look: the snipers' own sculpted rifle instead, raised so its scope sits where
+    // this one's does (on the eye when aiming) and moved forward so its stock stays clear of
+    // the camera; its bolt handle turns and slides like this one's
+    const sculpted = this.stylized;
+    const vmMat = sculpted ? sniperBodyMaterial() : null;
     const rng = new RNG(5);
-    const strips = this._strips(rng, [
-      { z0: 0.08, z1: 0.28, y: -0.03, n: 10 },
-      { z0: -0.4, z1: -0.12, y: -0.02, n: 12 },
-      { z0: -0.25, z1: -0.05, y: 0.11, n: 6 },
-    ], 0.05, 0.11);
-    rifle.add(new THREE.Mesh(strips, stripMat));
+    if (sculpted) {
+      rifle.clear();
+      const dy = 0.088 - RIFLE_SCOPE_Y, dz = -0.045;
+      const body = new THREE.Mesh(pieces.rifle, vmMat);
+      body.position.set(0, dy, dz);
+      rifle.add(body);
+      const sb = new THREE.Group();
+      sb.position.set(0, RIFLE_BORE_Y + dy, 0.015);
+      const handleMesh = new THREE.Mesh(pieces.bolt, vmMat);
+      handleMesh.position.set(BOLT_AT[0], BOLT_AT[1] - RIFLE_BORE_Y, BOLT_AT[2] + dz - 0.015);
+      sb.add(handleMesh);
+      this.bolt = sb;
+      rifle.add(sb);
+      this.muzzlePoint.set(0, RIFLE_BORE_Y + dy, -0.865 + dz - 0.01);
+    } else {
+      // burlap strips wrapped on stock and forend
+      const strips = this._strips(rng, [
+        { z0: 0.08, z1: 0.28, y: -0.03, n: 10 },
+        { z0: -0.4, z1: -0.12, y: -0.02, n: 12 },
+        { z0: -0.25, z1: -0.05, y: 0.11, n: 6 },
+      ], 0.05, 0.11);
+      rifle.add(new THREE.Mesh(strips, stripMat));
+    }
 
     // arms with ghillie sleeves
     const arms = new THREE.Group();
@@ -254,8 +281,16 @@ export class Viewmodel {
       g.add(new THREE.Mesh(sleeve, stripMat));
       return g;
     };
-    arms.add(mkArm(new THREE.Vector3(0.0, -0.06, -0.02), new THREE.Vector3(0.17, -0.28, 0.28)));
-    arms.add(mkArm(new THREE.Vector3(0.0, -0.045, -0.33), new THREE.Vector3(-0.17, -0.3, -0.02)));
+    if (sculpted) {
+      // the stylized sniper's own sleeves and fingerless gloves (the right fist round the
+      // pistol grip, the left hand cupped under the fore-end), leaves on the sleeves
+      const fp = pieces.fpArms;
+      arms.add(new THREE.Mesh(fp.solid, vmMat));
+      arms.add(new THREE.Mesh(fp.leaves, stripMat));
+    } else {
+      arms.add(mkArm(new THREE.Vector3(0.0, -0.06, -0.02), new THREE.Vector3(0.17, -0.28, 0.28)));
+      arms.add(mkArm(new THREE.Vector3(0.0, -0.045, -0.33), new THREE.Vector3(-0.17, -0.3, -0.02)));
+    }
     rifle.add(arms);
 
     // own muzzle flash
@@ -309,13 +344,6 @@ export class Viewmodel {
         const c = palette[rng.int(0, palette.length - 1)];
         const b = pos.length / 3;
         const sway = rng.float(-0.03, 0.03);
-        if (this.stylized) {
-          const lc = VM_LEAF[rng.int(0, VM_LEAF.length - 1)];
-          const tip = [x + side * 0.01 + sway, zn.y - L * 1.1, z + sway];
-          const mid = (k) => [x + side * 0.005 + sway * 0.5 + k * w * 0.7, zn.y - L * 0.45, z + sway * 0.5];
-          pushLeaf(pos, uv, col, idx, [x, zn.y, z], mid(-1), tip, mid(1), lc);
-          continue;
-        }
         pos.push(x - w / 2 * side, zn.y, z, x + w / 2 * side, zn.y, z, x + side * 0.01 + sway - w / 2, zn.y - L, z + sway, x + side * 0.01 + sway + w / 2, zn.y - L, z + sway);
         const u0 = col0 / 8, u1 = (col0 + 1) / 8;
         uv.push(u0, 1, u1, 1, u0, 0, u1, 0);
@@ -335,7 +363,7 @@ export class Viewmodel {
   _sleeve(rng, a, b) {
     const pos = [], uv = [], col = [], idx = [];
     const palette = [[0.3, 0.3, 0.19], [0.22, 0.25, 0.14], [0.36, 0.32, 0.21], [0.18, 0.2, 0.12]];
-    for (let i = 0; i < (this.stylized ? 34 : 26); i++) {
+    for (let i = 0; i < 26; i++) {
       const t = rng.float(0.1, 1.0);
       const p = new THREE.Vector3().lerpVectors(a, b, t);
       const ang = rng.float(0, Math.PI * 2);
@@ -347,12 +375,6 @@ export class Viewmodel {
       const col0 = rng.int(0, 7);
       const base = pos.length / 3;
       const dx = rng.float(-0.02, 0.02);
-      if (this.stylized) {
-        const lc = VM_LEAF[rng.int(0, VM_LEAF.length - 1)];
-        const dz = rng.float(-0.02, 0.02);
-        pushLeaf(pos, uv, col, idx, [p.x, p.y, p.z], [p.x - w * 0.7 + dx * 0.5, p.y - L * 0.45, p.z + dz * 0.5], [p.x + dx, p.y - L * 1.15, p.z + dz], [p.x + w * 0.7 + dx * 0.5, p.y - L * 0.45, p.z + dz * 0.5], lc);
-        continue;
-      }
       pos.push(p.x - w / 2, p.y, p.z, p.x + w / 2, p.y, p.z, p.x - w / 2 + dx, p.y - L, p.z + rng.float(-0.02, 0.02), p.x + w / 2 + dx, p.y - L, p.z);
       uv.push(col0 / 8, 1, (col0 + 1) / 8, 1, col0 / 8, 0, (col0 + 1) / 8, 0);
       for (let k = 0; k < 4; k++) col.push(c[0], c[1], c[2]);

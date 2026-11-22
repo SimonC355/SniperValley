@@ -12,11 +12,29 @@ Each version's section becomes the notes of its release on GitHub (see
   clumps; rocks have big flat facets; the grass is a saturated green with painted strokes, the
   river a clear turquoise between light sandy banks, under a clear sky with a warm sun. A
   ghillie suit still stands out by its shape, not by its texture. The other maps look as before.
-  The snipers match it there: the suit is solid, jagged layers of olive and moss green (dark at
-  the root, light at the tips) with a pointed hood, a long jagged cape down the back and a few
-  leaves sticking up, a face in olive camo paint with dark goggles, and a clean olive rifle.
-  Your own sleeves and the wrap on your rifle are the same leaves. Poses, hit boxes and how the
-  suit moves in the wind are unchanged.
+- **The Ravine's snipers, made again in the same style.** The snipers there are now a sculpted,
+  stylized soldier with smooth, rounded shapes, a little like Fortnite or Overwatch, instead of a
+  bundle of capsules and jagged skirts:
+  - **Face.** Eyes with heavy lids under a ghillie hood, camo face paint in olive stripes with a
+    dark band across the eyes, a neck gaiter pulled up under the nose, and orange shooting
+    goggles pushed up onto the hood.
+  - **Uniform and gear.** Woodland camo, a plate carrier with magazine pouches, a belt with
+    pouches and a buckle, a drop-leg pouch, a cargo pocket, knee pads, fingerless gloves and
+    chunky boots with laces, the trousers bloused over the boot tops.
+  - **The ghillie.** A mantle over the shoulders and a cape down the back, covered in layered,
+    folded leaves (two-tone, dark at the root and light at the tip, some of them dry), with jute
+    strands, grass tufts, leaves on the arms and legs, and a radio antenna. The leaves move in
+    the wind as before.
+  - **Rifle and hands.** Their hands now hold the rifle in every pose. Standing or walking they
+    carry it across the body instead of muzzle-down like a stick. The rifle is new too: a chunky
+    bolt-action with a big scope, suppressor, folded bipod and burlap wraps with leaves.
+  - **First person.** You hold the same rifle, with your own camo sleeves, leaves and
+    fingerless gloves.
+  - **Variation.** No two snipers are quite alike: the gear comes in coyote, ranger green, khaki
+    or brown, the camo blobs fall differently, and the leaves vary in tone.
+  - **Performance.** Far away (or small in the scope) a light version is drawn. Everything is
+    built in the background while the map loads.
+  - **Unchanged.** Poses, hit boxes, the camouflage tint and everything else in the game.
 - **No more flickering pink pixels in the grass.** Grass blades thinner than a pixel left single
   magenta pixels along their edges with antialiasing on (every map). Those may be some of the
   "glittering specks" you saw.
