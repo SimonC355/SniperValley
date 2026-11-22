@@ -284,9 +284,104 @@ class SunShaftsPass extends Pass {
   }
 }
 
+// v5.3: the eye adapting. The scene's brightness (log luminance on a 64×36 grid, the middle of
+// the view weighted most; measured before the rifle is drawn) is followed over a second or two,
+// and the final pass opens up or stops down toward a set mid grey, within limits (config.js
+// render.autoExposure): the dark conifer forest opens up by up to 1.8 stops, Tuscany's sunny
+// hills by about half a stop, and a view full of bright sky stops down.
+const AE_LUM_FRAG = /* glsl */`
+uniform sampler2D tDiffuse;
+uniform vec2 uCell;
+varying vec2 vUv;
+void main() {
+  float s = 0.0;
+  for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
+    vec3 c = texture2D(tDiffuse, vUv + (vec2(float(x), float(y)) - 1.5) * 0.25 * uCell).rgb;
+    s += clamp(log2(max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-4)), -10.0, 3.0);
+  }
+  gl_FragColor = vec4(s / 16.0, 0.0, 0.0, 1.0);
+}`;
+// 64×36 -> 8×6 blocks: (sum of weight × log luminance, sum of weights)
+const AE_BLOCK_FRAG = /* glsl */`
+uniform sampler2D tLum;
+void main() {
+  ivec2 b = ivec2(gl_FragCoord.xy) * 8;
+  b.y = int(gl_FragCoord.y) * 6;
+  float s = 0.0, ws = 0.0;
+  for (int y = 0; y < 6; y++) for (int x = 0; x < 8; x++) {
+    ivec2 q = b + ivec2(x, y);
+    vec2 p = (vec2(q) + 0.5) / vec2(64.0, 36.0) - 0.5;
+    float w = exp(-dot(p * vec2(1.0, 0.8), p * vec2(1.0, 0.8)) * 7.0);
+    s += texelFetch(tLum, q, 0).r * w;
+    ws += w;
+  }
+  gl_FragColor = vec4(s, ws, 0.0, 1.0);
+}`;
+const AE_ADAPT_FRAG = /* glsl */`
+uniform sampler2D tBlocks, tPrev;
+uniform float uDt, uFirst;
+void main() {
+  vec2 s = vec2(0.0);
+  for (int y = 0; y < 6; y++) for (int x = 0; x < 8; x++) s += texelFetch(tBlocks, ivec2(x, y), 0).rg;
+  float target = s.x / max(s.y, 1e-4);
+  float prev = texelFetch(tPrev, ivec2(0), 0).r;
+  // stopping down for bright light is quicker than opening up in the dark
+  float k = uFirst > 0.5 ? 1.0 : 1.0 - exp(-uDt * (target > prev ? 2.2 : 1.1));
+  gl_FragColor = vec4(mix(prev, target, k), 0.0, 0.0, 1.0);
+}`;
+
+class AutoExposurePass extends Pass {
+  constructor(out) {
+    super();
+    this.needsSwap = false;
+    this.out = out;   // the final pass's tAdapt uniform
+    const mk = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    this.lum = mk(64, 36);
+    this.blocks = mk(8, 6);
+    this.adapt = [mk(1, 1), mk(1, 1)];
+    this.cur = 0;
+    this.first = true;
+    const mat = (frag, uniforms) => new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false });
+    this.lumMat = mat(AE_LUM_FRAG, { tDiffuse: { value: null }, uCell: { value: new THREE.Vector2(1 / 64, 1 / 36) } });
+    this.blockMat = mat(AE_BLOCK_FRAG, { tLum: { value: this.lum.texture } });
+    this.adaptMat = mat(AE_ADAPT_FRAG, { tBlocks: { value: this.blocks.texture }, tPrev: { value: null }, uDt: { value: 0 }, uFirst: { value: 1 } });
+    this.quad = new FullScreenQuad(null);
+  }
+
+  render(renderer, writeBuffer, readBuffer, deltaTime) {
+    this.lumMat.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.lum);
+    this.quad.material = this.lumMat;
+    this.quad.render(renderer);
+    renderer.setRenderTarget(this.blocks);
+    this.quad.material = this.blockMat;
+    this.quad.render(renderer);
+    const prev = this.adapt[this.cur], next = this.adapt[1 - this.cur];
+    const u = this.adaptMat.uniforms;
+    u.tPrev.value = prev.texture;
+    u.uDt.value = Math.min(Math.max(deltaTime || 0, 0), 0.1);
+    u.uFirst.value = this.first ? 1 : 0;
+    renderer.setRenderTarget(next);
+    this.quad.material = this.adaptMat;
+    this.quad.render(renderer);
+    this.cur = 1 - this.cur;
+    this.first = false;
+    this.out.value = next.texture;
+  }
+
+  // the adapted log2 luminance (debugging and tuning)
+  read(renderer) {
+    const buf = new Uint16Array(4);
+    renderer.readRenderTargetPixels(this.adapt[this.cur], 0, 0, 1, 1, buf);
+    return THREE.DataUtils.fromHalfFloat(buf[0]);
+  }
+}
+
 const FINAL_FRAG = /* glsl */`
 uniform sampler2D tDiffuse;
 uniform float uExposure;
+uniform sampler2D tAdapt;  // v5.3: the adapted log2 luminance (AutoExposurePass)
+uniform vec4 uAE;          // its key (log2), strength, most stops down, most stops up
 uniform float uVignette;
 uniform float uGrain;
 uniform float uTime;
@@ -376,7 +471,7 @@ void main() {
              + texture2D(tDiffuse, suv + vec2(0.0, sv.y)).rgb + texture2D(tDiffuse, suv - vec2(0.0, sv.y)).rgb;
     col = mix(col, acc * 0.125, clamp(max(uKick * 1.2, sb * 0.5), 0.0, 0.85));
   }
-  col *= uExposure;
+  col *= uExposure * exp2(clamp((uAE.x - texture2D(tAdapt, vec2(0.5)).r) * uAE.y, -uAE.z, uAE.w));
   // grading in linear HDR: log-space contrast around mid grey, saturation, split toning
   col = 0.18 * exp2(log2(max(col, vec3(1e-5)) / 0.18) * uGrade.y);
   float lumG = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -460,6 +555,12 @@ export class PostFX {
     this.composer.addPass(this.ssao);
     this.shafts = new SunShaftsPass();
     this.composer.addPass(this.shafts);
+    this.adaptTex = { value: new THREE.DataTexture(new Uint8Array(4), 1, 1) };
+    this.adaptTex.value.needsUpdate = true;
+    const AE = CONFIG.render.autoExposure;
+    this.ae = new AutoExposurePass(this.adaptTex);
+    this.ae.enabled = !!AE && CONFIG.map.style !== 'stylized';
+    this.composer.addPass(this.ae);
     if (vmScene) {
       this.vmPass = new RenderPass(vmScene, vmCamera);
       this.vmPass.clear = false;
@@ -475,6 +576,8 @@ export class PostFX {
       uniforms: {
         tDiffuse: { value: null },
         uExposure: { value: CONFIG.render.exposure },
+        tAdapt: this.adaptTex,
+        uAE: { value: new THREE.Vector4(0, 0, 0, 0) },   // set below when the eye adapts
         // the stylized look: clean picture (no grain), a softer vignette, little sharpening
         uVignette: { value: CONFIG.map.style === 'stylized' ? 0.16 : CONFIG.render.vignette },
         uGrain: { value: CONFIG.map.style === 'stylized' ? 0 : CONFIG.render.grain },
@@ -496,6 +599,7 @@ export class PostFX {
     }));
     this.composer.addPass(this.final);
     this.uniforms = this.final.material.uniforms;
+    if (this.ae.enabled) this.uniforms.uAE.value.set(AE.key, AE.strength, AE.down, AE.up);
   }
 
   setSize(w, h, pixelRatio) {

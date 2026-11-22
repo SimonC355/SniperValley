@@ -146,12 +146,14 @@ The first three are the same forested river valley at different sizes: narrower 
 smaller river and lower ridges, with the same mountains behind. Tuscan Hills is a valley of old
 stone hamlets (houses and ruins block bullets; you can climb the low ruin walls), and Beech
 River a flat, rolling beech forest with a broad river between the teams. Every map ends in
-steep mountains right at its edge, so you always see where it ends. The Ravine is drawn in a
-stylized look (solid, tiered trees, strong colours, faceted rocks, a turquoise river with sandy
-banks, and sculpted stylized snipers in leafy ghillie capes, with their own rifle): the first map
-in the direction the graphics are heading. On Beech River the same sculpted snipers wear a
-realistic ghillie suit of thousands of jute strands, leaves, twigs and ferns, to compare with. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
-and when the host switches map everyone follows and rejoins.
+steep mountains right at its edge, so you always see where it ends, with forest, alpine meadows
+and (around the conifer valleys) snow beyond. Every map aims at photo realism, and the snipers
+on every map are sculpted soldiers in a realistic ghillie suit of thousands of jute strands,
+leaves, twigs and ferns, dressed for the map's forest. A stylized look (solid, tiered trees,
+strong colours, faceted rocks, a turquoise river and stylized snipers) is kept as an option:
+`style: 'stylized'` on a map in `src/config.js`. The zone closes faster on the smaller maps. In a
+LAN game the host's map is used: friends who join load it automatically, and when the host
+switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
 
@@ -286,9 +288,12 @@ Every other tunable is in [`src/config.js`](src/config.js).
 src/
   main.js        game loop, match/round flow, rosters, killcam, LAN wiring, glints/HUD wiring
   config.js      all tunables
-  terrain.js     analytic valley heightfield, 1 m height grid, splat material, zone line
+  terrain.js     analytic valley heightfield, 1 m height grid, splat material, zone line, the
+                 mountains (far forest, meadows, snow) and their baked sun shadow and occlusion
   water.js       river: planar reflection, fresnel, depth transparency
   trees.js       procedural conifers (LOD0/LOD1/impostor/shadow proxy) + undergrowth
+  cardtex.js     card textures assembled at load (broadleaf sprays, the ghillie atlas helpers),
+                 mipmaps that keep their coverage
   rocks.js       procedural boulders (or Higgsfield / Megascans models)
   megascans.js   optional Megascans models from public/assets/megascans/ (npm run megascans)
   lodinst.js     near / far copies of instanced models, culled to the view
@@ -299,6 +304,7 @@ src/
   particles.js   needles drifting down under the canopy, dust motes in the sun
   textures.js    GPU-baked terrain/bark/water textures, Canvas2D foliage + ghillie strips
   assets.js      loads optional photoscanned textures (public/assets) in place of the bakes
+  hftextures.js  the generated photo textures (public/hf), colour-corrected per map on load
   shaders.js     shared uniforms, gusts, exponential height fog, foliage material patch
   world.js       analytic raycasts / line of sight / collisions (no physics engine)
   player.js      first-person controller, scope, sway, recoil, flinch
@@ -308,9 +314,9 @@ src/
   combat.js      firing, hitscan / ballistics, hits, impacts, reveal events
   characters.js  procedural ghillie suits, skeleton, poses
   sculpt.js      signed-distance sculpting: shapes, smooth blends, surface-nets mesher, occlusion
-  sculptedsniper.js  the sculpted sniper, rifle and first-person arms in two looks (stylized on
-                 the Ravine, realistic on Beech River), simplified to two levels of detail;
-                 plain arrays
+  sculptedsniper.js  the sculpted sniper, rifle and first-person arms in two looks (realistic on
+                 every map, stylized for a map drawn stylized), simplified to two levels of
+                 detail; plain arrays
   ghilliestrands.js  the realistic ghillie: jute, burlap and leaf strands, leaves, twigs, ferns
   sniperworker.js    builds those in a worker while the map loads
   sniperparts.js     turns them into geometry; their materials (camo, face paint, gear colour),
@@ -325,7 +331,8 @@ src/
                  hearing filter, breath, heartbeat, rifle foley)
   sfx.js         gunshot synthesis: muzzle blast wave and the supersonic crack
   forestsound.js songbirds, woodpecker, needle rustle and gust roar
-  post.js        SSAO, light shafts, bloom, grading, tone mapping, scope lens, vignette, grain
+  post.js        SSAO, light shafts, eye adaptation, bloom, grading, tone mapping, scope lens,
+                 vignette, grain
   hud.js         HUD, menus (tabs, key rebinding), lobby, killcam panel, scoreboard
   input.js       keyboard/mouse, pointer lock, rebindable actions
   net.js         multiplayer: lobby session, host snapshots, shot/kill sync, map sync

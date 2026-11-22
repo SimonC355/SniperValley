@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, clamp, lerp, smoothstep, hash2 } from './noise.js';
 import { patchFoliage, SHARED } from './shaders.js';
+import { leafSpray } from './cardtex.js';
 
 const VARIANTS = {
   spruce: { H: 16, r0: 0.3, crownBase: 0.08, R: 2.8, whorls: 20, branches: [8, 5], droop: [-0.4, 0.2], profile: 'cone', tex: 'spray', bark: 'barkSpruce', tint: [0.82, 0.92, 0.88] },
@@ -13,10 +14,12 @@ const VARIANTS = {
   pine: { H: 19, r0: 0.32, crownBase: 0.5, R: 3.5, whorls: 10, branches: [7, 4], droop: [0.05, 0.45], profile: 'round', tex: 'pine', bark: 'barkPine', tint: [1.0, 0.97, 0.88] },
   snag: { H: 13, r0: 0.25, crownBase: 0.4, R: 1.6, whorls: 6, branches: [4, 2], droop: [-0.1, 0.2], profile: 'cone', tex: null, bark: 'barkSpruce', tint: [1, 1, 1] },
   // v5 biomes. Broadleaf trees (broadleaf: true) get a trunk that forks into limbs and a dome
-  // of leafy cards (buildBroadleaf); the rest use the conifer builder.
-  beech: { H: 27, r0: 0.42, crownBase: 0.36, R: 7.6, Ry: 0.6, limbs: 6, broadleaf: true, profile: 'round', tex: 'beechLeaves', bark: 'barkBeech', tint: [0.92, 1.0, 0.86], clusters: [280, 96, 34], card: [3.0, 4.4, 6.4] },
-  beechYoung: { H: 15, r0: 0.21, crownBase: 0.28, R: 4.2, Ry: 0.62, limbs: 4, broadleaf: true, profile: 'round', tex: 'beechLeaves', bark: 'barkBeech', tint: [0.98, 1.05, 0.88], clusters: [150, 54, 20], card: [2.2, 3.2, 4.6] },
-  olive: { H: 6.5, r0: 0.26, crownBase: 0.34, R: 3.0, Ry: 0.7, limbs: 4, broadleaf: true, gnarled: true, profile: 'round', tex: 'oliveLeaves', bark: 'barkOlive', tint: [1.0, 1.0, 0.96], clusters: [120, 46, 18], card: [1.5, 2.2, 3.2] },
+  // of leafy cards (buildBroadleaf); the rest use the conifer builder. Their cards show a spray
+  // (cardtex.js leafSpray: the twig drawn many times, small, along a branch) so the leaves have
+  // their real size on cards metres long.
+  beech: { H: 27, r0: 0.42, crownBase: 0.36, R: 7.6, Ry: 0.6, limbs: 6, broadleaf: true, profile: 'round', tex: 'beechLeaves', spray: { scale: 0.36, shoots: 7 }, bark: 'barkBeech', tint: [0.92, 1.0, 0.86], clusters: [280, 96, 34], card: [3.0, 4.4, 6.4] },
+  beechYoung: { H: 15, r0: 0.21, crownBase: 0.28, R: 4.2, Ry: 0.62, limbs: 4, broadleaf: true, profile: 'round', tex: 'beechLeaves', spray: { scale: 0.36, shoots: 7 }, bark: 'barkBeech', tint: [0.98, 1.05, 0.88], clusters: [150, 54, 20], card: [2.2, 3.2, 4.6] },
+  olive: { H: 6.5, r0: 0.26, crownBase: 0.34, R: 3.0, Ry: 0.7, limbs: 4, broadleaf: true, gnarled: true, profile: 'round', tex: 'oliveLeaves', spray: { scale: 0.44, shoots: 6, stem: '#5d5545', seed: 5 }, bark: 'barkOlive', tint: [1.0, 1.0, 0.96], clusters: [120, 46, 18], card: [1.5, 2.2, 3.2] },
   cypress: { H: 16, r0: 0.24, crownBase: 0.03, R: 1.4, whorls: 36, branches: [7, 5], droop: [0.4, 0.65], profile: 'cypress', tex: 'cypress', bark: 'barkPine', tint: [0.95, 1.08, 0.95] },
   stonepine: { H: 15, r0: 0.34, crownBase: 0.64, R: 5.4, whorls: 9, branches: [10, 7], droop: [0.22, 0.08], profile: 'umbrella', tex: 'pine', bark: 'barkPine', tint: [0.95, 1.0, 0.86] },
 };
@@ -534,6 +537,7 @@ export class Forest {
       const V = VARIANTS[name];
       const stylized = CONFIG.map.style === 'stylized' && STYLIZED_CROWN[name] && T[STYLIZED_CROWN[name]];
       const build = V.broadleaf ? buildBroadleaf : stylized ? buildStylized : buildConifer;
+      const leafTex = V.spray && T[V.tex] ? leafSpray(T[V.tex], V.spray) : T[V.tex];
       const lod0 = build(name, 0, variantSeed(name));
       const lod1 = build(name, 1, variantSeed(name));
       const lod2 = build(name, 2, variantSeed(name));
@@ -548,7 +552,7 @@ export class Forest {
         patchFoliage(leafMat, { sway: 0.003, flutter: 0, translucency: 0.12, key: 'crown' });
       } else if (V.tex) {
         leafMat = new THREE.MeshStandardMaterial({
-          map: T[V.tex], alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.82,
+          map: leafTex, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.82,
           alphaToCoverage: CONFIG.render.msaa > 0,
         });
         patchFoliage(leafMat, V.broadleaf ? { sway: 0.005, flutter: 0.05, translucency: 0.5, key: 'leaves' } : { sway: 0.004, flutter: 0.035, translucency: 0.35, key: 'needles' });
@@ -562,7 +566,7 @@ export class Forest {
         alphaToCoverage: CONFIG.render.msaa > 0,
       });
       patchFoliage(impMat, { sway: 0.003, flutter: 0, translucency: 0.35, billboard: true, noFlip: false, key: 'impostor' });
-      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(stylized ? T[STYLIZED_CROWN[name]] : T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
+      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(stylized ? T[STYLIZED_CROWN[name]] : leafTex) : null, shadowBark: shadowOnlyMaterial(null) };
     }
   }
 

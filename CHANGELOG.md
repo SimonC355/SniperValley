@@ -5,20 +5,40 @@ Each version's section becomes the notes of its release on GitHub (see
 
 ## Unreleased
 
-- **The Ravine in a new, stylized look.** The Ravine is the first map drawn in the direction the
-  game is heading: stylized and readable, with strong colours, instead of chasing photo realism.
-  Spruces and firs are stacked tiers of jagged cones and the pines round, puffy crowns, all in
-  solid colours that go from dark at the rim to light at the top; bushes are solid, rounded
-  clumps; rocks have big flat facets; the grass is a saturated green with painted strokes, the
-  river a clear turquoise between light sandy banks, under a clear sky with a warm sun. A
-  ghillie suit still stands out by its shape, not by its texture. The other maps look as before.
-- **Beech River's snipers in a realistic ghillie suit.** On Beech River the snipers are the same
-  sculpted soldier, kept realistic, so you can compare it with the stylized Ravine:
-  - **The suit.** A full ghillie suit of thousands of jute strands from the photo texture, with
-    burlap strips and strings of synthetic leaves among them. A thick, shaggy hood frames a
-    painted face with a neck gaiter, and short fringes fall over the brow. Single beech and oak
-    leaves sit on top, and beech twigs and fern fronds are tucked into the hood, the shoulders
-    and the back.
+- **Every map looks more like a photo.** All five maps got an overhaul, the weakest points first:
+  - **Mountains.** The rock walls around each map have gullies, ledges, crags and beds of stone,
+    with bushes clinging to them, instead of smooth, pale walls. Here and there they lean back,
+    so the crest wanders instead of running straight across the valley. At both ends of the
+    valley the river comes out of a winding gorge instead of running into a sheer wall. Beyond
+    the walls: forest on the lower slopes, alpine meadows and scree above the tree line, and
+    snow on the peaks around the conifer valleys. The mountains cast their own shadows and are
+    darker in their folds and gullies. They still rise steeply right at the edge of the map.
+  - **Clearer air.** Less haze, so cliffs 200 m away keep their shape and colour.
+  - **Light like a camera's.** The picture opens up in a dark forest and stops down toward a
+    bright sky, over a second or two, as your eyes would. The contrast is softer, so deep
+    shade is no longer black, and the sky is a paler, softer blue.
+  - **Trees against the sun.** Looking toward the sun, only the leaves and needles the sun
+    reaches glow, golden green (the rims of the crowns). Shaded ones stay dark. Before, every
+    tree lit up, and the sun side of the crowns turned cream-white like paper.
+  - **Beech and olive crowns.** The leaves have their real size. Each card in a crown is now a
+    whole branch of small twigs. It used to be one twig blown up to several metres, so every
+    leaf was half a metre across.
+  - **Tuscany.** The dry grass is thin, pale and floppy, with stems that nod under seed heads,
+    instead of broad orange spikes. The hillsides are straw-coloured instead of orange, and the
+    soil is ochre instead of red.
+  - **Beech River.** The leaf litter is brown instead of a red-orange carpet.
+  - **Your rifle against the sun.** Looking toward a low sun, it no longer glows like polished
+    brass from end to end.
+  - **The Ravine is realistic again**, like the other maps.
+- **Every sniper in a realistic ghillie suit.** On every map the snipers are now a sculpted soldier
+  in a full ghillie suit, dressed for the map's forest:
+  - **The suit.** Thousands of jute strands from the photo texture, with burlap strips and strings
+    of synthetic leaves among them. A thick, shaggy hood frames a painted face with a neck
+    gaiter, and short fringes fall over the brow. Single leaves sit on top. Twigs and fern
+    fronds are tucked into the hood, the shoulders and the back.
+  - **Dressed for the forest.** On the conifer maps (Valley, Narrow Valley, Ravine): spruce
+    sprigs and darker, greener jute. On Beech River: beech twigs and browner jute. On Tuscan
+    Hills: olive sprigs and straw and khaki jute.
   - **Movement.** The strands hang with gravity in every pose. Kneeling and aiming they fall from
     the arms, and lying down they lie along the back. They sway in the wind and trail behind
     when the sniper moves.
@@ -29,30 +49,20 @@ Each version's section becomes the notes of its release on GitHub (see
     sleeves and jute hanging from them.
   - **Distance.** The jute keeps its fullness far away and through the scope instead of thinning
     out. From across the river the sniper reads as a shaggy shape, and lying down as a bush.
-  - **Everything else.** Unchanged, and the other maps keep their snipers.
-- **The Ravine's snipers, made again in the same style.** The snipers there are now a sculpted,
-  stylized soldier with smooth, rounded shapes, a little like Fortnite or Overwatch, instead of a
-  bundle of capsules and jagged skirts:
-  - **Face.** Eyes with heavy lids under a ghillie hood, camo face paint in olive stripes with a
-    dark band across the eyes, a neck gaiter pulled up under the nose, and orange shooting
-    goggles pushed up onto the hood.
-  - **Uniform and gear.** Woodland camo, a plate carrier with magazine pouches, a belt with
-    pouches and a buckle, a drop-leg pouch, a cargo pocket, knee pads, fingerless gloves and
-    chunky boots with laces, the trousers bloused over the boot tops.
-  - **The ghillie.** A mantle over the shoulders and a cape down the back, covered in layered,
-    folded leaves (two-tone, dark at the root and light at the tip, some of them dry), with jute
-    strands, grass tufts, leaves on the arms and legs, and a radio antenna. The leaves move in
-    the wind as before.
-  - **Rifle and hands.** Their hands now hold the rifle in every pose. Standing or walking they
-    carry it across the body instead of muzzle-down like a stick. The rifle is new too: a chunky
-    bolt-action with a big scope, suppressor, folded bipod and burlap wraps with leaves.
-  - **First person.** You hold the same rifle, with your own camo sleeves, leaves and
-    fingerless gloves.
-  - **Variation.** No two snipers are quite alike: the gear comes in coyote, ranger green, khaki
-    or brown, the camo blobs fall differently, and the leaves vary in tone.
+  - **Variation.** No two snipers are quite alike: the gear colour, the camo and the tones of the
+    leaves and jute vary.
+  - **No giveaway sparkle.** Their scope lens no longer mirrors the sun as a blinding green dot
+    that showed where a sniper was from any angle. The glint still shows when a scope points at
+    you, as before.
   - **Performance.** Far away (or small in the scope) a light version is drawn. Everything is
     built in the background while the map loads.
   - **Unchanged.** Poses, hit boxes, the camouflage tint and everything else in the game.
+- **A stylized look, kept as an option.** The game can also draw a map stylized instead of
+  photoreal (`style: 'stylized'` on a map in `config.js`; no map uses it now). Spruces and firs
+  become stacked tiers of jagged cones, pines round, puffy crowns, and bushes solid clumps.
+  Rocks get big facets, the grass is a saturated, painted green, and the river is turquoise
+  between sandy banks. The snipers are a smooth, rounded soldier (a little like Fortnite) in
+  goggles and a plate carrier, with a cape of folded leaves and a chunky rifle.
 - **No more flickering pink pixels in the grass.** Grass blades thinner than a pixel left single
   magenta pixels along their edges with antialiasing on (every map). Those may be some of the
   "glittering specks" you saw.

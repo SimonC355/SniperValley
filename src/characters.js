@@ -222,15 +222,15 @@ function buildGeometry(seed, light = false) {
   return g;
 }
 
-// The sculpted sniper (sculptedsniper.js, sniperparts.js): stylized on the stylized map (Ravine),
-// in a realistic ghillie suit on maps that ask for it (Beech River: ghillie 'sculpted'); built
-// once per map load in a worker while the world is built. Elsewhere, and without it, the strip
-// suit is used.
+// The sculpted sniper (sculptedsniper.js, sniperparts.js): in a realistic ghillie suit dressed for
+// the map's own forest (every map; ghillie 'strips' keeps the old strip suit), or stylized on a
+// map in the stylized style; built once per map load in a worker while the world is built.
+// Without it the strip suit is used.
 export function sniperLook() {
   if (CONFIG.map.style === 'stylized') return 'stylized';
   return CONFIG.map.ghillie === 'sculpted' ? 'real' : null;
 }
-export const prepareSculptedSniper = () => (sniperLook() ? prepareSniperPieces(BONES, sniperLook()) : Promise.resolve(null));
+export const prepareSculptedSniper = () => (sniperLook() ? prepareSniperPieces(BONES, sniperLook(), CONFIG.map.biome) : Promise.resolve(null));
 
 const GEO_CACHE = [];
 function getGeometry(i, light = false) {

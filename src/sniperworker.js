@@ -5,7 +5,7 @@ import { sniperReady, buildSniperPieces, transferables } from './sculptedsniper.
 self.onmessage = async (e) => {
   try {
     await sniperReady;
-    const pieces = buildSniperPieces(e.data.bones, e.data.look);
+    const pieces = buildSniperPieces(e.data.bones, e.data.look, e.data.biome);
     self.postMessage({ pieces }, transferables(pieces));
   } catch (err) {
     self.postMessage({ error: String((err && err.stack) || err) });

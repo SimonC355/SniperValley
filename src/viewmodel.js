@@ -122,8 +122,8 @@ export class Viewmodel {
     // Materials: cerakote (stippled), black anodised aluminium, blued steel, rubber and
     // coated glass; a small noise texture breaks up the roughness so it doesn't look plastic.
     const stipple = stippleTexture();
-    const cerakote = new THREE.MeshStandardMaterial({ color: 0x6b6446, roughness: 0.62, metalness: 0.15, roughnessMap: stipple, bumpMap: stipple, bumpScale: 0.6 });
-    const anod = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.38, metalness: 0.7, roughnessMap: stipple });
+    const cerakote = new THREE.MeshStandardMaterial({ color: 0x6b6446, roughness: 0.72, metalness: 0.1, roughnessMap: stipple, bumpMap: stipple, bumpScale: 0.6 });
+    const anod = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.46, metalness: 0.7, roughnessMap: stipple });
     const metal = new THREE.MeshStandardMaterial({ color: 0x232527, roughness: 0.32, metalness: 0.85, roughnessMap: stipple });
     const metalDark = new THREE.MeshStandardMaterial({ color: 0x101112, roughness: 0.45, metalness: 0.65, roughnessMap: stipple });
     const rubber = new THREE.MeshStandardMaterial({ color: 0x141513, roughness: 0.92, metalness: 0, bumpMap: stipple, bumpScale: 1.2 });
@@ -481,6 +481,9 @@ export class Viewmodel {
     const sun = typeof inShade === 'number' ? inShade : inShade ? 0 : 1;
     this.shade = THREE.MathUtils.lerp(this.shade, 0.15 + 0.85 * sun, 1 - Math.exp(-dt * 4));
     this.sun.position.copy(sunDirView);
-    this.sun.intensity = 2.6 * this.shade;
+    // looking toward a low sun the rifle stands against the light: only its edges catch it (at
+    // full strength its top glowed like polished brass from end to end)
+    const backlit = THREE.MathUtils.smoothstep(-sunDirView.z, 0.1, 0.75);
+    this.sun.intensity = 2.6 * this.shade * (1 - 0.6 * backlit);
   }
 }

@@ -49,6 +49,8 @@ export class SkySystem {
         vec3 base = max(texColor - sundiscColor * (1.0 - cloudAlpha), vec3(0.0)) * uSkyGain;
         float bl = dot(base, vec3(0.2126, 0.7152, 0.0722));
         base *= min(1.0, 2.4 / max(bl, 1e-4));
+        // a clear sky in a photo is a paler, softer blue than the scattering model gives
+        base = mix(vec3(dot(base, vec3(0.2126, 0.7152, 0.0722))), base, ${CONFIG.map.style === 'stylized' ? '1.0' : '0.8'});
         base = mix(base, fc, hz * 0.85);
         texColor = base + sundisc * (1.0 - cloudAlpha) * vec3(40.0, 34.0, 26.0);
       }
@@ -82,7 +84,11 @@ export class SkySystem {
     const ground = new THREE.Mesh(groundGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0.06, 0.07, 0.04) }));
     ground.position.y = -20;
     envScene.add(ground);
+    // (without the sun's disc: the sun light gives its own highlights, and the disc in the
+    // reflections made glossy things glow gold when you looked toward the sun)
+    sky.material.uniforms.showSunDisc.value = 0;
     const envRT = pmrem.fromScene(envScene, 0, 0.1, 5000);
+    sky.material.uniforms.showSunDisc.value = 1;
     scene.environment = envRT.texture;
     scene.environmentIntensity = CONFIG.sun.ambient;
     pmrem.dispose();

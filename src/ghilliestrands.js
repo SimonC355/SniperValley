@@ -24,8 +24,15 @@ export const ATLAS = {
 
 const lin = (hex) => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((v) => ((v / 255 + 0.055) / 1.055) ** 2.4);
 // tints for the light jute photo: tan, khaki, olive, brown, dark brown, moss (the texture
-// itself is a pale straw, so these are multipliers more than colours)
-const JUTE_TINT = [0xbfb187, 0xa99d72, 0x8e9060, 0x93744f, 0x66553c, 0x74824c, 0xb0a074, 0x7f8556, 0x5f6a3e].map(lin);
+// itself is a pale straw, so these are multipliers more than colours), dressed for each forest:
+// darker and greener under the conifers, browner in the beech wood, straw and khaki in the dry
+// Tuscan hills
+const JUTE_TINTS = {
+  conifer: [0x9a8f68, 0x857b58, 0x6e7048, 0x7a5f40, 0x55462f, 0x5f6a3e, 0x8f8460, 0x6a6e48, 0x4f5634].map(lin),
+  beech: [0xbfb187, 0xa99d72, 0x8e9060, 0x93744f, 0x66553c, 0x74824c, 0xb0a074, 0x7f8556, 0x5f6a3e].map(lin),
+  tuscany: [0xd0bf8e, 0xbcab7a, 0xa89a6a, 0xa08458, 0x8a7a52, 0x9a9466, 0xc4b182, 0x8c8a5e, 0x7a6e4a].map(lin),
+};
+let JUTE_TINT = JUTE_TINTS.beech;
 const LEAF_TINT = [0xffffff, 0xf2f0e8, 0xe0e6d0, 0xfff0dc].map(lin);
 
 const add = (a, b, k) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
@@ -44,6 +51,7 @@ const DOWN = [0, -1, 0];
 //        -> [indices, weights], normalAt(obj, p) -> n, ao(p, n) -> 0..1, lod }
 export function realGhillieStrands(def, ctx) {
   const { surfaces, lod } = ctx;
+  JUTE_TINT = JUTE_TINTS[ctx.biome] || JUTE_TINTS.conifer;
   const far = lod > 0;
   const rng = new RNG(7331);
   const F = def.F, hd = F.head.t;

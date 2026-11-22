@@ -50,6 +50,10 @@ export const CONFIG = {
     particles: false,      // v5.2: needles drifting down and dust motes in the sun (off: they glittered like noise)
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
+    // v5.3: the eye adapting to the light (post.js AutoExposurePass): the exposure follows the
+    // view's average brightness (log2 luminance) toward `key`, by `strength` (0 off, 1 fully),
+    // at most `down` stops darker and `up` stops brighter
+    autoExposure: { key: -2.6, strength: 0.75, down: 0.8, up: 1.8 },
     grain: 0.03,
     sharpen: 0.6,          // v5: sharpening in the final pass (0 = off)
     vignette: 0.32,
@@ -58,8 +62,9 @@ export const CONFIG = {
 
   // Colour grading in the final pass (applied to linear HDR colour before tone mapping).
   grade: {
-    saturation: 1.15,
-    contrast: 1.16,        // around mid grey, in log space (v5: a little punchier)
+    saturation: 1.1,
+    contrast: 1.1,         // around mid grey, in log space (v5: a little punchier; v5.3 less again:
+                           // with the eye adapting, deep shade no longer goes black)
     warmth: 0.05,          // warm highlights / cool shadows split toning
     shafts: 0.36,          // light-shaft strength
   },
@@ -89,10 +94,11 @@ export const CONFIG = {
   },
 
   fog: {
-    density: 0.0017,       // exponential density at height 0 (v5: clearer air)
+    density: 0.0012,       // exponential density at height 0 (v5: clearer air; v5.2 clearer still,
+                           // so cliffs 200 m away keep their shape and colour)
     heightFalloff: 0.028,  // per metre
     color: 0xb9c3c9,
-    sunScatter: 0.6,
+    sunScatter: 0.45,
   },
 
   // Drifting clouds (sky + their shadows on the ground) and gusts sweeping the valley.
@@ -474,7 +480,7 @@ export const MAPS = {
     map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70], style: 'stylized',
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
   },
   tuscany: {
@@ -482,7 +488,7 @@ export const MAPS = {
     map: { length: 300, width: 240, ridgeDist: 112, ridgeHeightNorth: 38, ridgeHeightSouth: 34, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.7, relief: 0.7 },
   },
   beech: {
-    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14], ghillie: 'sculpted',
+    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14],
     map: { length: 320, width: 260, ridgeDist: 122, ridgeHeightNorth: 9, ridgeHeightSouth: 8, riverDeepHalfWidth: 12, riverShelfStart: 15, riverShelfEnd: 19, riverDepth: 3.0, meander: 0.9, relief: 0.55 },
   },
 };
@@ -506,9 +512,10 @@ export const MAP_ID = (() => {
   CONFIG.map.terrain = P.terrain;
   CONFIG.map.farHills = P.farHills;
   CONFIG.map.style = P.style || 'realistic';
-  // the snipers: 'sculpted' = the sculpted figure in a realistic ghillie suit (Beech River),
-  // otherwise the strip suit (the stylized style always has its own sculpted sniper)
-  CONFIG.map.ghillie = P.ghillie || 'strips';
+  // the snipers: the sculpted figure in a realistic ghillie suit on every map ('sculpted'), or the
+  // old strip suit ('strips'); a map in the stylized style (style: 'stylized', none at the moment)
+  // gets the stylized sculpted sniper
+  CONFIG.map.ghillie = P.ghillie || 'sculpted';
   const k = (P.map.length * P.map.width) / (440 * 380);
   CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
   // beech forests are open underneath; Tuscany's hillsides are drier and more open
@@ -521,13 +528,13 @@ export const MAP_ID = (() => {
   // light and air of the biome: warm, hazy late sun over Tuscany; soft light in the beech forest
   if (P.biome === 'tuscany') {
     Object.assign(CONFIG.sun, { elevation: 17, azimuth: 242, intensity: 3.7, color: 0xffd39a });
-    Object.assign(CONFIG.fog, { color: 0xd3cab4, density: 0.0017 });
-    Object.assign(CONFIG.grade, { warmth: 0.09, saturation: 1.06 });
+    Object.assign(CONFIG.fog, { color: 0xd3cab4, density: 0.0012 });
+    Object.assign(CONFIG.grade, { warmth: 0.07, saturation: 1.04 });
     CONFIG.sky.turbidity = 6;
   } else if (P.biome === 'beech') {
     Object.assign(CONFIG.sun, { elevation: 21, azimuth: 230, intensity: 3.5, color: 0xffe9cc });
-    Object.assign(CONFIG.fog, { color: 0xb8c5c1, density: 0.0021 });
-    CONFIG.grade.saturation = 1.1;
+    Object.assign(CONFIG.fog, { color: 0xb8c5c1, density: 0.0015 });
+    CONFIG.grade.saturation = 1.06;
   }
   // v5.2 stylized look (Ravine): a high, clean sun, lifted shadows, a blue sky and blue air in
   // the distance, strong but clean colour; painted textures instead of photos (textures.js),

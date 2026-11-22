@@ -9,6 +9,7 @@ import { ATLAS } from './ghilliestrands.js';
 import { CONFIG } from './config.js';
 import { SHARED, GUST_GLSL } from './shaders.js';
 import { RNG } from './noise.js';
+import { drawable, bleed, coverageMips, mipTexture } from './cardtex.js';
 
 let PIECES = null;
 let pending = null;
@@ -17,15 +18,15 @@ let pending = null;
 //   fpArms: { solid, leaves | strands }, head } once prepared, else null
 export const sniperPieces = () => PIECES;
 
-export function prepareSniperPieces(BONES, look) {
+export function prepareSniperPieces(BONES, look, biome = 'conifer') {
   if (PIECES) return Promise.resolve(PIECES);
   if (pending) return pending;
   const t0 = performance.now();
   pending = (async () => {
     let data = null;
-    try { data = await inWorker(BONES, look); } catch (e) { console.warn('sculpted sniper: no worker, building here', e); }
+    try { data = await inWorker(BONES, look, biome); } catch (e) { console.warn('sculpted sniper: no worker, building here', e); }
     if (!data) {
-      try { await sniperReady; data = buildSniperPieces(BONES, look); } catch (e) { console.warn('sculpted sniper: unavailable', e); return null; }
+      try { await sniperReady; data = buildSniperPieces(BONES, look, biome); } catch (e) { console.warn('sculpted sniper: unavailable', e); return null; }
     }
     const g = (p) => (p ? toGeometry(p) : null);
     PIECES = {
@@ -38,7 +39,7 @@ export function prepareSniperPieces(BONES, look) {
   return pending;
 }
 
-function inWorker(BONES, look) {
+function inWorker(BONES, look, biome) {
   return new Promise((resolve, reject) => {
     let w;
     try { w = new Worker(new URL('./sniperworker.js', import.meta.url), { type: 'module' }); } catch (e) { reject(e); return; }
@@ -46,7 +47,7 @@ function inWorker(BONES, look) {
     const timer = setTimeout(() => { done(); reject(new Error('timed out')); }, 90000);
     w.onmessage = (e) => { done(); if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.pieces); };
     w.onerror = (e) => { done(); reject(e.error || new Error(e.message || 'worker error')); };
-    w.postMessage({ bones: BONES, look });
+    w.postMessage({ bones: BONES, look, biome });
   });
 }
 
@@ -187,7 +188,8 @@ export function ghillieAtlas(textures) {
     if (src) g.drawImage(src, r.x, r.y, r.w, r.h);
   };
   put(textures.ghillie, ATLAS.jute);
-  put(textures.beechLeaves || textures.leaves, ATLAS.twig);
+  // the twig tucked into the suit: the map's own (a beech twig, an olive sprig, a spruce sprig)
+  put(textures.beechLeaves || textures.oliveLeaves || textures.spray || textures.leaves, ATLAS.twig);
   put(textures.fern, ATLAS.fern);
   const rng = new RNG(2024);
   drawLeafStrips(g, ATLAS.leafStrip, rng);
@@ -196,101 +198,8 @@ export function ghillieAtlas(textures) {
   const base = g.getImageData(0, 0, S, S).data;
   const regions = [ATLAS.jute, ATLAS.twig, ATLAS.fern, ATLAS.leafStrip, ATLAS.burlap, ATLAS.leaves];
   bleed(base, S, regions);
-  const levels = coverageMips(base, S, regions, GHILLIE_ALPHA_TEST);
-  const flip = (d, n) => {
-    const o = new Uint8Array(d.length);
-    for (let y = 0; y < n; y++) o.set(d.subarray((n - 1 - y) * n * 4, (n - y) * n * 4), y * n * 4);
-    return o;
-  };
-  const mips = levels.map((d, i) => ({ data: flip(d, S >> i), width: S >> i, height: S >> i }));
-  const tex = new THREE.DataTexture(mips[0].data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.mipmaps = mips;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.anisotropy = 4;
-  tex.needsUpdate = true;
-  ATLAS_TEX = tex;
-  return tex;
-}
-
-// an image, canvas or bitmap to draw; a DataTexture (rows bottom-up) is turned back into one
-function drawable(tex) {
-  if (!tex || !tex.image) return null;
-  const im = tex.image;
-  if (typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) return im;
-  if (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap) return im;
-  if (typeof HTMLCanvasElement !== 'undefined' && im instanceof HTMLCanvasElement) return im;
-  if (im.data && im.width) {
-    const c = document.createElement('canvas');
-    c.width = im.width; c.height = im.height;
-    const id = c.getContext('2d').createImageData(im.width, im.height);
-    const w = im.width * 4;
-    for (let y = 0; y < im.height; y++) id.data.set(im.data.subarray((im.height - 1 - y) * w, (im.height - y) * w), y * w);
-    c.getContext('2d').putImageData(id, 0, 0);
-    return c;
-  }
-  return null;
-}
-
-// fill fully transparent texels with the region's average colour, so filtering never pulls
-// in black
-function bleed(d, S, regions) {
-  for (const r of regions) {
-    let sr = 0, sg = 0, sb = 0, n = 0;
-    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
-      const i = (y * S + x) * 4;
-      if (d[i + 3] > 128) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++; }
-    }
-    if (!n) continue;
-    sr /= n; sg /= n; sb /= n;
-    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
-      const i = (y * S + x) * 4;
-      if (d[i + 3] < 8) { d[i] = sr; d[i + 1] = sg; d[i + 2] = sb; d[i + 3] = 0; }
-    }
-  }
-}
-
-function coverageMips(d0, S, regions, thr) {
-  const levels = [d0];
-  const t = thr * 255;
-  const coverage = (d, n, r, k, scale) => {
-    let pass = 0, all = 0;
-    const x0 = r.x >> k, y0 = r.y >> k, x1 = Math.max(x0 + 1, (r.x + r.w) >> k), y1 = Math.max(y0 + 1, (r.y + r.h) >> k);
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { all++; if (d[(y * n + x) * 4 + 3] * scale > t) pass++; }
-    return all ? pass / all : 0;
-  };
-  const want = regions.map((r) => coverage(d0, S, r, 0, 1));
-  let prev = d0, n = S;
-  for (let k = 1; n > 1; k++) {
-    const m = n >> 1;
-    const d = new Uint8ClampedArray(m * m * 4);
-    for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-      let r = 0, g = 0, b = 0, a = 0;
-      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-        const i = ((y * 2 + dy) * n + x * 2 + dx) * 4, al = prev[i + 3] + 1;
-        r += prev[i] * al; g += prev[i + 1] * al; b += prev[i + 2] * al; a += prev[i + 3];
-      }
-      const o = (y * m + x) * 4, wsum = a + 4;
-      d[o] = r / wsum; d[o + 1] = g / wsum; d[o + 2] = b / wsum; d[o + 3] = a / 4;
-    }
-    // per region: the alpha scale that keeps its coverage (binary search)
-    if (m >= 4) regions.forEach((r, ri) => {
-      if (!want[ri]) return;
-      let lo = 0.5, hi = 4;
-      for (let it = 0; it < 14; it++) {
-        const s = (lo + hi) / 2;
-        if (coverage(d, m, r, k, s) < want[ri]) lo = s; else hi = s;
-      }
-      const s = (lo + hi) / 2;
-      const x0 = r.x >> k, y0 = r.y >> k, x1 = (r.x + r.w) >> k, y1 = (r.y + r.h) >> k;
-      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * m + x) * 4 + 3; d[i] = Math.min(255, d[i] * s); }
-    });
-    levels.push(d);
-    prev = d; n = m;
-  }
-  return levels;
+  ATLAS_TEX = mipTexture(coverageMips(base, S, S, regions, GHILLIE_ALPHA_TEST), S, S);
+  return ATLAS_TEX;
 }
 
 // synthetic leaves on strings (like laser-cut ghillie leaves): a dark cord down each strip with

@@ -45,6 +45,42 @@ void main() {
   pc_fragColor = vec4(n * 0.5 + 0.5, r);
 }`;
 
+const TONE = HEAD + /* glsl */`
+uniform sampler2D tMap;
+uniform float uSat;
+uniform vec3 uGain;
+void main() {
+  vec4 t = texture(tMap, vUv);
+  float l = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722));
+  pc_fragColor = vec4(max(mix(vec3(l), t.rgb, uSat), 0.0) * uGain, t.a);
+}`;
+
+// A colour-corrected copy of an sRGB texture (alpha, e.g. height, kept): saturation, then a gain
+// per channel, both in linear colour. Done once on the GPU, so every material that samples the
+// texture (terrain, grass, rocks, walls) gets the same colour. The source is disposed.
+export function toneTexture(renderer, tex, { saturation = 1, gain = [1, 1, 1] }) {
+  const w = tex.image.width, h = tex.image.height;
+  const rt = packTarget(w, true, tex.anisotropy, h);
+  const mat = new THREE.RawShaderMaterial({
+    glslVersion: THREE.GLSL3, vertexShader: VERT, fragmentShader: TONE,
+    uniforms: { tMap: { value: tex }, uSat: { value: saturation }, uGain: { value: new THREE.Vector3(...gain) } },
+    depthTest: false, depthWrite: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  quad.frustumCulled = false;
+  const scene = new THREE.Scene().add(quad);
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1));
+  renderer.setRenderTarget(prev);
+  quad.geometry.dispose();
+  mat.dispose();
+  tex.dispose();
+  rt.texture.wrapS = tex.wrapS;
+  rt.texture.wrapT = tex.wrapT;
+  return rt.texture;
+}
+
 // Procedural tile sizes (metres per repeat) used when the manifest has no real-world size.
 const DEFAULT_TILE = { grass: 2.5, forest: 2.5, rock: 3.0, mud: 2.5, barkSpruce: 1, barkPine: 1 };
 
@@ -63,8 +99,8 @@ function loadTexture(loader, rel, srgb) {
   });
 }
 
-function packTarget(size, srgb, aniso) {
-  const rt = new THREE.WebGLRenderTarget(size, size, {
+function packTarget(size, srgb, aniso, height = size) {
+  const rt = new THREE.WebGLRenderTarget(size, height, {
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
     colorSpace: srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace,

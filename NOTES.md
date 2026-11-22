@@ -1345,3 +1345,98 @@ Ravine keeps `'stylized'` and the other maps keep the strip suit.
 - Built in the same worker (about 1.9 s on one core here); the load of Beech River in the test
   suite went from 10 to 13 s on this two-core container, where the worker and the world share
   the CPU.
+
+### v5.3: a photoreal overhaul of every map
+
+Asked for: "I'm mostly into the photorealistic! Will you give all the maps an overhaul?" Three
+parts: the realistic ghillie sniper on every map, the Ravine realistic again, and the maps
+themselves, weakest points first.
+
+- **Snipers.** `CONFIG.map.ghillie` defaults to `'sculpted'` on every map (`'strips'` gives the old
+  strip suit). The suit is dressed per biome: nine jute tints per forest (`JUTE_TINTS` in
+  `ghilliestrands.js`: darker and greener under the conifers, browner in the beech wood, straw and
+  khaki in Tuscany), and the twig tucked into it is the map's own card (beech twig, olive sprig,
+  spruce sprig). The AI rifles' scope lens is matte now (roughness 0.1 → 0.42): it mirrored the
+  sun as one blinding pixel that bloomed into a green ball and gave snipers away from any angle,
+  outside the glint rules.
+- **The Ravine**: `style: 'stylized'` removed. The stylized code (crowns, rocks, textures, light,
+  sniper) stays, for any map that sets it.
+- **Survey.** Five views per map (overview, the forest at eye level, the river bank, a sniper 7 m
+  away, the same sniper through the scope from the far bank). Weakest points, in order: the
+  mountains (flat, pale walls); the rifle glowing toward the sun; Tuscany's grass (orange spikes);
+  Beech River (a red leaf carpet, crowns of giant leaves); dark, harsh forests under a deep-blue
+  sky.
+- **Mountains** (`terrain.js`, realistic maps only):
+  - Shape (`_rim`): gullies 4-7 m deep from a 1-D noise along the edge, crags between them, beds
+    of 6.5 m (heights pulled 45% toward steps), and small relief. The rim mesh has 104 rings
+    outward (64 before).
+  - Bays: along the edge (noise at 0.009/m) the wall leans back to a 1.7 times longer climb
+    to the crest, blended in from 6 to 30 m out. The crest wanders, and the foot stays as steep
+    as before. Measured along every edge of every map (except at the river): 11-16 m of rise
+    within 10 m (14-19 m before), at least 19 m within 30 m (19.5-31 before). The suite's edge
+    test (8 m and 25 m at one spot) passes.
+  - The river's gorge: at both ends the wall is cut down across a Gaussian (half width the
+    river's shelf + 6 m) around the river's own meandering line, so the river comes out of a
+    winding canyon that closes between 2.5 and 5 wall lengths out (90-180 m on the Valley).
+    The water plane already ran the whole length. Players can't go past the edge as before.
+  - The walls (shader): the rock darker (× 0.62, 0.6, 0.56), big structure from the macro texture
+    at 90 m, beds of lighter and darker stone that wander (± 0.6 bed) and pinch out, narrow
+    streaks running down, darker hollows from the rock texture's height, and plants on the less
+    steep parts of the walls (the far forest's colours, noise on the wall's own plane).
+  - Beyond the edge (8-45 m out, `FAR` per biome): forest canopy below the tree line (conifer
+    175 m, beech 230 m, Tuscany 205 m; crowns from the macro texture's cell channel at 120 m,
+    stands at 900 m), alpine meadow and scree above it, snow above 255 m around the conifer
+    valleys (not too steep, longer in the gullies).
+  - Light baked per vertex (`_bakeLight`, about 0.8 s with the mesh on the Valley): sun
+    visibility (a march toward the sun over a 4 m grid of the mesh's heights, 3-900 m, soft over
+    about 4°) and sky visibility (horizon occlusion in 8 directions at 3-110 m). The sun part
+    applies only beyond the play area's edge, where the shadow map doesn't reach. The sky part
+    applies everywhere, at 55% inside.
+- **Air and sky.** Fog 0.0017 → 0.0012 (Beech River 0.0021 → 0.0015), sun scatter 0.6 → 0.45.
+  The environment map is rendered without the sun disc: glossy things mirrored it, and the rifle
+  glowed gold toward the sun. The sky dome is desaturated by 20% (photos show a paler blue than
+  the scattering model).
+- **Eye adaptation** (`AutoExposurePass` in `post.js`):
+  - Measuring: log2 luminance on a 64×36 grid (16 taps per cell), then 8×6 blocks weighted
+    toward the middle of the view, then one value. It is taken before the rifle is drawn.
+  - Following: two 1×1 half-float targets in turn, at 2.2/s when the view gets brighter and
+    1.1/s when it gets darker.
+  - Exposure: the final pass multiplies by 2^clamp((key − L) × strength, −down, up), with
+    `render.autoExposure` = key −2.6, strength 0.75, at most 0.8 stops down and 1.8 up.
+  - Measured: L is −5.7 to −4.1 on the Valley (dark conifers, sun at 13°) and −3.4 to −2.5 in
+    Tuscany. So the Valley opens up by 1.1-1.8 stops and Tuscany by 0-0.6.
+  - Grade: contrast 1.16 → 1.1 and saturation 1.15 → 1.1 (Tuscany 1.06 → 1.04 and warmth
+    0.09 → 0.07; Beech River 1.1 → 1.06).
+- **No grazing specular on the back of a card** (`patchFoliage`): the specular colour and F90 fade
+  out as the (unflipped, crown-shaped) normal turns away from the viewer (dot from 0.3 to
+  −0.05). Seen from behind, as the sun side of a crown is when you look toward the sun, the
+  Fresnel term went to 1 at the grazing angle and those sides turned cream-white.
+- **Light through leaves** (`patchFoliage`): the sun's colour after its shadow and the clouds
+  (kept from the light loop as `foliageSun`) instead of the bare sun colour, so only the leaves
+  the sun reaches glow: a crown's rim when back-lit, its inside stays dark. The colour is the
+  leaf's albedo × (3.2 × albedo + 0.25), capped at 1.6: deeper than the leaf, as light filtered
+  twice. Strength × 1.6.
+- **The rifle against the sun** (`viewmodel.js`): the viewmodel's sun drops to 40% when you look
+  toward it (−sunDirView.z from 0.1 to 0.75). Cerakote roughness 0.62 → 0.72 (metalness 0.15 →
+  0.1), anodised 0.38 → 0.46.
+- **Ground colours** (`TONE` in `hftextures.js`, applied once on the GPU by `toneTexture` in
+  `assets.js`, so terrain, grass, rocks and walls all get it). The generated textures averaged
+  sRGB (0.71, 0.56, 0.38) for the dry grass and (0.57, 0.32, 0.20) for the leaf litter.
+  - Tuscany: grass saturation 0.84, soil 0.82. Its drier patches are bleached instead of
+    yellowed.
+  - Beech River: litter saturation 0.55 with gain (0.84, 0.97, 0.88): a dull brown, as old
+    litter is under a green summer canopy.
+- **Tuscany's dry grass** (`SHAPES.dry` in `grass.js`): 7 blades per clump (5).
+  - Five are thin floppy blades, 0.95 cm wide (4 cm) and drooping twice as much.
+  - Two are taller stems (5 segments) that swell into a 1.4 cm seed head near the top and nod.
+  - No saturation boost, roots barely darker, tips bleached.
+  - 64 vertices per clump (30). The green maps' grass is unchanged.
+- **Beech and olive crowns** (`leafSpray` in `cardtex.js`):
+  - The problem: one photo twig (about 20 leaves on a 512×256 card) was stretched over crown
+    cards 3-6.4 m long, so every leaf was half a metre across.
+  - A spray is a 1024×512 canvas: a main stem with 14 side shoots, and the twig drawn about 40
+    times at 0.36 scale (olive: 0.44, 12 shoots), inner twigs first and darker.
+  - Each twig is shrunk or turned until it lies inside the card, and the spray has
+    coverage-keeping mipmaps (coverage 0.29 at every level).
+  - Built once per twig texture (about 0.3 s). The ghillie atlas's helpers moved to `cardtex.js`
+    and take rectangles now.

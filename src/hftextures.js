@@ -9,6 +9,7 @@
 // The CC0 photoscans (assets.js) still take over the conifer ground and barks when they are there.
 // A missing file keeps the procedural texture.
 import * as THREE from 'three';
+import { toneTexture } from './assets.js';
 
 const SURFACES = {
   conifer: { grass: 'meadow', forest: 'forest', rock: 'rock', mud: 'mud', barkSpruce: 'bark-spruce', barkPine: 'bark-pine' },
@@ -17,6 +18,13 @@ const SURFACES = {
 };
 // photo stone walls for the Tuscan houses and ruins
 const WALLS = { wallDry: 'wall-dry', wallRubble: 'wall-rubble' };
+// Colour corrections per biome and slot, applied once on load (linear colour: saturation, then a
+// gain per channel). Next to photos the generated dry grass came out orange, the Tuscan soil red
+// and the beech leaf litter a red-orange carpet; real ones are straw, ochre and brown.
+const TONE = {
+  tuscany: { grass: { saturation: 0.84, gain: [0.97, 0.98, 0.98] }, forest: { saturation: 0.82, gain: [0.95, 1, 1.02] } },
+  beech: { forest: { saturation: 0.55, gain: [0.84, 0.97, 0.88] } },
+};
 // metres per repeat on the terrain (barks use the trunk's own uv)
 const TILE = { grass: 2.6, forest: 2.4, rock: 3.2, mud: 2.2, wallDry: 2.4, wallRubble: 2.0 };
 const CARDS = {
@@ -58,7 +66,8 @@ export async function loadHFTextures(renderer, textures, biome = 'conifer') {
       const [map, normalMap] = await Promise.all([load(loader, `${name}_ah.webp`, { srgb: true, repeat: true, aniso }), load(loader, `${name}_nr.webp`, { srgb: false, repeat: true, aniso })]);
       if (!map || !normalMap) return;
       const old = textures[slot] || {};
-      textures[slot] = { map, normalMap, tile: TILE[slot] || old.tile, hf: name };
+      const tone = (TONE[biome] || {})[slot];
+      textures[slot] = { map: tone ? toneTexture(renderer, map, tone) : map, normalMap, tile: TILE[slot] || old.tile, hf: name };
       done.push(slot);
     }),
     ...Object.entries(cards).map(async ([slot, name]) => {

@@ -5,21 +5,35 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { SHARED, GUST_GLSL } from './shaders.js';
 
-function buildClump(blades = 5, segs = 2) {
+// Blade shapes per biome. The green grass: broad blades tapering to a point. The dry Tuscan
+// grass: thin, pale, floppy blades and a few taller stems that nod under a seed head (broad
+// blades there read as orange spikes standing on the straw).
+const SHAPES = {
+  green: { blades: 5, segs: 2, width: 0.02, taper: 0.92, lean: 0.18, heads: 0, h: [0.18, 0.5], sat: 1.25, root: 0.42, tip: 1.25 },
+  dry: { blades: 7, segs: 3, width: 0.0095, taper: 0.8, lean: 0.34, heads: 2, h: [0.22, 0.6], sat: 1.0, root: 0.66, tip: 1.12 },
+};
+const SHAPE = SHAPES[CONFIG.map.biome === 'tuscany' ? 'dry' : 'green'];
+
+function buildClump(S = SHAPE) {
   const pos = [], uv = [], nrm = [], idx = [], bl = [];
   let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  for (let b = 0; b < blades; b++) {
+  for (let b = 0; b < S.blades; b++) {
+    const head = b < S.heads;
+    const segs = head ? 5 : S.segs;
     const ox = (rnd() - 0.5) * 0.26, oz = (rnd() - 0.5) * 0.26;
     const yaw = rnd() * Math.PI * 2;
     const dx = Math.cos(yaw), dz = Math.sin(yaw);
     const leanX = -dz, leanZ = dx;
     const base = pos.length / 3;
-    const hMul = 0.7 + rnd() * 0.45;
+    const hMul = head ? 1.05 + rnd() * 0.3 : 0.7 + rnd() * 0.45;
     for (let r = 0; r <= segs; r++) {
       const t = r / segs;
-      const w = 0.02 * (1 - t * 0.92) + 0.0015;
-      const lean = t * t * 0.18;
+      // a stem: thin up to the head, which swells and closes to a point
+      const u = Math.max(0, (t - 0.62) / 0.38);
+      const w = head ? 0.004 * (1 - u) + 0.012 * Math.sin(Math.PI * Math.min(1, u * 1.15)) + 0.0008
+        : S.width * (1 - t * S.taper) + 0.0015;
+      const lean = head ? t * t * t * 0.3 : t * t * S.lean;
       for (const s of [-1, 1]) {
         pos.push(ox + dx * w * s + leanX * lean, t * hMul, oz + dz * w * s + leanZ * lean);
         uv.push(s * 0.5 + 0.5, t);
@@ -115,7 +129,7 @@ float dens = texture(tSplat, huv).g * uDensity;
 float d = length(wxz - uFadeCenter);
 float fade = 1.0 - smoothstep(uFadeRadius * 0.62, uFadeRadius * 0.97, d);
 float show = step(rr.z, dens * 1.15) * fade;
-float H = mix(0.18, 0.5, rr.w) * (0.55 + 0.6 * dens) * show;
+float H = mix(${SHAPE.h[0].toFixed(2)}, ${SHAPE.h[1].toFixed(2)}, rr.w) * (0.55 + 0.6 * dens) * show;
 float ang = rr.x * 6.2831;
 float ca = cos(ang), sa = sin(ang);
 vec3 p = position;
@@ -144,14 +158,15 @@ vec3 gcol = textureLod(tGrassA, vBaseXZ / uGrassTile, 3.0).rgb;
 vec4 mac = texture(tMacro, vBaseXZ / 47.0);
 gcol *= 0.82 + 0.36 * mac.r;
 float lum = dot(gcol, vec3(0.3, 0.6, 0.1));
-gcol = max(mix(vec3(lum), gcol, 1.25), 0.0);   // (very saturated grass would go below 0 in blue)
-// v5: darker roots, brighter tips that dry out a little, more variety between blades
-vec3 tipCol = mix(gcol, vec3(lum) * vec3(1.25, 1.15, 0.7), 0.35);
+gcol = max(mix(vec3(lum), gcol, ${SHAPE.sat.toFixed(2)}), 0.0);   // (very saturated grass would go below 0 in blue)
+// v5: darker roots, brighter tips that dry out a little, more variety between blades (dry grass:
+// pale all the way down, tips bleached)
+vec3 tipCol = ${SHAPE === SHAPES.dry ? 'mix(gcol, vec3(lum) * vec3(1.1, 1.05, 0.92), 0.45)' : 'mix(gcol, vec3(lum) * vec3(1.25, 1.15, 0.7), 0.35)'};
 // with MSAA a blade thinner than a pixel is shaded at the pixel centre, outside the blade, where
 // vT and vShade run past 0..1: unclamped, the colour went negative (green most) and the resolve
 // left single magenta pixels flickering along thin blades
 float bt = clamp(vT, 0.0, 1.0), bs = clamp(vShade, 0.0, 1.0);
-diffuseColor.rgb = mix(gcol, tipCol, smoothstep(0.55, 1.0, bt) * bs) * mix(0.42, 1.25, bt) * (0.8 + 0.4 * bs);`)
+diffuseColor.rgb = mix(gcol, tipCol, smoothstep(0.55, 1.0, bt) * bs) * mix(${SHAPE.root.toFixed(2)}, ${SHAPE.tip.toFixed(2)}, bt) * (0.8 + 0.4 * bs);`)
         .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
     };
     this.material = mat;

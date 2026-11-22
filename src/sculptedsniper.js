@@ -467,7 +467,7 @@ function smoothAndPack(W, nv, nb, idx, iters) {
 // LOD error budgets (metres of surface deviation the simplifier may introduce)
 const LODS = [{ err: 0.001, ratio: 0.02 }, { err: 0.005, ratio: 0.005 }];
 
-export function buildSculptedSniper(BONES, { look = 'stylized', lods = [0, 1] } = {}) {
+export function buildSculptedSniper(BONES, { look = 'stylized', lods = [0, 1], biome = 'conifer' } = {}) {
   const foliage = look === 'real' ? realGhillieStrands : sniperFoliage;
   const t0 = performance.now();
   const timing = {};
@@ -559,7 +559,7 @@ export function buildSculptedSniper(BONES, { look = 'stylized', lods = [0, 1] } 
   let t = performance.now();
   const geos = out.map((parts, li) => {
     const leaves = foliage(def, {
-      scene, surfaces, boneIndex, nb, lod: lods[li],
+      scene, surfaces, boneIndex, nb, lod: lods[li], biome,
       normalAt: (obj, p) => normalAt((a, b, c) => obj.dist(a, b, c), p[0], p[1], p[2], [0, 0, 0]),
       ao: (p, n) => sdfAO(scene, p[0], p[1], p[2], n[0], n[1], n[2]),
       weights: (p, px) => topWeights(p, px, boneIndex, nb, wv),
@@ -980,7 +980,9 @@ export function buildSculptedRifle(look = 'stylized') {
   // near-black metal and a dark lens
   const STOCK = M(lin(real ? 0x4a4a38 : 0x5d653a), real ? 0.72 : 0.8), METAL = M(lin(real ? 0x2b2b29 : 0x3a3934), real ? 0.5 : 0.62);
   const DARK = M(lin(real ? 0x1c1c1b : 0x272723), real ? 0.6 : 0.7);
-  const BURLAP = M(lin(real ? 0x857552 : 0x9a8858), 0.95), LENS = M(lin(0x2a8f8a), 0.1);
+  // (the lens not glossy: at 0.1 it mirrored the sun as a single blinding pixel that gave a
+  // sniper away from any angle; the game's own glint shows when a scope points at you)
+  const BURLAP = M(lin(real ? 0x857552 : 0x9a8858), 0.95), LENS = M(lin(0x2a8f8a), 0.42);
   const RX = (a) => eulerRot(a, 0, 0);
   // stock: butt, cheek rest, butt pad, wrist, pistol grip, fore-end, trigger guard
   r.add(roundBox([0, -0.032, 0.31], IDENT, 0.022, 0.058, 0.11, 0.018), STOCK);
@@ -1172,10 +1174,10 @@ const FP_ARMS = {
 // All the pieces of one look, 'stylized' (Ravine) or 'real' (call once the simplifier is
 // ready): the sniper and the rifle in two levels of detail (the realistic rifle with its jute),
 // the bolt handle, the first-person arms, and where the head is in the bind pose (face paint).
-export function buildSniperPieces(BONES, look = 'stylized') {
+export function buildSniperPieces(BONES, look = 'stylized', biome = 'conifer') {
   C = PALETTES[look] || STYLIZED;
   const t = [performance.now()];
-  const sniper = buildSculptedSniper(BONES, { look });
+  const sniper = buildSculptedSniper(BONES, { look, biome });
   t.push(performance.now());
   const { near: rifle, far: rifleFar, strands: rifleStrands } = buildSculptedRifle(look);
   t.push(performance.now());
