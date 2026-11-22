@@ -482,7 +482,7 @@ export const MAPS = {
     map: { length: 300, width: 240, ridgeDist: 112, ridgeHeightNorth: 38, ridgeHeightSouth: 34, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.7, relief: 0.7 },
   },
   beech: {
-    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14],
+    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14], ghillie: 'sculpted',
     map: { length: 320, width: 260, ridgeDist: 122, ridgeHeightNorth: 9, ridgeHeightSouth: 8, riverDeepHalfWidth: 12, riverShelfStart: 15, riverShelfEnd: 19, riverDepth: 3.0, meander: 0.9, relief: 0.55 },
   },
 };
@@ -506,6 +506,9 @@ export const MAP_ID = (() => {
   CONFIG.map.terrain = P.terrain;
   CONFIG.map.farHills = P.farHills;
   CONFIG.map.style = P.style || 'realistic';
+  // the snipers: 'sculpted' = the sculpted figure in a realistic ghillie suit (Beech River),
+  // otherwise the strip suit (the stylized style always has its own sculpted sniper)
+  CONFIG.map.ghillie = P.ghillie || 'strips';
   const k = (P.map.length * P.map.width) / (440 * 380);
   CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
   // beech forests are open underneath; Tuscany's hillsides are drier and more open

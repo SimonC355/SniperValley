@@ -7,8 +7,8 @@ import { CONFIG } from './config.js';
 import { FX_TEX } from './effects.js';
 import { RNG } from './noise.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { RIFLE_SCOPE_Y, RIFLE_BORE_Y, BOLT_AT } from './stylizedsniper.js';
-import { stylizedPieces, sniperBodyMaterial } from './sniperparts.js';
+import { RIFLE_SCOPE_Y, RIFLE_BORE_Y, BOLT_AT } from './sculptedsniper.js';
+import { sniperPieces, sniperBodyMaterial, ghillieCardMaterial } from './sniperparts.js';
 
 const _up = new THREE.Vector3(), _g = new THREE.Vector3(), _xAxis = new THREE.Vector3(1, 0, 0);
 
@@ -129,9 +129,11 @@ export class Viewmodel {
     const rubber = new THREE.MeshStandardMaterial({ color: 0x141513, roughness: 0.92, metalness: 0, bumpMap: stipple, bumpScale: 1.2 });
     const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x06101a, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, emissive: 0x03100c, emissiveIntensity: 0.6, sheen: 1, sheenColor: 0x2a6a50 });
     const gloveMat = new THREE.MeshStandardMaterial({ color: 0x2f2c21, roughness: 0.88, bumpMap: stipple, bumpScale: 1.5 });
-    // stylized look: the sculpted sniper's rifle, sleeves, gloves and solid folded leaves
-    const pieces = CONFIG.map.style === 'stylized' ? stylizedPieces() : null;
-    this.stylized = !!pieces;
+    // the sculpted sniper's pieces: stylized (its rifle, sleeves, gloves and solid leaves) or
+    // realistic (this rifle, with its sleeves, gloves and jute)
+    const pieces = sniperPieces();
+    this.stylized = !!pieces && pieces.look === 'stylized' && CONFIG.map.style === 'stylized';
+    const realArms = !!pieces && pieces.look === 'real' && CONFIG.map.style !== 'stylized';
     const stripMat = this.stylized
       ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.9 })
       : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.4, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
@@ -237,7 +239,7 @@ export class Viewmodel {
     // this one's does (on the eye when aiming) and moved forward so its stock stays clear of
     // the camera; its bolt handle turns and slides like this one's
     const sculpted = this.stylized;
-    const vmMat = sculpted ? sniperBodyMaterial() : null;
+    const vmMat = sculpted || realArms ? sniperBodyMaterial() : null;
     const rng = new RNG(5);
     if (sculpted) {
       rifle.clear();
@@ -281,7 +283,12 @@ export class Viewmodel {
       g.add(new THREE.Mesh(sleeve, stripMat));
       return g;
     };
-    if (sculpted) {
+    if (realArms) {
+      // the realistic ghillie's sleeves and fingerless gloves round this rifle's pistol grip and
+      // under its handguard, with jute hanging from the sleeves
+      arms.add(new THREE.Mesh(pieces.fpArms.solid, vmMat));
+      arms.add(new THREE.Mesh(pieces.fpArms.strands, ghillieCardMaterial(textures)));
+    } else if (sculpted) {
       // the stylized sniper's own sleeves and fingerless gloves (the right fist round the
       // pistol grip, the left hand cupped under the fore-end), leaves on the sleeves
       const fp = pieces.fpArms;

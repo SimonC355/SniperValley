@@ -1228,7 +1228,7 @@ ghillie suit, stumps, rocks."
   - Rocks: the same generated shapes with less detail and flat facets (non-indexed normals).
   - Water: turquoise (deep 0, 0.085, 0.1; shallow 0.05, 0.27, 0.27). Post: softer vignette, no
     grain, less sharpening.
-- **The snipers** (asked for: "in the Ravine the character may also change to match"; then "the
+- **The snipers** (`stylizedsniper.js`, now `sculptedsniper.js`; asked for: "in the Ravine the character may also change to match"; then "the
   map is getting there, but the person still isn't: give it a new go with all the effort you
   can"). The first try (solid jagged skirts on capsules) read as a bush on sticks; the second
   is a sculpted figure:
@@ -1286,3 +1286,62 @@ ghillie suit, stumps, rocks."
   frame in the stylized Ravine, a few on the other maps. `vT` and `vShade` are clamped to 0..1.
 - Not done yet: the far mountains still show the bright grass in streaks (cooled a little), the
   canyon's end walls are flat grey rock, and the stumps and logs only got the painted bark.
+
+### A realistic ghillie on Beech River
+
+Asked for: "give the ghillie suit another go, everything you can, on the map with the forest and
+the water (not the Valley), but keep that map realistic so I can compare the two maps." That is
+Beech River. It gets `ghillie: 'sculpted'` in `MAPS` (`CONFIG.map.ghillie`). The sculpted sniper
+(`sculptedsniper.js`, formerly `stylizedsniper.js`) is built there in its `'real'` look; the
+Ravine keeps `'stylized'` and the other maps keep the strip suit.
+
+- **The figure underneath** (`defineSniper(F, 'real')`): the same shapes, without the goggles, vest,
+  belt, pouches and knee pads (a full ghillie suit hides them), gloves at natural size, and
+  a thinner cape. Muted palette: skin, paint, suede boots, olive-tan gloves, dark netting. In
+  `sniperparts.js` it gets a muted woodland with soft blob edges and a fine cloth grain (noise at
+  700/m, faded by its screen-space derivative so it never shimmers), no rim light. The face
+  keeps 85% of its occlusion (it sits in the hood's shadow), and the eyes are a little smaller
+  and deeper.
+- **The suit** (`realGhillieStrands` in `ghilliestrands.js`): ribbons of 4 segments (2 far away)
+  that leave the surface along "down the surface / down the limb", lifted up to 40°, and sag a
+  little more toward straight down at every segment. They are twisted along their length and
+  taper by 30%, and their normal leans out of the body (soft, volumetric light). The colour
+  multiplies the light photo jute by nine tints (straw to dark brown and moss), from about a
+  quarter to half brightness at the root (with the root's occlusion) up to 1.15× at the tip.
+  - Hood: 420 (15-30 cm, flowing back; 5-11 cm fringes over the brow; the face opening clear).
+  - Mantle: 760 (20-48 cm, longer toward the hem).
+  - Body: 1050 (the jacket's front 13-26 cm; arms 9-22 cm except the inner side and the
+    wrist; legs 10-27 cm except the crotch, fewer on the shins' and knees' front, none on the
+    boots).
+  - Mixed in: 10-16% synthetic leaf strips and 5-8% burlap. Then 230 single leaves on the
+    outside, eight beech twigs and three fern fronds tucked in. Roots at least 1.5-2.1 cm
+    apart per layer.
+  - About 2100 ribbons, 17 800 triangles near (30 500 with the figure); far: 36% of them, wider,
+    5 900 triangles in all.
+- **Gravity in the shader** (`ghillieStrandMaterial`): every strand vertex carries its root (bind
+  pose), the surface normal there and (how far along it is, how floppy it is).
+  - After skinning, the root and its normal are skinned with the same bones. The strand's
+    direction then swings from the posed one back toward its bind-pose direction (how it hangs
+    when the sniper stands), by along × floppiness. That is gated by whether the bind direction
+    points into the body here, so on a prone sniper's back the strands stay lying along the back
+    instead of being pulled down through it.
+  - Then the same wind, gusts, drag and bob as before, in world space. The shadow map uses a
+    depth material with the same hanging (`customDepthMaterial`; the body's uv points at an
+    opaque texel so the body isn't cut out of it).
+- **The atlas** (`ghillieAtlas`, 1024², made once on the main thread):
+  - The map's own photo cards: the Higgsfield jute strips, beech twig and fern.
+  - Drawn on a canvas: synthetic leaf strips (oak and beech shapes on a cord), frayed burlap
+    and eight single leaves (green and dry).
+  - Transparent texels are filled with each region's average colour.
+  - The mipmaps keep coverage: per region, each smaller level's alpha is scaled (binary search)
+    until as large a share passes the 0.36 alpha test as at full size. Averaged mipmaps thin
+    hair-like cards to nothing at a distance.
+  - Alpha to coverage with MSAA.
+- **Rifle and first person**: the sculpted rifle in dark olive with near-black metal, burlap wraps
+  and 34 strands of jute hanging from them (`hangingJute`, the atlas card material), the bolt
+  handle separate as before; hands by IK. First person keeps the detailed realistic rifle; the
+  sculpted gloves sit round its pistol grip and under its handguard, on camo sleeves with 80
+  strands of jute leaning back toward the elbows.
+- Built in the same worker (about 1.9 s on one core here); the load of Beech River in the test
+  suite went from 10 to 13 s on this two-core container, where the worker and the world share
+  the CPU.

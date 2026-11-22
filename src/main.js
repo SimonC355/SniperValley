@@ -21,7 +21,7 @@ import { Buildings } from './buildings.js';
 import { loadHouseModels, loadRockModels } from './models.js';
 import { loadMegascans } from './megascans.js';
 import { loadGhillieModel } from './ghilliemodel.js';
-import { prepareStylizedSniper } from './characters.js';
+import { prepareSculptedSniper, sniperLook } from './characters.js';
 import { Grass } from './grass.js';
 import { Water } from './water.js';
 import { World } from './world.js';
@@ -108,8 +108,9 @@ class Game {
     // the beech and Tuscan maps keep their own ground (leaf litter, dry grass) and barks
     this.photoSlots = stylized ? [] : await loadPhotoTextures(renderer, this.textures, CONFIG.map.biome === 'conifer' ? [] : ['grass', 'forest']);
 
-    // the stylized sniper is sculpted and dressed in a worker while the world is built
-    const sniperPrep = stylized ? prepareStylizedSniper() : null;
+    // the sculpted sniper (stylized, or in a realistic ghillie) is made in a worker while the
+    // world is built
+    const sniperPrep = sniperLook() ? prepareSculptedSniper() : null;
 
     this.hud.setLoading('SHAPING THE VALLEY');
     await nextFrame();

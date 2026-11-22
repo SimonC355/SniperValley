@@ -1,23 +1,28 @@
-// The stylized sniper (Ravine), in the spirit of Fortnite / Apex / Overwatch: a sculpted figure
-// built once from signed-distance shapes (sculpt.js) in an A-pose and skinned to the game's own
-// skeleton, so it takes the same poses as every other character.
-//   - a uniform in woodland camo (the pattern is drawn by the shader from the bind-pose position)
-//   - a face with camo paint and eyes, a neck gaiter, a ghillie hood with shooting goggles
-//     pushed up onto it
-//   - fingerless gloves, chunky boots, knee pads, a plate carrier with pouches, a belt and a
-//     drop-leg pouch
-//   - the ghillie: a mantle over the shoulders and down the back, covered in layered, folded
-//     leaves and jute strands that move in the wind (group 1, the strip material)
+// The sculpted sniper: a figure built once from signed-distance shapes (sculpt.js) in an A-pose
+// and skinned to the game's own skeleton, so it takes the same poses as every other character.
+// Two looks:
+//   - 'stylized' (Ravine), in the spirit of Fortnite / Apex / Overwatch: a uniform in woodland
+//     camo, a face with camo paint and eyes, a neck gaiter, a ghillie hood with shooting goggles
+//     pushed up onto it, fingerless gloves, chunky boots, knee pads, a plate carrier with
+//     pouches, a belt and a drop-leg pouch, and a mantle and cape of layered, folded leaves and
+//     jute strands (sniperFoliage)
+//   - 'real' (Beech River): the same figure under a full, realistic ghillie suit of jute,
+//     burlap and leaves (ghilliestrands.js); no goggles or gear, a muted palette
 // Each piece is meshed finely, then simplified (meshoptimizer) to two levels of detail; the
 // ambient occlusion is baked into the vertex colours. Everything here is plain arrays (no
 // three.js), so it can run in a worker (sniperworker.js); sniperparts.js turns the result into
-// geometry and has the material.
+// geometry and has the materials.
 import { MeshoptSimplifier } from 'meshopt-simplifier';
 import {
   SdfObject, meshObject, sdfAO, normalAt, roundCone, ellipsoid, roundBox, torus, custom, shell,
   smax, eulerRot, mul3, IDENT,
 } from './sculpt.js';
 import { RNG } from './noise.js';
+import { realGhillieStrands, hangingJute, ATLAS } from './ghilliestrands.js';
+
+// the body's uv where the ghillie has an atlas: an opaque texel, so the strands' shadow
+// material (which cuts by the atlas' alpha) keeps the body whole
+const SOLID_UV = [ATLAS.solid[0] / ATLAS.size, 1 - ATLAS.solid[1] / ATLAS.size];
 
 // The simplifier is WebAssembly: wait for this before building.
 export const sniperReady = MeshoptSimplifier.ready;
@@ -31,8 +36,9 @@ export const BIND_POSE = {
 
 const lin = (hex) => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((v) => ((v / 255 + 0.055) / 1.055) ** 2.4);
 
-// palette (sRGB in the source, linear here)
-const C = {
+// palettes (sRGB in the source, linear here): the stylized look (Ravine) and the realistic one
+// (Beech River: muted skin and paint, suede boots, olive-tan gloves, dark netting)
+const STYLIZED = {
   skin: lin(0xc68a64), paintG: lin(0x55642f), paintD: lin(0x2c2d22), paintB: lin(0x6e5434),
   sclera: lin(0xe6dfd2), iris: lin(0x5a4129), pupil: lin(0x140f0b),
   gear: lin(0x8c7754), gearDk: lin(0x6e5c40), web: lin(0x5c4d36),
@@ -43,6 +49,17 @@ const C = {
   metal: lin(0x4a4a44), pad: lin(0x3b3c33), radio: lin(0x3a3d32),
   white: [1, 1, 1],
 };
+const REAL = {
+  ...STYLIZED,
+  skin: lin(0xb07a5a), paintG: lin(0x474f2e), paintD: lin(0x22231b), paintB: lin(0x5b4830),
+  sclera: lin(0xd6cec1), iris: lin(0x4a3622), pupil: lin(0x0f0c09),
+  boot: lin(0x5c4a36), bootDk: lin(0x463626), sole: lin(0x2a2724), lace: lin(0x3a3226),
+  glove: lin(0x6b6247), gloveDk: lin(0x4a4434),
+  hood: lin(0x3b3826), gaiter: lin(0x5c5a40), metal: lin(0x3a3a36),
+};
+const PALETTES = { stylized: STYLIZED, real: REAL };
+// the palette of the look being built (set by buildSniperPieces; the builds run one at a time)
+let C = STYLIZED;
 const M = (color, rough = 0.88, camo = 0, gear = 0) => ({ color, rough, camo, gear });
 // the vest, pouches and belts: a shade here, the colour per sniper (sniperparts.js, uGear)
 const GEARC = (shade, rough = 0.9) => M([shade, shade, shade], rough, 0, 1);
@@ -89,7 +106,8 @@ function boxDist(qx, qy, qz, bx, by, bz, r) {
 }
 
 // ---------------------------------------------------------------- the figure
-function defineSniper(F) {
+function defineSniper(F, look = 'stylized') {
+  const real = look === 'real';
   const P = (b, x, y, z) => {
     const f = F[b], R = f.R;
     return [R[0] * x + R[1] * y + R[2] * z + f.t[0], R[3] * x + R[4] * y + R[5] * z + f.t[1], R[6] * x + R[7] * y + R[8] * z + f.t[2]];
@@ -131,7 +149,7 @@ function defineSniper(F) {
   // and the top of the head are inside the hood and left out)
   const face = new SdfObject('face', { h: 0.0048, bone: 'head' });
   face.errK = 0.5;
-  face.aoK = 0.5;
+  face.aoK = real ? 0.85 : 0.5;   // (the realistic face sits in the hood's shadow)
   // (aCamo 2: the shader paints skin and camo paint, crisp at any mesh density)
   const SKIN = M(C.white, 0.62, 2);
   const H = (x, y, z) => P('head', x, y, z);
@@ -181,29 +199,31 @@ function defineSniper(F) {
   });
   objects.push(gaiter);
 
-  // ---- goggles pushed up onto the hood, their strap round it
-  const gog = new SdfObject('goggles', { h: 0.0042, bone: 'head' });
-  gog.errK = 0.9;
-  const tilt = eulerRot(-0.42, 0, 0);
-  const gy = 0.104, gz = -0.094;
-  gog.add(roundBox(H(0, gy, gz), tilt, 0.071, 0.024, 0.014, 0.013), M(C.frame, 0.5));
-  gog.sub(ellipsoid(H(0, gy - 0.026, gz - 0.004), tilt, 0.016, 0.016, 0.03), { k: 0.006 });
-  for (const [s] of SIDES) gog.add(ellipsoid(H(s * 0.034, gy + 0.0015, gz - 0.0095), tilt, 0.031, 0.02, 0.009), M(C.lensBot, 0.12), { k: 0.002 });
-  {
-    const c = H(0, 0.1, 0.02), n = [0, Math.cos(-0.42), Math.sin(-0.42)];
-    const band = (x, y, z) => Math.abs((x - c[0]) * n[0] + (y - c[1]) * n[1] + (z - c[2]) * n[2]) - 0.0075;
-    gog.add(shell((x, y, z) => hood.dist(x, y, z), -0.003, 0.0035, band, [c[0] - 0.13, c[1] - 0.08, c[2] - 0.14], [c[0] + 0.13, c[1] + 0.09, c[2] + 0.14], 0.003), M(C.strap, 0.9), { k: 0.003 });
+  if (!real) {
+    // ---- goggles pushed up onto the hood, their strap round it
+    const gog = new SdfObject('goggles', { h: 0.0042, bone: 'head' });
+    gog.errK = 0.9;
+    const tilt = eulerRot(-0.42, 0, 0);
+    const gy = 0.104, gz = -0.094;
+    gog.add(roundBox(H(0, gy, gz), tilt, 0.071, 0.024, 0.014, 0.013), M(C.frame, 0.5));
+    gog.sub(ellipsoid(H(0, gy - 0.026, gz - 0.004), tilt, 0.016, 0.016, 0.03), { k: 0.006 });
+    for (const [s] of SIDES) gog.add(ellipsoid(H(s * 0.034, gy + 0.0015, gz - 0.0095), tilt, 0.031, 0.02, 0.009), M(C.lensBot, 0.12), { k: 0.002 });
+    {
+      const c = H(0, 0.1, 0.02), n = [0, Math.cos(-0.42), Math.sin(-0.42)];
+      const band = (x, y, z) => Math.abs((x - c[0]) * n[0] + (y - c[1]) * n[1] + (z - c[2]) * n[2]) - 0.0075;
+      gog.add(shell((x, y, z) => hood.dist(x, y, z), -0.003, 0.0035, band, [c[0] - 0.13, c[1] - 0.08, c[2] - 0.14], [c[0] + 0.13, c[1] + 0.09, c[2] + 0.14], 0.003), M(C.strap, 0.9), { k: 0.003 });
+    }
+    gog.paint((x, y, z, c) => {
+      // lenses: dark amber at the top to bright orange at the bottom, with a light streak
+      if (c[4] > 0.3) return;
+      const ly = y - hd[1] - gy;
+      const t = smooth(0.016, -0.014, ly);
+      for (let i = 0; i < 3; i++) c[i] = C.lensTop[i] + (C.lensBot[i] - C.lensTop[i]) * t;
+      const streak = smooth(0.004, 0.0, Math.abs(ly - 0.006 + (x - hd[0]) * 0.25)) * 0.6;
+      for (let i = 0; i < 3; i++) c[i] += (1 - c[i]) * streak;
+    });
+    objects.push(gog);
   }
-  gog.paint((x, y, z, c) => {
-    // lenses: dark amber at the top to bright orange at the bottom, with a light streak
-    if (c[4] > 0.3) return;
-    const ly = y - hd[1] - gy;
-    const t = smooth(0.016, -0.014, ly);
-    for (let i = 0; i < 3; i++) c[i] = C.lensTop[i] + (C.lensBot[i] - C.lensTop[i]) * t;
-    const streak = smooth(0.004, 0.0, Math.abs(ly - 0.006 + (x - hd[0]) * 0.25)) * 0.6;
-    for (let i = 0; i < 3; i++) c[i] += (1 - c[i]) * streak;
-  });
-  objects.push(gog);
 
   // the torso alone (no arms or legs): the vest, belt and mantle follow its surface
   const torso = new SdfObject('torso');
@@ -216,66 +236,68 @@ function defineSniper(F) {
   };
   const frontZ = (x, y, off) => -0.4 + trace((a, b, c) => tD(a, b, c) - off, x, y, -0.4, 0, 0, 1, 0.6);
 
-  // ---- plate carrier: front and back panels, cummerbund, shoulder straps, pouches
-  const vest = new SdfObject('vest', { h: 0.0085 });
-  vest.errK = 1.5;
-  const GEAR = GEARC(1), GEARDK = GEARC(0.8), WEB = GEARC(0.66, 0.92);
-  const box = (cx, cy, cz, bx, by, bz) => (x, y, z) => Math.max(Math.abs(x - cx) - bx, Math.abs(y - cy) - by, Math.abs(z - cz) - bz);
-  vest.add(shell(tD, 0.003, 0.025, box(0, 1.275, -0.3, 0.142, 0.16, 0.27), [-0.22, 1.08, -0.3], [0.22, 1.47, 0], 0.008), GEAR);
-  vest.add(shell(tD, 0.003, 0.022, box(0, 1.29, 0.3, 0.145, 0.15, 0.26), [-0.22, 1.1, 0], [0.22, 1.47, 0.3], 0.008), GEAR);
-  vest.add(shell(tD, 0.002, 0.018, (x, y, z) => Math.abs(y - 1.14) - 0.05, [-0.24, 1.07, -0.24], [0.24, 1.21, 0.24], 0.006), GEARDK, { k: 0.004 });
-  for (const [s] of SIDES) {
-    vest.add(shell(tD, 0.002, 0.016, (x, y, z) => Math.max(Math.abs(x - s * 0.1) - 0.027, 1.37 - y), [s * 0.1 - 0.05, 1.35, -0.2], [s * 0.1 + 0.05, 1.6, 0.2], 0.005), WEB, { k: 0.004 });
-  }
-  // three magazine pouches with flaps, an admin pouch above them
-  for (const x of [-0.07, 0, 0.07]) {
-    const z0 = frontZ(x, 1.19, 0.025);
-    vest.add(roundBox([x, 1.19, z0 - 0.018], IDENT, 0.032, 0.052, 0.023, 0.009), GEAR, { k: 0.004 });
-    vest.add(roundBox([x, 1.238, z0 - 0.021], eulerRot(0.12, 0, 0), 0.034, 0.012, 0.026, 0.006), GEARDK, { k: 0.002 });
-    vest.add(roundBox([x, 1.219, z0 - 0.048], IDENT, 0.007, 0.009, 0.003, 0.002), WEB, { k: 0.002 });
-  }
-  {
-    const z0 = frontZ(0, 1.35, 0.025);
-    vest.add(roundBox([0, 1.35, z0 - 0.013], IDENT, 0.056, 0.033, 0.016, 0.009), GEARDK, { k: 0.004 });
-  }
-  // a radio on the left side at the back (its antenna is a strand, with the leaves)
-  vest.add(roundBox([-0.165, 1.31, 0.075], eulerRot(0, -0.5, 0), 0.03, 0.058, 0.028, 0.01), M(C.radio, 0.7), { k: 0.004 });
-  // MOLLE webbing: darker bands across the panels
-  vest.paint((x, y, z, c) => {
-    if (Math.abs(tD(x, y, z) - 0.025) > 0.0025 || Math.abs(z) < 0.05) return;
-    const f = ((y - 1.09) / 0.026) % 1;
-    const k = f < 0.3 ? 0.8 : 1;
-    c[0] *= k; c[1] *= k; c[2] *= k;
-  });
-  objects.push(vest);
+  if (!real) {
+    // ---- plate carrier: front and back panels, cummerbund, shoulder straps, pouches
+    const vest = new SdfObject('vest', { h: 0.0085 });
+    vest.errK = 1.5;
+    const GEAR = GEARC(1), GEARDK = GEARC(0.8), WEB = GEARC(0.66, 0.92);
+    const box = (cx, cy, cz, bx, by, bz) => (x, y, z) => Math.max(Math.abs(x - cx) - bx, Math.abs(y - cy) - by, Math.abs(z - cz) - bz);
+    vest.add(shell(tD, 0.003, 0.025, box(0, 1.275, -0.3, 0.142, 0.16, 0.27), [-0.22, 1.08, -0.3], [0.22, 1.47, 0], 0.008), GEAR);
+    vest.add(shell(tD, 0.003, 0.022, box(0, 1.29, 0.3, 0.145, 0.15, 0.26), [-0.22, 1.1, 0], [0.22, 1.47, 0.3], 0.008), GEAR);
+    vest.add(shell(tD, 0.002, 0.018, (x, y, z) => Math.abs(y - 1.14) - 0.05, [-0.24, 1.07, -0.24], [0.24, 1.21, 0.24], 0.006), GEARDK, { k: 0.004 });
+    for (const [s] of SIDES) {
+      vest.add(shell(tD, 0.002, 0.016, (x, y, z) => Math.max(Math.abs(x - s * 0.1) - 0.027, 1.37 - y), [s * 0.1 - 0.05, 1.35, -0.2], [s * 0.1 + 0.05, 1.6, 0.2], 0.005), WEB, { k: 0.004 });
+    }
+    // three magazine pouches with flaps, an admin pouch above them
+    for (const x of [-0.07, 0, 0.07]) {
+      const z0 = frontZ(x, 1.19, 0.025);
+      vest.add(roundBox([x, 1.19, z0 - 0.018], IDENT, 0.032, 0.052, 0.023, 0.009), GEAR, { k: 0.004 });
+      vest.add(roundBox([x, 1.238, z0 - 0.021], eulerRot(0.12, 0, 0), 0.034, 0.012, 0.026, 0.006), GEARDK, { k: 0.002 });
+      vest.add(roundBox([x, 1.219, z0 - 0.048], IDENT, 0.007, 0.009, 0.003, 0.002), WEB, { k: 0.002 });
+    }
+    {
+      const z0 = frontZ(0, 1.35, 0.025);
+      vest.add(roundBox([0, 1.35, z0 - 0.013], IDENT, 0.056, 0.033, 0.016, 0.009), GEARDK, { k: 0.004 });
+    }
+    // a radio on the left side at the back (its antenna is a strand, with the leaves)
+    vest.add(roundBox([-0.165, 1.31, 0.075], eulerRot(0, -0.5, 0), 0.03, 0.058, 0.028, 0.01), M(C.radio, 0.7), { k: 0.004 });
+    // MOLLE webbing: darker bands across the panels
+    vest.paint((x, y, z, c) => {
+      if (Math.abs(tD(x, y, z) - 0.025) > 0.0025 || Math.abs(z) < 0.05) return;
+      const f = ((y - 1.09) / 0.026) % 1;
+      const k = f < 0.3 ? 0.8 : 1;
+      c[0] *= k; c[1] *= k; c[2] *= k;
+    });
+    objects.push(vest);
 
-  // ---- belt with a buckle and hip pouches; a drop-leg pouch on the right thigh
-  const belt = new SdfObject('belt', { h: 0.0075 });
-  belt.errK = 1.3;
-  belt.add(shell(tD, 0.001, 0.013, (x, y, z) => Math.abs(y - 1.0) - 0.023, [-0.24, 0.96, -0.2], [0.24, 1.04, 0.2], 0.004), WEB);
-  {
-    const z0 = frontZ(0, 1.0, 0.013);
-    belt.add(roundBox([0, 1.0, z0 - 0.004], IDENT, 0.026, 0.019, 0.006, 0.004), M(C.metal, 0.45), { k: 0.002 });
-  }
-  for (const [s] of SIDES) belt.add(roundBox([s * 0.168, 0.975, -0.02], eulerRot(0, s * 0.35, 0), 0.022, 0.047, 0.042, 0.011), GEAR, { k: 0.004 });
-  {
-    const th = 'thighR';
-    belt.add(roundBox(P(th, 0.098, -0.17, -0.004), Rb(th), 0.017, 0.066, 0.05, 0.012), GEAR);
-    belt.add(roundBox(P(th, 0.104, -0.1, -0.004), Rb(th, eulerRot(0, 0, 0.15)), 0.012, 0.012, 0.053, 0.007), GEARC(0.8), { k: 0.003 });
-    for (const y of [-0.13, -0.235]) belt.add(torus(P(th, 0, y, -0.002), Rb(th), 0.079 + (y + 0.13) * 0.048, 0.0055), WEB, { k: 0.004 });
-  }
-  objects.push(belt);
+    // ---- belt with a buckle and hip pouches; a drop-leg pouch on the right thigh
+    const belt = new SdfObject('belt', { h: 0.0075 });
+    belt.errK = 1.3;
+    belt.add(shell(tD, 0.001, 0.013, (x, y, z) => Math.abs(y - 1.0) - 0.023, [-0.24, 0.96, -0.2], [0.24, 1.04, 0.2], 0.004), WEB);
+    {
+      const z0 = frontZ(0, 1.0, 0.013);
+      belt.add(roundBox([0, 1.0, z0 - 0.004], IDENT, 0.026, 0.019, 0.006, 0.004), M(C.metal, 0.45), { k: 0.002 });
+    }
+    for (const [s] of SIDES) belt.add(roundBox([s * 0.168, 0.975, -0.02], eulerRot(0, s * 0.35, 0), 0.022, 0.047, 0.042, 0.011), GEAR, { k: 0.004 });
+    {
+      const th = 'thighR';
+      belt.add(roundBox(P(th, 0.098, -0.17, -0.004), Rb(th), 0.017, 0.066, 0.05, 0.012), GEAR);
+      belt.add(roundBox(P(th, 0.104, -0.1, -0.004), Rb(th, eulerRot(0, 0, 0.15)), 0.012, 0.012, 0.053, 0.007), GEARC(0.8), { k: 0.003 });
+      for (const y of [-0.13, -0.235]) belt.add(torus(P(th, 0, y, -0.002), Rb(th), 0.079 + (y + 0.13) * 0.048, 0.0055), WEB, { k: 0.004 });
+    }
+    objects.push(belt);
 
-  // ---- knee pads (on the shins, so they stay on the knee when it bends)
-  const pads = new SdfObject('pads', { h: 0.0065 });
-  pads.errK = 1.6;
-  for (const [, S] of SIDES) {
-    const sh = 'shin' + S;
-    pads.add(ellipsoid(P(sh, 0, -0.03, -0.05), Rb(sh), 0.05, 0.062, 0.03), M(C.pad, 0.6), { bone: sh });
-    pads.add(torus(P(sh, 0, -0.035, 0.0), Rb(sh), 0.061, 0.006), M(C.gearDk, 0.9), { k: 0.004, bone: sh });
+    // ---- knee pads (on the shins, so they stay on the knee when it bends)
+    const pads = new SdfObject('pads', { h: 0.0065 });
+    pads.errK = 1.6;
+    for (const [, S] of SIDES) {
+      const sh = 'shin' + S;
+      pads.add(ellipsoid(P(sh, 0, -0.03, -0.05), Rb(sh), 0.05, 0.062, 0.03), M(C.pad, 0.6), { bone: sh });
+      pads.add(torus(P(sh, 0, -0.035, 0.0), Rb(sh), 0.061, 0.006), M(C.gearDk, 0.9), { k: 0.004, bone: sh });
+    }
+    pads.ownWeights = true;
+    objects.push(pads);
   }
-  pads.ownWeights = true;
-  objects.push(pads);
 
   // ---- boots: shaft round the lower shin, the foot with toe cap and heel, a thick sole, laces
   const boots = new SdfObject('boots', { h: 0.0065 });
@@ -298,7 +320,7 @@ function defineSniper(F) {
   objects.push(boots);
 
   // ---- fingerless gloves gripping (fingers curled round a grip), a cuff over the sleeve
-  for (const [s, S] of SIDES) objects.push(glove(P, Rb, 'hand' + S, s, 0.004, 1.1));
+  for (const [s, S] of SIDES) objects.push(glove(P, Rb, 'hand' + S, s, 0.004, real ? 1.0 : 1.1));
 
   // ---- the ghillie mantle: a shawl over the shoulders and a cape down the back
   const mantle = new SdfObject('mantle', { h: 0.015 });
@@ -307,7 +329,7 @@ function defineSniper(F) {
   mantle.add(ellipsoid(P('chest', 0, 0.18, 0.05), IDENT, 0.225, 0.095, 0.15), NET);
   mantle.add(custom((x, y, z) => {
     const t = Math.max(0, Math.min(1, (1.5 - y) / 0.82));
-    const hw = 0.17 + 0.075 * t, zc = 0.148 + 0.9 * x * x, th = 0.03 - 0.008 * t;
+    const hw = 0.17 + 0.075 * t, zc = 0.148 + 0.9 * x * x, th = real ? 0.016 - 0.004 * t : 0.03 - 0.008 * t;
     return boxDist(x, y - 1.1, z - zc, hw, 0.41, th, 0.022);
   }, [-0.27, 0.68, 0.09], [0.27, 1.52, 0.27]), NET, { k: 0.05 });
   mantle.sub(ellipsoid(P('chest', 0, 0.07, -0.19), IDENT, 0.17, 0.16, 0.13), { k: 0.03 });
@@ -395,6 +417,16 @@ function weightsFor(x, y, z, proxies, boneIndex, nb, out) {
   for (let b = 0; b < nb; b++) out[b] = dmin[b] > 1e8 ? 0 : Math.exp(-(dmin[b] - best) / 0.02);
 }
 
+// the 4 strongest weights at a point: [indices, weights] (rigid on the head without proxies)
+function topWeights(p, px, boneIndex, nb, wv) {
+  if (!px) return [[boneIndex.head, 0, 0, 0], [1, 0, 0, 0]];
+  weightsFor(p[0], p[1], p[2], px, boneIndex, nb, wv);
+  const order = [...wv.keys()].sort((a, b) => wv[b] - wv[a]).slice(0, 4);
+  let sum = 0;
+  for (const b of order) if (wv[b] > 0.02) sum += wv[b];
+  return [order, order.map((b) => (wv[b] > 0.02 ? wv[b] / sum : 0))];
+}
+
 function smoothAndPack(W, nv, nb, idx, iters) {
   if (iters > 0) {
     const nbr = Array.from({ length: nv }, () => []);
@@ -435,14 +467,15 @@ function smoothAndPack(W, nv, nb, idx, iters) {
 // LOD error budgets (metres of surface deviation the simplifier may introduce)
 const LODS = [{ err: 0.001, ratio: 0.02 }, { err: 0.005, ratio: 0.005 }];
 
-export function buildSculptedSniper(BONES, { foliage = sniperFoliage, lods = [0, 1] } = {}) {
+export function buildSculptedSniper(BONES, { look = 'stylized', lods = [0, 1] } = {}) {
+  const foliage = look === 'real' ? realGhillieStrands : sniperFoliage;
   const t0 = performance.now();
   const timing = {};
   const tick = (k, t) => { timing[k] = (timing[k] || 0) + Math.round(performance.now() - t); };
   const F = bindFrames(BONES);
   const boneIndex = Object.fromEntries(BONES.map((b, i) => [b[0], i]));
   const nb = BONES.length;
-  const def = defineSniper(F);
+  const def = defineSniper(F, look);
   const { objects, proxies } = def;
   const side = (b) => (/^(thigh|shin|foot)R$/.test(b) ? 1 : /^(thigh|shin|foot)L$/.test(b) ? -1 : 0);
   const prox = (list) => list.map((p) => ({ ...p, bi: boneIndex[p.bone], side: side(p.bone) }));
@@ -516,7 +549,8 @@ export function buildSculptedSniper(BONES, { foliage = sniperFoliage, lods = [0,
   }
   // eyes
   for (const s of [1, -1]) {
-    const e = eyeMesh(def.P('head', s * 0.032, 0.0155, -0.0575), 0.0135);
+    // (realistic: a little smaller and deeper, so less of the white shows)
+    const e = look === 'real' ? eyeMesh(def.P('head', s * 0.032, 0.0152, -0.0565), 0.0128) : eyeMesh(def.P('head', s * 0.032, 0.0155, -0.0575), 0.0135);
     const nv = e.pos.length / 3;
     const si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
     for (let v = 0; v < nv; v++) { si[v * 4] = boneIndex.head; sw[v * 4] = 1; }
@@ -524,7 +558,12 @@ export function buildSculptedSniper(BONES, { foliage = sniperFoliage, lods = [0,
   }
   let t = performance.now();
   const geos = out.map((parts, li) => {
-    const leaves = foliage ? foliage(def, { scene, surfaces, boneIndex, nb, lod: lods[li] }) : null;
+    const leaves = foliage(def, {
+      scene, surfaces, boneIndex, nb, lod: lods[li],
+      normalAt: (obj, p) => normalAt((a, b, c) => obj.dist(a, b, c), p[0], p[1], p[2], [0, 0, 0]),
+      ao: (p, n) => sdfAO(scene, p[0], p[1], p[2], n[0], n[1], n[2]),
+      weights: (p, px) => topWeights(p, px, boneIndex, nb, wv),
+    });
     return assemble(parts, leaves);
   });
   tick('foliage', t);
@@ -798,39 +837,43 @@ function sniperFoliage(def, ctx) {
   };
 }
 
+// The parts as one geometry. Every part has positions, normals, colours, indices and skin; the
+// other attributes are zero where a part has none, and left out when no part has them.
+const EXTRA = [['camo', 'aCamo', 1], ['rough', 'aRough', 1], ['sway', 'aSway', 1], ['gear', 'aGear', 1], ['uv', 'uv', 2],
+  ['root', 'aRoot', 3], ['rootN', 'aRootN', 3], ['strand', 'aStrand', 2]];
 function assemble(parts, foliage) {
   const all = foliage ? [...parts, foliage] : parts;
   let nv = 0, ni = 0;
   for (const p of all) { nv += p.pos.length / 3; ni += p.idx.length; }
   const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
-  const camo = new Float32Array(nv), rough = new Float32Array(nv), sway = new Float32Array(nv), gear = new Float32Array(nv);
   const si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
   const idx = new Uint32Array(ni);
+  const extra = EXTRA.filter(([k]) => all.some((p) => p[k])).map(([k, name, size]) => [k, name, size, new Float32Array(nv * size)]);
   let ov = 0, oi = 0, bodyCount = 0;
   for (const p of all) {
     const n = p.pos.length / 3;
     pos.set(p.pos, ov * 3); nrm.set(p.nrm, ov * 3); col.set(p.col, ov * 3);
-    camo.set(p.camo, ov); rough.set(p.rough, ov);
-    if (p.sway) sway.set(p.sway, ov);
-    if (p.gear) gear.set(p.gear, ov);
+    for (const [k, , size, arr] of extra) {
+      if (p[k]) arr.set(p[k], ov * size);
+      else if (k === 'uv') for (let i = 0; i < n; i++) { arr[(ov + i) * 2] = SOLID_UV[0]; arr[(ov + i) * 2 + 1] = SOLID_UV[1]; }
+    }
     si.set(p.si, ov * 4); sw.set(p.sw, ov * 4);
     for (let i = 0; i < p.idx.length; i++) idx[oi + i] = p.idx[i] + ov;
     ov += n; oi += p.idx.length;
     if (p !== foliage) bodyCount = oi;
   }
+  const attributes = { position: [pos, 3], normal: [nrm, 3], color: [col, 3], skinIndex: [si, 4], skinWeight: [sw, 4] };
+  for (const [, name, size, arr] of extra) attributes[name] = [arr, size];
   return {
-    attributes: {
-      position: [pos, 3], normal: [nrm, 3], color: [col, 3], aCamo: [camo, 1], aRough: [rough, 1], aSway: [sway, 1], aGear: [gear, 1],
-      skinIndex: [si, 4], skinWeight: [sw, 4],
-    },
+    attributes,
     index: idx,
     groups: [[0, bodyCount, 0], [bodyCount, ni - bodyCount, 1]],
     parts: all.map((p) => `${p.name}:${p.idx.length / 3}`).join(' '),
   };
 }
 
-// colours the shader needs (face paint), linear
-export const FACE_PAINT = { skin: C.skin, green: C.paintG, brown: C.paintB, dark: C.paintD };
+// colours the shader needs (face paint) for each look, linear
+export const FACE_PAINTS = Object.fromEntries(Object.entries(PALETTES).map(([k, P]) => [k, { skin: P.skin, green: P.paintG, brown: P.paintB, dark: P.paintD }]));
 
 // ---------------------------------------------------------------- rigid pieces
 // Mesh, simplify and shade sculpted objects that move as one piece (the rifle, the bolt, the
@@ -929,11 +972,15 @@ function pushFoldedLeaf(out, root, dir, n0, L, W, c, curl = 0.15, foldK = 0.2) {
 // fore-end (0, -0.05, -0.32). The bolt handle is its own piece (buildSculptedBolt), so first
 // person can work it. Near and far versions.
 export const RIFLE_SCOPE_Y = 0.08, RIFLE_BORE_Y = 0.02;
-export function buildSculptedRifle() {
+export function buildSculptedRifle(look = 'stylized') {
+  const real = look === 'real';
   const r = new SdfObject('rifle', { h: 0.004 });
   r.errK = 1.2;
-  const STOCK = M(lin(0x5d653a), 0.8), METAL = M(lin(0x3a3934), 0.62), DARK = M(lin(0x272723), 0.7);
-  const BURLAP = M(lin(0x9a8858), 0.95), LENS = M(lin(0x2a8f8a), 0.1);
+  // stylized: an olive stock, warm dark metal, a teal lens; realistic: a dark olive-drab stock,
+  // near-black metal and a dark lens
+  const STOCK = M(lin(real ? 0x4a4a38 : 0x5d653a), real ? 0.72 : 0.8), METAL = M(lin(real ? 0x2b2b29 : 0x3a3934), real ? 0.5 : 0.62);
+  const DARK = M(lin(real ? 0x1c1c1b : 0x272723), real ? 0.6 : 0.7);
+  const BURLAP = M(lin(real ? 0x857552 : 0x9a8858), 0.95), LENS = M(lin(0x2a8f8a), 0.1);
   const RX = (a) => eulerRot(a, 0, 0);
   // stock: butt, cheek rest, butt pad, wrist, pistol grip, fore-end, trigger guard
   r.add(roundBox([0, -0.032, 0.31], IDENT, 0.022, 0.058, 0.11, 0.018), STOCK);
@@ -966,10 +1013,11 @@ export function buildSculptedRifle() {
   for (const [z, ra] of wraps) r.add(torus([0, RIFLE_BORE_Y, z], RX(Math.PI / 2), ra, 0.0065), BURLAP, { k: 0.006 });
   r.add(torus([0, -0.016, 0.155], RX(Math.PI / 2 - 0.1), 0.024, 0.008), BURLAP, { k: 0.008 });
   r.add(torus([0, -0.016, 0.19], RX(Math.PI / 2 - 0.12), 0.025, 0.008), BURLAP, { k: 0.008 });
-  // the lens: teal in the middle, a bright rim of light
+  // the lens: teal in the middle, a bright rim of light (realistic: dark, a faint green coating)
   r.paint((x, y, z, c) => {
     if (c[4] > 0.2) return;
     const t = smooth(0.2, 1.0, Math.hypot(x, y - sy) / 0.024);
+    if (real) { c[0] = 0.01 + 0.08 * t; c[1] = 0.02 + 0.12 * t; c[2] = 0.02 + 0.1 * t; return; }
     c[0] = 0.02 + 0.5 * t; c[1] = 0.12 + 0.45 * t; c[2] = 0.12 + 0.3 * t;
   });
   // a few leaves tucked into the wraps
@@ -985,8 +1033,37 @@ export function buildSculptedRifle() {
     const dl = Math.hypot(...dir);
     pushFoldedLeaf(leaves, root, dir.map((v) => v / dl), o, rng.float(0.06, 0.09), rng.float(0.028, 0.036), LEAF_GREEN[rng.int(0, LEAF_GREEN.length - 1)], 0.2);
   }
+  if (real) {
+    // jute hanging from the wraps (the atlas material, as its own mesh)
+    const anchors = [];
+    const jr = new RNG(77);
+    // from the wraps (their underside and sides), along the barrel and round the stock's wrist
+    for (const [z, ra] of wraps) for (let i = 0; i < 3; i++) {
+      const a = jr.float(-0.6, Math.PI + 0.6) + Math.PI;
+      anchors.push({ p: [Math.cos(a) * ra, RIFLE_BORE_Y + Math.sin(a) * ra, z + jr.float(-0.01, 0.01)], n: [Math.cos(a), Math.sin(a), 0] });
+    }
+    for (let i = 0; i < 12; i++) {
+      const z = jr.float(-0.86, -0.42), a = jr.float(-0.7, Math.PI + 0.7) + Math.PI, ra = z < -0.69 ? 0.022 : 0.013;
+      anchors.push({ p: [Math.cos(a) * ra, RIFLE_BORE_Y + Math.sin(a) * ra, z], n: [Math.cos(a), Math.sin(a), 0] });
+    }
+    for (let i = 0; i < 7; i++) {
+      const z = jr.float(0.13, 0.22), a = jr.float(-0.5, Math.PI + 0.5) + Math.PI;
+      anchors.push({ p: [Math.cos(a) * 0.026, -0.016 + Math.sin(a) * 0.026, z], n: [Math.cos(a), Math.sin(a), 0] });
+    }
+    const strands = hangingJute(anchors, { seed: 5, L: [0.05, 0.15], w: [0.014, 0.026], tone: 0.62 });
+    const [near, far] = rigidGeometry([r], [0.0008, 0.0045]);
+    return { near, far, strands: plainStrands(strands) };
+  }
   const [near, far] = rigidGeometry([r], [0.0008, 0.0045], leaves);
   return { near, far };
+}
+
+// { pos, nrm, uv, col, idx } as plain geometry
+function plainStrands(o) {
+  return {
+    attributes: { position: [new Float32Array(o.pos), 3], normal: [new Float32Array(o.nrm), 3], uv: [new Float32Array(o.uv), 2], color: [new Float32Array(o.col), 3] },
+    index: new Uint32Array(o.idx),
+  };
 }
 
 // The bolt handle with its knob, in the bolt's own space (in first person it turns about the
@@ -1005,14 +1082,16 @@ export function buildSculptedBolt() {
 // under the fore-end) and folded leaves on the top and outer side of the sleeves.
 // arms: [{ s, elbow, grip, axis, curl }]: grip is where the fist's hole goes, axis what it
 // wraps round.
-export function buildFirstPersonArms(arms) {
+export function buildFirstPersonArms(arms, look = 'stylized') {
+  const real = look === 'real';
   const objs = [];
   const leaves = { pos: [], nrm: [], col: [], idx: [] };
+  const jute = [];
   const rng = new RNG(31);
   const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
   const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
   for (const a of arms) {
-    const k = 1.1;
+    const k = real ? 1.0 : 1.1;
     const hole = [-a.s * 0.03 * k, -0.09 * k, 0];
     let W = a.grip.slice(), R = IDENT;
     for (let it = 0; it < 3; it++) {
@@ -1036,7 +1115,19 @@ export function buildFirstPersonArms(arms) {
     sl.errK = 1.5;
     objs.push(gl, sl);
     // leaves on the top and the outer side, pointing back along the arm and drooping
+    // (realistic: jute hanging from the top, the outer side and underneath)
     const out = norm(cross(f, [0, 1, 0]).map((v) => v * a.s));
+    if (real) {
+      for (let i = 0; i < 80; i++) {
+        const t = rng.float(0.0, 0.86);
+        const c = [0, 1, 2].map((q) => a.elbow[q] + (W[q] - a.elbow[q]) * t);
+        const ang = rng.float(-0.9, 2.6);
+        const n = norm([0, 1, 2].map((q) => out[q] * Math.cos(ang) + [0, 1, 0][q] * Math.sin(ang)));
+        const rr = 0.058 - 0.014 * t;
+        jute.push({ p: [0, 1, 2].map((q) => c[q] + n[q] * (rr - 0.004)), n });
+      }
+      continue;
+    }
     for (let i = 0; i < 26; i++) {
       const t = rng.float(0.05, 0.85);
       const c = [0, 1, 2].map((q) => a.elbow[q] + (W[q] - a.elbow[q]) * t);
@@ -1051,6 +1142,10 @@ export function buildFirstPersonArms(arms) {
       pushFoldedLeaf(leaves, root, dir, n, rng.float(0.06, 0.095), rng.float(0.028, 0.04), lc, 0.15);
     }
   }
+  if (real) {
+    // (toward the elbow: the forearms point away from the camera)
+    return { solid: rigidGeometry(objs, 0.0006), strands: plainStrands(hangingJute(jute, { seed: 9, L: [0.08, 0.17], w: [0.022, 0.038], tone: 0.85, back: [0, 0, 1] })) };
+  }
   const lv = {
     attributes: { position: [new Float32Array(leaves.pos), 3], normal: [new Float32Array(leaves.nrm), 3], color: [new Float32Array(leaves.col), 3] },
     index: new Uint32Array(leaves.idx),
@@ -1061,24 +1156,33 @@ export function buildFirstPersonArms(arms) {
 // ---------------------------------------------------------------- everything at once
 // The first-person arms, in the viewmodel rifle's space: the right fist round the sculpted
 // rifle's pistol grip, the left hand cupped under its fore-end.
-const FP_ARMS = [
-  { s: 1, elbow: [0.17, -0.28, 0.28], grip: [0, -0.052, 0.058], axis: [0, 0.904, -0.428], curl: [0.95, 1.45, 0.75] },
-  { s: -1, elbow: [-0.17, -0.3, -0.02], grip: [0, -0.01, -0.31], axis: [0, 0, 1], curl: [0.6, 0.95, 0.55] },
-];
+const FP_ARMS = {
+  stylized: [
+    { s: 1, elbow: [0.17, -0.28, 0.28], grip: [0, -0.052, 0.058], axis: [0, 0.904, -0.428], curl: [0.95, 1.45, 0.75] },
+    { s: -1, elbow: [-0.17, -0.3, -0.02], grip: [0, -0.01, -0.31], axis: [0, 0, 1], curl: [0.6, 0.95, 0.55] },
+  ],
+  // the realistic look keeps its detailed first-person rifle (viewmodel.js): its pistol grip and
+  // the underside of its handguard
+  real: [
+    { s: 1, elbow: [0.17, -0.28, 0.28], grip: [0, -0.056, 0.064], axis: [0, 0.949, -0.315], curl: [0.95, 1.45, 0.75] },
+    { s: -1, elbow: [-0.17, -0.3, -0.02], grip: [0, 0.0, -0.31], axis: [0, 0, 1], curl: [0.55, 0.85, 0.5] },
+  ],
+};
 
-// All the stylized pieces (call once the simplifier is ready): the sniper and the rifle in two
-// levels of detail, the bolt handle, the first-person arms, and where the head is in the bind
-// pose (for the face paint).
-export function buildStylizedPieces(BONES) {
+// All the pieces of one look, 'stylized' (Ravine) or 'real' (call once the simplifier is
+// ready): the sniper and the rifle in two levels of detail (the realistic rifle with its jute),
+// the bolt handle, the first-person arms, and where the head is in the bind pose (face paint).
+export function buildSniperPieces(BONES, look = 'stylized') {
+  C = PALETTES[look] || STYLIZED;
   const t = [performance.now()];
-  const sniper = buildSculptedSniper(BONES);
+  const sniper = buildSculptedSniper(BONES, { look });
   t.push(performance.now());
-  const { near: rifle, far: rifleFar } = buildSculptedRifle();
+  const { near: rifle, far: rifleFar, strands: rifleStrands } = buildSculptedRifle(look);
   t.push(performance.now());
-  const bolt = buildSculptedBolt(), fpArms = buildFirstPersonArms(FP_ARMS);
+  const bolt = buildSculptedBolt(), fpArms = buildFirstPersonArms(FP_ARMS[look] || FP_ARMS.stylized, look);
   t.push(performance.now());
   sniper[0].stats.pieces = { sniper: Math.round(t[1] - t[0]), rifles: Math.round(t[2] - t[1]), fp: Math.round(t[3] - t[2]) };
-  return { sniper, rifle, rifleFar, bolt, fpArms, head: bindFrames(BONES).head.t.slice() };
+  return { look, sniper, rifle, rifleFar, rifleStrands: rifleStrands || null, bolt, fpArms, head: bindFrames(BONES).head.t.slice() };
 }
 
 // every typed array's buffer, to hand them over from the worker without copying

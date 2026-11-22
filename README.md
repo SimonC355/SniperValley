@@ -149,7 +149,8 @@ River a flat, rolling beech forest with a broad river between the teams. Every m
 steep mountains right at its edge, so you always see where it ends. The Ravine is drawn in a
 stylized look (solid, tiered trees, strong colours, faceted rocks, a turquoise river with sandy
 banks, and sculpted stylized snipers in leafy ghillie capes, with their own rifle): the first map
-in the direction the graphics are heading. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
+in the direction the graphics are heading. On Beech River the same sculpted snipers wear a
+realistic ghillie suit of thousands of jute strands, leaves, twigs and ferns, to compare with. The zone closes faster on the smaller maps. In a LAN game the host's map is used: friends who join load it automatically,
 and when the host switches map everyone follows and rejoins.
 
 ### Photoscanned textures (optional)
@@ -307,10 +308,13 @@ src/
   combat.js      firing, hitscan / ballistics, hits, impacts, reveal events
   characters.js  procedural ghillie suits, skeleton, poses
   sculpt.js      signed-distance sculpting: shapes, smooth blends, surface-nets mesher, occlusion
-  stylizedsniper.js  the stylized (Ravine) sniper, rifle and first-person arms, sculpted and
-                 simplified to two levels of detail, with leaves; plain arrays
+  sculptedsniper.js  the sculpted sniper, rifle and first-person arms in two looks (stylized on
+                 the Ravine, realistic on Beech River), simplified to two levels of detail;
+                 plain arrays
+  ghilliestrands.js  the realistic ghillie: jute, burlap and leaf strands, leaves, twigs, ferns
   sniperworker.js    builds those in a worker while the map loads
-  sniperparts.js     turns them into geometry; their material (camo, face paint, gear colour)
+  sniperparts.js     turns them into geometry; their materials (camo, face paint, gear colour),
+                 the ghillie atlas and the strands' gravity and wind
   ai.js          sniper spots, AI state machine and perception
   events.js      reveal event bus
   birds.js       crow flocks

@@ -9,8 +9,8 @@ import { CONFIG } from './config.js';
 import { RNG, lerp } from './noise.js';
 import { SHARED, GUST_GLSL } from './shaders.js';
 import { GhillieModel, hasGhillieModel } from './ghilliemodel.js';
-import { BIND_POSE, BOLT_AT } from './stylizedsniper.js';
-import { prepareStylizedPieces, stylizedPieces, sniperBodyMaterial, sniperVariant } from './sniperparts.js';
+import { BIND_POSE, BOLT_AT } from './sculptedsniper.js';
+import { prepareSniperPieces, sniperPieces, sniperBodyMaterial, sniperVariant, ghillieStrandMaterial, ghillieCardMaterial } from './sniperparts.js';
 
 export const BONES = [
   // name, parent, x, y, z
@@ -222,10 +222,15 @@ function buildGeometry(seed, light = false) {
   return g;
 }
 
-// The stylized look's sculpted sniper (stylizedsniper.js, sniperparts.js): built once per map
-// load in a worker while the world is built. Without it the photoreal suit is used.
-export const prepareStylizedSniper = () => prepareStylizedPieces(BONES);
-export const stylizedSniperReady = () => !!stylizedPieces();
+// The sculpted sniper (sculptedsniper.js, sniperparts.js): stylized on the stylized map (Ravine),
+// in a realistic ghillie suit on maps that ask for it (Beech River: ghillie 'sculpted'); built
+// once per map load in a worker while the world is built. Elsewhere, and without it, the strip
+// suit is used.
+export function sniperLook() {
+  if (CONFIG.map.style === 'stylized') return 'stylized';
+  return CONFIG.map.ghillie === 'sculpted' ? 'real' : null;
+}
+export const prepareSculptedSniper = () => (sniperLook() ? prepareSniperPieces(BONES, sniperLook()) : Promise.resolve(null));
 
 const GEO_CACHE = [];
 function getGeometry(i, light = false) {
@@ -320,27 +325,41 @@ export class GhillieCharacter {
   constructor(scene, textures, { index = 0, armbandColor = null } = {}) {
     this.scene = scene;
     // v5: the leafy 3D suit made with Higgsfield, when its model file is there
-    // (the stylized look has its own sculpted sniper: sniperparts.js)
-    const pieces = CONFIG.map.style === 'stylized' ? stylizedPieces() : null;
-    this.stylized = !!pieces;
+    // (the sculpted sniper, stylized or in a realistic ghillie, when the map uses it)
+    const look = sniperLook(), ready = sniperPieces();
+    const pieces = look && ready && ready.look === look ? ready : null;
+    this.look = pieces ? look : null;
+    this.stylized = this.look === 'stylized';
     this.sculpted = pieces ? pieces.sniper : null;
-    const use3d = !this.stylized && hasGhillieModel();
+    const use3d = !pieces && hasGhillieModel();
     const geo = this.sculpted ? this.sculpted[0] : getGeometry(index, use3d);
     this.lod = 0;
     this.variant = this.sculpted ? sniperVariant(index) : null;
     this.bodyMat = this.sculpted ? sniperBodyMaterial(this.variant) : new THREE.MeshStandardMaterial({ color: 0x0d0d09, roughness: 0.95 });
-    this.stripMat = this.stylized
-      ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.85 })
-      : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
     // per-character motion for the strands (world space): smoothed velocity, turn rate, bob
     this.motion = { uVel: { value: new THREE.Vector3() }, uTurn: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uBob: { value: 0 }, uDroop: { value: use3d ? 1 : 0 } };
-    this.stripMat.customProgramCacheKey = () => 'ghillie';
-    this.stripMat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = SHARED.uTime;
-      shader.uniforms.uWindDir = SHARED.uWindDir;
-      Object.assign(shader.uniforms, this.motion);
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>
+    if (this.look === 'real') {
+      // the realistic ghillie: jute, burlap and leaves from the atlas, hanging with gravity
+      const sm = ghillieStrandMaterial(textures, this.motion);
+      this.stripMat = sm.mat;
+      this.stripDepth = sm.depth;
+    } else {
+      this.stripMat = this.stylized
+        ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.85 })
+        : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+      this.stripMat.customProgramCacheKey = () => 'ghillie';
+      this.stripMat.onBeforeCompile = (shader) => this._stripShader(shader);
+    }
+    // skeleton (below)
+    this._build(textures, geo, use3d, pieces, armbandColor);
+  }
+
+  _stripShader(shader) {
+    shader.uniforms.uTime = SHARED.uTime;
+    shader.uniforms.uWindDir = SHARED.uWindDir;
+    Object.assign(shader.uniforms, this.motion);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
 attribute float aSway;
 uniform float uTime;
 uniform vec2 uWindDir;
@@ -350,16 +369,16 @@ uniform vec3 uCenter;
 uniform float uBob;
 uniform float uDroop;
 ${GUST_GLSL}`)
-        // after skinning: move the strands in world space so wind and drag act in the
-        // right direction whatever the pose (standing, kneeling or prone)
-        .replace('#include <project_vertex>', `
+      // after skinning: move the strands in world space so wind and drag act in the
+      // right direction whatever the pose (standing, kneeling or prone)
+      .replace('#include <project_vertex>', `
 vec4 wp = modelMatrix * vec4(transformed, 1.0);
 {
   float ph = dot(position, vec3(7.1, 3.3, 5.7));
   float gust = gustAt(uCenter.xz) * ${CONFIG.weather.gusts.toFixed(3)};
   vec3 wind = vec3(uWindDir.x, 0.0, uWindDir.y);
   vec3 d = wind * (sin(uTime * 2.2 + ph) * (0.6 + 0.8 * gust) + 0.4 + 1.3 * gust) * 0.035
-         + vec3(sin(uTime * 5.1 + ph * 2.0), 0.0, cos(uTime * 4.3 + ph)) * 0.012 * (1.0 + 2.2 * gust);
+       + vec3(sin(uTime * 5.1 + ph * 2.0), 0.0, cos(uTime * 4.3 + ph)) * 0.012 * (1.0 + 2.2 * gust);
   // drag: trail behind when moving, swing out when turning, bounce with the steps
   vec3 rel = wp.xyz - uCenter;
   vec3 drag = -uVel * 0.05 - vec3(rel.z, 0.0, -rel.x) * uTurn * 0.07;
@@ -372,10 +391,12 @@ vec4 wp = modelMatrix * vec4(transformed, 1.0);
 }
 vec4 mvPosition = viewMatrix * wp;
 gl_Position = projectionMatrix * mvPosition;`);
-      shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>',
-        THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
-    };
-    // skeleton
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>',
+      THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+  }
+
+  // skeleton, mesh, the 3D suit, rifle and armband
+  _build(textures, geo, use3d, pieces, armbandColor) {
     this.bones = {};
     const list = [];
     for (const [name, parent, x, y, z] of BONES) {
@@ -387,6 +408,7 @@ gl_Position = projectionMatrix * mvPosition;`);
       list.push(b);
     }
     const mesh = new THREE.SkinnedMesh(geo, [this.bodyMat, this.stripMat]);
+    if (this.stripDepth) mesh.customDepthMaterial = this.stripDepth;   // shadows of the hanging strands
     mesh.add(this.bones.root);
     // the sculpted sniper is modelled in an A-pose: bind the skeleton in that pose
     if (this.sculpted) for (const [name, e] of Object.entries(BIND_POSE)) this.bones[name].rotation.set(e[0], e[1], e[2]);
@@ -415,6 +437,13 @@ gl_Position = projectionMatrix * mvPosition;`);
       bolt.position.fromArray(BOLT_AT);
       bolt.userData.shared = true;
       this.rifle.add(bolt);
+      if (pieces.rifleStrands) {
+        // the realistic rifle's jute
+        this.rifleStrands = new THREE.Mesh(pieces.rifleStrands, ghillieCardMaterial(textures));
+        this.rifleStrands.castShadow = true;
+        this.rifleStrands.userData.shared = true;
+        this.rifle.add(this.rifleStrands);
+      }
     } else this.rifle = buildRifle();
     this.bones.chest.add(this.rifle);
     // armband (team members only)
@@ -425,7 +454,7 @@ gl_Position = projectionMatrix * mvPosition;`);
       this.bones.upperArmL.add(band);
       this.armband = band;
     }
-    scene.add(this.group);
+    this.scene.add(this.group);
     // pose state: current quaternions per bone
     this.cur = {};
     for (const [name] of BONES) this.cur[name] = new THREE.Quaternion();
@@ -540,6 +569,7 @@ gl_Position = projectionMatrix * mvPosition;`);
     this.tint.lerp(this.tintTarget, 1 - Math.exp(-dt * 0.8));
     // (stylized: the suit keeps most of its own colour, the ground only shifts it a little)
     if (this.stylized) this.stripMat.color.copy(this.tint).lerp(_white, 0.55).multiply(this.variant.leaves);
+    else if (this.look === 'real') this.stripMat.color.copy(this.tint).lerp(_white, 0.25).multiply(this.variant.leaves);
     else this.stripMat.color.copy(this.tint);
     this.modelDirty = true;
   }
@@ -607,8 +637,9 @@ gl_Position = projectionMatrix * mvPosition;`);
     if (lod !== this.lod) {
       this.lod = lod;
       this.mesh.geometry = this.sculpted[lod];
-      const P = stylizedPieces();
+      const P = sniperPieces();
       if (P && this.rifle.userData.shared) this.rifle.geometry = lod ? P.rifleFar : P.rifle;
+      if (this.rifleStrands) this.rifleStrands.visible = !lod;
     }
   }
 
@@ -618,6 +649,7 @@ gl_Position = projectionMatrix * mvPosition;`);
     this.scene.remove(this.group);
     this.bodyMat.dispose();
     this.stripMat.dispose();
+    if (this.stripDepth) this.stripDepth.dispose();
     if (this.model) this.model.dispose();
     // per-character rifle and armband (the skinned suit geometry is shared and cached)
     for (const o of [this.rifle, this.armband]) {

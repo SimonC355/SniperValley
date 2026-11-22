@@ -12,6 +12,24 @@ Each version's section becomes the notes of its release on GitHub (see
   clumps; rocks have big flat facets; the grass is a saturated green with painted strokes, the
   river a clear turquoise between light sandy banks, under a clear sky with a warm sun. A
   ghillie suit still stands out by its shape, not by its texture. The other maps look as before.
+- **Beech River's snipers in a realistic ghillie suit.** On Beech River the snipers are the same
+  sculpted soldier, kept realistic, so you can compare it with the stylized Ravine:
+  - **The suit.** A full ghillie suit of thousands of jute strands from the photo texture, with
+    burlap strips and strings of synthetic leaves among them. A thick, shaggy hood frames a
+    painted face with a neck gaiter, and short fringes fall over the brow. Single beech and oak
+    leaves sit on top, and beech twigs and fern fronds are tucked into the hood, the shoulders
+    and the back.
+  - **Movement.** The strands hang with gravity in every pose. Kneeling and aiming they fall from
+    the arms, and lying down they lie along the back. They sway in the wind and trail behind
+    when the sniper moves.
+  - **Underneath.** Muted woodland camo with a fine weave, suede boots and olive gloves. The
+    rifle is dark olive, wrapped in burlap with jute hanging from it, and the hands hold it in
+    every pose.
+  - **First person.** You keep the detailed rifle, now held in the same gloves, with camo
+    sleeves and jute hanging from them.
+  - **Distance.** The jute keeps its fullness far away and through the scope instead of thinning
+    out. From across the river the sniper reads as a shaggy shape, and lying down as a bush.
+  - **Everything else.** Unchanged, and the other maps keep their snipers.
 - **The Ravine's snipers, made again in the same style.** The snipers there are now a sculpted,
   stylized soldier with smooth, rounded shapes, a little like Fortnite or Overwatch, instead of a
   bundle of capsules and jagged skirts:
