@@ -1,22 +1,27 @@
 // DOM HUD: crosshair, team status, zone timer, compass, health, bolt + glint status,
 // "being aimed at" warning, kill feed, teammate markers, overlays (start/pause/settings/end).
 import * as THREE from 'three';
-import { CONFIG, DEFAULT_BINDS, MAPS, MAP_ID, saveRenderSettings } from './config.js';
+import { CONFIG, DEFAULT_BINDS, MAPS, MAP_ID, saveRenderSettings, GRAPHICS_PRESETS, currentPreset } from './config.js';
 import { keyLabel } from './input.js';
 
 const ACTION_LABELS = {
   forward: 'Move forward', back: 'Move back', left: 'Strafe left', right: 'Strafe right',
-  sprint: 'Sprint (gets up) · hold breath while scoped', jump: 'Jump / stand up', crouch: 'Crouch', prone: 'Prone',
+  sprint: 'Sprint (gets up) · hold breath while scoped', jump: 'Jump / stand up · climb onto a rock or low wall', crouch: 'Crouch · while sprinting: slide', prone: 'Prone',
   scope: 'Scope (hold)', fire: 'Fire (bolt cycles 1.5 s)', scores: 'Scoreboard (hold)', restart: 'Restart (single player)',
 };
 
 const $ = (id) => document.getElementById(id);
+const UI_BASE = (import.meta.env && import.meta.env.BASE_URL) || '/';
+
+// small skull icon for the kill markers
+const SKULL_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2c-5 0-8.6 3.6-8.6 8.2 0 2.6 1.2 4.7 3.1 6v2.4c0 .7.5 1.2 1.2 1.2h1.4v-2.2h1.6V20h2.6v-2.2h1.6V20h1.4c.7 0 1.2-.5 1.2-1.2v-2.4c1.9-1.3 3.1-3.4 3.1-6 0-4.6-3.6-8.2-8.6-8.2zM8.4 14.1a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zm7.2 0a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4zM12 14.6l1.3 2.4h-2.6l1.3-2.4z"/></svg>';
 
 export class HUD {
   constructor() {
     const hud = $('hud');
     hud.innerHTML = `
       <div id="markers" class="hud-el"></div>
+      <div id="skulls" class="hud-el"></div>
       <div id="crosshair" class="hud-el"></div>
       <div id="hitmarker" class="hud-el"></div>
       <div id="topbar" class="hud-el">
@@ -110,6 +115,7 @@ export class HUD {
         <div class="controls fixed">
           <b>Mouse</b><span>look (arrow keys if pointer lock is unavailable)</span>
           <b>Mouse wheel</b><span>scoped: zoom ${CONFIG.player.zoomLevels[0]}–${CONFIG.player.zoomLevels[CONFIG.player.zoomLevels.length - 1]}× (forward in, back out)</span>
+          <b>Hold forward</b><span>against a rock or a low wall: climb onto it (or press jump)</span>
           <b>Esc</b><span>pause / settings</span>
           <b>T · F1 · F2</b><span>debug: skip zone step · debug info · reveal all characters</span>
         </div>
@@ -124,9 +130,9 @@ export class HUD {
           <label>Friendly fire</label><select id="set-ff">${opt([['1', 'on (a team kill costs a point in deathmatch)'], ['0', 'off (bullets pass teammates)']])}</select>
           <label>Rounds to win</label><select id="set-rounds">${opt([['1', '1 (single round)'], ['2', '2 (best of 3)'], ['3', '3 (best of 5)'], ['4', '4 (best of 7)']])}</select>
           <label>Swap sides each round</label><select id="set-swap">${onoff}</select>
-          <label>Zone mode</label><select id="set-zone">${opt([['ends', 'ends (closes from valley ends)'], ['radial', 'radial (toward the water)']])}</select>
+          <label>Zone mode</label><select id="set-zone">${opt([['radial', 'circle (closes toward the water)'], ['ends', 'ends (closes from the valley ends)']])}</select>
           <label>Camouflage</label><input id="set-camo" type="range" min="0" max="1" step="0.05">
-          <label>Tracers</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'faint'], ['bright', 'bright']])}</select>
+          <label>Bullet trails</label><select id="set-tracers">${opt([['off', 'off'], ['faint', 'light (yours clear, others faint)'], ['bright', 'bright (everyone)']])}</select>
           <label>Ballistics</label><select id="set-ball">${opt([['0', 'hitscan'], ['1', 'travel time + drop + wind']])}</select>
         </div>
         <div class="note">Match settings apply when a new match starts. Rounds, side swap and the zone are for elimination; deathmatch keeps the whole valley open for ${Math.round(CONFIG.match.tdmTime / 60)} minutes. Changing the map reloads the game (in a LAN game the host's map is used).</div>
@@ -134,6 +140,7 @@ export class HUD {
       <div class="tabpage" data-page="graphics">
         <div class="settings">
           <label class="desk">Fullscreen (F11)</label><select id="set-fullscreen" class="desk">${onoff}</select>
+          <label>Quality preset</label><select id="set-preset">${opt([['low', 'low'], ['medium', 'medium'], ['high', 'high (default)'], ['ultra', 'ultra'], ['custom', 'custom']])}</select>
           <label>Render scale</label><div class="rng"><input id="set-scale" type="range" min="0.5" max="1" step="0.05"><span id="set-scale-v"></span></div>
           <label>Auto resolution</label><select id="set-autores">${opt([['1', 'on (keeps ~60 fps)'], ['0', 'off']])}</select>
           <label>Shadows</label><select id="set-shadow"><option>off</option><option>low</option><option>medium</option><option>high</option></select>
@@ -143,6 +150,9 @@ export class HUD {
           <label>Water reflections</label><select id="set-refl">${onoff}</select>
           <label>MSAA (reload)</label><select id="set-msaa">${opt([['4', '4x'], ['0', 'off']])}</select>
           <label>Grass density (reload)</label><input id="set-grass" type="range" min="0" max="1.5" step="0.1">
+          <label>Scope eye box</label><select id="set-eyebox">${opt([['1', 'on (dark edge when the eye is off the scope)'], ['0', 'off']])}</select>
+          <label>Heat mirage</label><select id="set-mirage">${opt([['1', 'on (shimmer at long range)'], ['0', 'off']])}</select>
+          <label>Drifting needles &amp; dust</label><select id="set-particles">${opt([['0', 'off'], ['1', 'on (motes light up toward the sun)']])}</select>
         </div>
         <div class="note">Graphics settings are saved on this computer. <a href="?bench" class="link">Run the benchmark</a> to measure frame rates on this PC.</div>
       </div>
@@ -152,11 +162,21 @@ export class HUD {
           <label>Effects</label><div class="rng"><input id="set-vfx" type="range" min="0" max="1.5" step="0.05"><span id="set-vfx-v"></span></div>
           <label>Ambience</label><div class="rng"><input id="set-vamb" type="range" min="0" max="1.5" step="0.05"><span id="set-vamb-v"></span></div>
           <label>Valley echo</label><select id="set-echo">${onoff}</select>
+          <label>Breath &amp; heartbeat</label><div class="rng"><input id="set-vbody" type="range" min="0" max="1.5" step="0.05"><span id="set-vbody-v"></span></div>
+          <label>Hit sound</label><select id="set-hitsnd">${opt([['1', 'on (tick, then the far-off thump)'], ['0', 'off']])}</select>
         </div>
       </div>`;
-    this.startScreen = make('startscreen', `<div class="panel">
+    // map cards: a picture of each map (UI art made with Higgsfield, see CREDITS.md)
+    const mapCards = Object.entries(MAPS).map(([id, m]) => `<button class="mapcard" data-map="${id}" style="--img:url('${UI_BASE}ui/map-${id}.webp')">
+        <span class="mc-name">${m.name}</span><span class="mc-meta">${m.size}<br>${m.players}</span></button>`).join('');
+    this.startScreen = make('startscreen', `<div class="panel start">
       <h1>SNIPER<span>VALLEY</span></h1>
-      <div class="sub">TEST VERSION ${__APP_VERSION__} · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
+      <div class="sub"><span class="ver">VERSION ${__APP_VERSION__.replace(/\.0$/, '')}</span> · PLAYER-REQUESTED UPDATES · TEAM SNIPER BATTLES · ONE SHOT, ONE KILL</div>
+      <h2>CHOOSE YOUR BATTLEFIELD</h2>
+      <div class="mapcards" id="map-cards">${mapCards}</div>
+      <div class="btnrow"><button class="primary big" id="btn-play">SINGLE PLAYER</button>
+        <label class="mappick" style="display:none">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label>
+        <button id="btn-quit" class="desk quit">QUIT</button></div>
       <div id="lanbox" class="lan" style="display:none">
         <h2 id="lan-h">LAN MULTIPLAYER</h2>
         <div class="settings">
@@ -175,26 +195,32 @@ export class HUD {
         <div class="note" id="lan-note"></div>
       </div>
       ${settings.replace(/id="set-/g, 'id="s0-')}
-      <div class="btnrow"><button class="primary" id="btn-play">SINGLE PLAYER</button>
-        <label class="mappick">MAP <select id="map-quick">${opt(Object.entries(MAPS).map(([id, m]) => [id, `${m.name} · ${m.players}`]))}</select></label>
-        <button id="btn-quit" class="desk quit">QUIT</button></div>
     </div>`);
     this.pauseScreen = make('pausescreen', `<div class="panel">
       <h1>PAUSED</h1>
-      <div class="sub">CLICK RESUME TO RE-LOCK THE MOUSE</div>
+      <div class="sub">CLICK RESUME TO RE-LOCK THE MOUSE · LOBBY: CHOOSE ANOTHER MAP OR MODE</div>
+      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-lobby">LOBBY</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button><button id="btn-quit2" class="desk quit">QUIT</button></div>
       ${settings.replace(/id="set-/g, 'id="s1-')}
-      <div class="btnrow"><button class="primary" id="btn-resume">RESUME</button><button id="btn-restart">RESTART MATCH</button><button id="btn-leavegame" style="display:none">LEAVE GAME</button><button id="btn-quit2" class="desk quit">QUIT</button></div>
     </div>`);
     this.endScreen = make('endscreen', `<div class="panel">
       <h1 id="end-title">VICTORY</h1>
       <div class="sub" id="end-sub"></div>
       <div class="stats" id="end-stats"></div>
-      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button><button id="btn-quit3" class="desk">QUIT</button></div>
+      <div class="btnrow" style="justify-content:center"><button class="primary" id="btn-again">NEW MATCH (R)</button><button id="btn-lobby2">LOBBY</button><button id="btn-quit3" class="desk">QUIT</button></div>
     </div>`);
     this.loading = document.createElement('div');
     this.loading.id = 'loading';
-    this.loading.innerHTML = `<div class="t">SNIPERVALLEY</div><div class="s" id="loading-s">LOADING</div>`;
+    // the map being loaded, as the loading screen's backdrop
+    this.loading.style.setProperty('--img', `url('${UI_BASE}ui/map-${MAP_ID}.webp')`);
+    this.loading.innerHTML = `<div class="t">SNIPERVALLEY</div><div class="m">${MAPS[MAP_ID].name}</div><div class="s" id="loading-s">LOADING</div>`;
     document.body.appendChild(this.loading);
+  }
+
+  // the loading backdrop for a map about to load (a map change reloads the page)
+  setLoadingMap(id) {
+    if (!MAPS[id]) return;
+    this.loading.style.setProperty('--img', `url('${UI_BASE}ui/map-${id}.webp')`);
+    this.loading.querySelector('.m').textContent = MAPS[id].name;
   }
 
   setLoading(text) {
@@ -207,10 +233,20 @@ export class HUD {
   bindSettings(onChange, input) {
     const C = CONFIG;
     const fmt = { sens: (v) => `${(+v).toFixed(2)}×`, ssens: (v) => `${(+v).toFixed(2)}×`, fov: (v) => `${v}°`, scale: (v) => `${Math.round(v * 100)}%`,
-      vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%` };
-    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = MAP_ID; };
+      vmaster: (v) => `${Math.round(v * 100)}%`, vfx: (v) => `${Math.round(v * 100)}%`, vamb: (v) => `${Math.round(v * 100)}%`, vbody: (v) => `${Math.round(v * 100)}%` };
+    // v5.2: choosing a map only marks it (selectedMap); it loads when the game starts
+    if (!this.selectedMap) this.selectedMap = MAP_ID;
+    const syncAll = () => { this.sync_s0(); this.sync_s1(); $('map-quick').value = this.selectedMap; this.syncMapCards(); };
     this.syncAll = syncAll;
     $('map-quick').addEventListener('change', () => onChange('map', $('map-quick').value));
+    // the map cards drive the (hidden) quick map select, so LAN rules apply to both
+    document.querySelectorAll('#map-cards .mapcard').forEach((c) => c.addEventListener('click', () => {
+      const sel = $('map-quick');
+      if (sel.disabled || c.dataset.map === this.selectedMap) return;
+      sel.value = c.dataset.map;
+      document.querySelectorAll('#map-cards .mapcard').forEach((x) => x.classList.toggle('on', x === c));
+      sel.dispatchEvent(new Event('change'));
+    }));
     for (const p of ['s0', 's1']) {
       const g = (k) => $(`${p}-${k}`);
       const panel = g('team').closest('.panel');
@@ -238,7 +274,7 @@ export class HUD {
         }));
       };
       const sync = () => {
-        g('map').value = MAP_ID;
+        g('map').value = this.selectedMap;
         if (![...g('team').options].some((o) => o.value === String(C.teams.size))) g('team').add(new Option(`${C.teams.size}v${C.teams.size}`, String(C.teams.size)));
         g('team').value = String(C.teams.size);
         g('gmode').value = C.match.mode;
@@ -269,6 +305,13 @@ export class HUD {
         g('vfx').value = String(C.audio.effects);
         g('vamb').value = String(C.audio.ambience);
         g('echo').value = C.audio.echo ? '1' : '0';
+        g('vbody').value = String(C.audio.body);
+        g('hitsnd').value = C.feel.hitSound ? '1' : '0';
+        g('eyebox').value = C.feel.scopeShadow ? '1' : '0';
+        g('mirage').value = C.feel.mirage ? '1' : '0';
+        g('particles').value = C.render.particles ? '1' : '0';
+        g('preset').value = currentPreset();
+        g('preset').querySelector('option[value="custom"]').disabled = currentPreset() !== 'custom';
         for (const k in fmt) { const el = g(`${k}-v`); if (el) el.textContent = fmt[k](g(k).value); }
         renderBinds();
       };
@@ -304,6 +347,21 @@ export class HUD {
       on('vfx', (v) => { C.audio.effects = parseFloat(v); }, 'input');
       on('vamb', (v) => { C.audio.ambience = parseFloat(v); }, 'input');
       on('echo', (v) => { C.audio.echo = v === '1'; });
+      on('vbody', (v) => { C.audio.body = parseFloat(v); }, 'input');
+      on('hitsnd', (v) => { C.feel.hitSound = v === '1'; });
+      on('eyebox', (v) => { C.feel.scopeShadow = v === '1'; });
+      on('mirage', (v) => { C.feel.mirage = v === '1'; });
+      on('particles', (v) => { C.render.particles = v === '1'; });
+      // a preset sets every graphics option at once (MSAA and grass after a reload)
+      g('preset').addEventListener('change', () => {
+        const P = GRAPHICS_PRESETS[g('preset').value];
+        if (!P) return;
+        const reload = P.msaa !== C.render.msaa || P.grassDensity !== C.render.grassDensity;
+        Object.assign(C.render, P);
+        saveRenderSettings();
+        syncAll();
+        onChange('preset', reload);
+      });
       g('bindreset').addEventListener('click', () => {
         C.controls.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
         saveRenderSettings();
@@ -311,6 +369,15 @@ export class HUD {
       });
     }
     syncAll();
+  }
+
+  // highlight the loaded map; grey the cards out when the LAN host chooses the map
+  syncMapCards() {
+    const locked = $('map-quick').disabled;
+    document.querySelectorAll('#map-cards .mapcard').forEach((c) => {
+      c.classList.toggle('on', c.dataset.map === this.selectedMap);
+      c.disabled = locked && c.dataset.map !== this.selectedMap;
+    });
   }
 
   showStart(on) { this.startScreen.classList.toggle('on', on); }
@@ -539,6 +606,48 @@ export class HUD {
     for (const [id, el] of this.markerEls) {
       if (!seen.has(id)) { el.remove(); this.markerEls.delete(id); }
     }
+  }
+
+  // Kill markers (v5): a small skull where someone you shot went down, with the distance. Off
+  // screen it sits at the edge of the screen in that direction, with an arrow.
+  // list: [{ id, pos: Vector3, name, t: seconds left, life: seconds total }]
+  updateSkulls(camera, list, width, height) {
+    if (!this.skullEls) this.skullEls = new Map();
+    const box = document.getElementById('skulls');
+    const seen = new Set();
+    const m = 46;
+    for (const k of list) {
+      seen.add(k.id);
+      let el = this.skullEls.get(k.id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'skull';
+        el.innerHTML = `<i class="arrow"></i>${SKULL_SVG}<span></span>`;
+        box.appendChild(el);
+        this.skullEls.set(k.id, el);
+      }
+      const p = this._v.copy(k.pos).project(camera);
+      const behind = p.z > 1;
+      let x = (p.x * 0.5 + 0.5) * width, y = (-p.y * 0.5 + 0.5) * height;
+      if (behind) { x = width - x; y = height - y; }
+      const off = behind || x < m || x > width - m || y < m || y > height - m;
+      if (off) {
+        // push to the screen edge along the direction from the centre
+        const cx = width / 2, cy = height / 2;
+        let dx = x - cx, dy = y - cy;
+        if (behind && Math.abs(dx) < 1 && Math.abs(dy) < 1) dy = 1;
+        const sx = (width / 2 - m) / Math.max(1e-3, Math.abs(dx)), sy = (height / 2 - m) / Math.max(1e-3, Math.abs(dy));
+        const sc = Math.min(sx, sy);
+        x = cx + dx * sc; y = cy + dy * sc;
+        el.style.setProperty('--ang', `${Math.atan2(dy, dx)}rad`);
+      }
+      el.classList.toggle('off', off);
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.style.opacity = String(Math.min(1, k.t / 1.5, (k.life - k.t) / 0.25 + 0.2));
+      el.lastElementChild.textContent = `${Math.round(camera.position.distanceTo(k.pos))} m`;
+    }
+    for (const [id, el] of this.skullEls) if (!seen.has(id)) { el.remove(); this.skullEls.delete(id); }
   }
 
   // Debug reveal (F2): circles on every character.

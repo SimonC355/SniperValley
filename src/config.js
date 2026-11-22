@@ -22,11 +22,18 @@ export const CONFIG = {
     ridgeHeightSouth: 58,
     meander: 1,            // scale of the river's side-to-side bends
     relief: 1,             // scale of the bumps, spurs and terraces on the slopes
-    deepWaterDepth: 0.85,  // water deeper than this is impassable
+    deepWaterDepth: 0.85,  // in water deeper than this the current takes you (v5; it used to be a wall)
     shallowSpeedMul: 0.55, // movement multiplier in shallow water
+    current: 5.0,          // m/s: the river's current in the deep channel (it sweeps you downstream)
+    shallowDrift: 0.6,     // m/s: the pull of the current on the shallow shelf
+    drownTime: 3.5,        // seconds in the deep current before it kills you
     fords: [],             // optional x positions of shallow crossings, e.g. [-120, 140]
     terrainExtent: 1500,   // full rendered terrain size (outer area is scenery)
     terrainSpacing: 2.0,   // mesh vertex spacing inside the play area (heights come from a 1 m grid)
+    biome: 'conifer',      // set from MAPS below
+    terrain: 'valley',
+    farHills: [90, 70],
+    rimHeight: null,       // mountains around the edge: crest height above the ground there (null: 0.21 × width, 30-70 m)
   },
 
   // ---------------------------------------------------------------- rendering
@@ -40,19 +47,26 @@ export const CONFIG = {
     reflections: true,
     sunShafts: true,       // screen-space light shafts when looking toward the sun
     autoResolution: true,  // lower the resolution (down to 60%) when frames take longer than ~17 ms
+    particles: false,      // v5.2: needles drifting down and dust motes in the sun (off: they glittered like noise)
     grassDensity: 1.0,     // 0 .. 1.5
     exposure: 1.0,
-    grain: 0.035,
+    // v5.3: the eye adapting to the light (post.js AutoExposurePass): the exposure follows the
+    // view's average brightness (log2 luminance) toward `key`, by `strength` (0 off, 1 fully),
+    // at most `down` stops darker and `up` stops brighter
+    autoExposure: { key: -2.6, strength: 0.75, down: 0.8, up: 1.8 },
+    grain: 0.03,
+    sharpen: 0.6,          // v5: sharpening in the final pass (0 = off)
     vignette: 0.32,
     farClip: 2600,
   },
 
   // Colour grading in the final pass (applied to linear HDR colour before tone mapping).
   grade: {
-    saturation: 1.12,
-    contrast: 1.1,         // around mid grey, in log space
+    saturation: 1.1,
+    contrast: 1.1,         // around mid grey, in log space (v5: a little punchier; v5.3 less again:
+                           // with the eye adapting, deep shade no longer goes black)
     warmth: 0.05,          // warm highlights / cool shadows split toning
-    shafts: 0.45,          // light-shaft strength
+    shafts: 0.36,          // light-shaft strength
   },
 
   // Photoscanned textures downloaded with `npm run assets` (CC0, Poly Haven) into
@@ -80,10 +94,11 @@ export const CONFIG = {
   },
 
   fog: {
-    density: 0.002,        // exponential density at height 0
+    density: 0.0012,       // exponential density at height 0 (v5: clearer air; v5.2 clearer still,
+                           // so cliffs 200 m away keep their shape and colour)
     heightFalloff: 0.028,  // per metre
     color: 0xb9c3c9,
-    sunScatter: 0.6,
+    sunScatter: 0.45,
   },
 
   // Drifting clouds (sky + their shadows on the ground) and gusts sweeping the valley.
@@ -109,6 +124,17 @@ export const CONFIG = {
     branches: 2000,        // dead branches (visual only, drawn within ~70 m)
   },
 
+  // v5.2: Megascans models (your own Fab downloads, made light with `npm run megascans`; see
+  // src/megascans.js). Used on these maps when public/assets/megascans/ has them; ?megascans=0
+  // turns them off to compare.
+  megascans: {
+    enabled: true,
+    maps: ['valley'],
+    nearDist: 70,          // m (zoom-scaled) where the near copy gives way to the far one
+    patches: 260,          // flat pieces of forest floor (twigs, roots, dirt) on the Valley
+    uprooted: 14,          // fallen trees with their root plate (big cover)
+  },
+
   // ---------------------------------------------------------------- vegetation
   trees: {
     playAreaCount: 2600,   // approx number of trees inside the playable area
@@ -120,7 +146,7 @@ export const CONFIG = {
     windStrength: 1.0,
   },
   bushes: { count: 5200, lod0Distance: 45, maxDistance: 240 },
-  rocks: { count: 340 },
+  rocks: { count: 640 },   // v5: about twice as many, and you can climb onto them
   grass: { radius: 30, spacing: 0.42 },
 
   // ---------------------------------------------------------------- player
@@ -137,6 +163,13 @@ export const CONFIG = {
     accel: 22,
     jumpVelocity: 4.6,
     gravity: 15,
+    stepHeight: 0.55,      // walk straight up onto rocks and ledges this high
+    climbHeight: 2.4,      // hold forward (or press jump) against a rock or a low wall this high to climb onto it
+    climbTime: 0.55,       // seconds a climb takes (a bit longer for a high one)
+    slideSpeed: 9.2,       // sprint + crouch: a slide that starts at this speed
+    slideFriction: 6.0,    // m/s² of slowing on level ground (a downhill slide goes further)
+    slideMinSpeed: 2.4,    // the slide ends, crouched, below this speed
+    slideEye: 0.78,        // eye height while sliding
     mouseSensitivity: 0.0021,  // radians per pixel at hip FOV
     arrowLookSpeed: 1.6,       // radians per second for the arrow-key fallback
     fovHip: 70,
@@ -161,8 +194,17 @@ export const CONFIG = {
     holdBreathSteady: 0.1,     // sway multiplier while holding the breath
     breathRecovery: 0.5,       // seconds of breath regained per second
     outOfBreathTime: 3.0,      // after running out: no breath hold and more sway for this long
-    tracers: 'faint',          // 'off' | 'faint' | 'bright'
-    tracerOpacity: 0.12,
+    tracers: 'faint',          // bullet trails: 'off' | 'faint' (default) | 'bright'
+    trail: {
+      life: 1.8,               // seconds the vapour trail lingers behind the bullet
+      opacity: 0.65,           // your own shots ('faint')
+      othersOpacity: 0.3,      // everyone else's shots ('faint'): a light hint back at the shooter
+      brightOpacity: 0.85,     // every shot with 'bright'
+      width: 0.04,             // metres right behind the bullet
+      spread: 0.25,            // metres per second the trail widens as it disperses
+      drift: 0.5,              // share of the wind the vapour drifts with
+      headTime: 0.025,         // seconds of bright streak at the bullet
+    },
     ballistics: {
       enabled: false,          // bullet travel time, drop and wind
       muzzleVelocity: 850,
@@ -211,7 +253,7 @@ export const CONFIG = {
     interval: 60,              // a new step starts every interval seconds
     warning: 10,
     shrink: 20,
-    mode: 'ends',              // 'ends' (closes from the valley ends) | 'radial' (circle toward the water)
+    mode: 'radial',            // 'radial' (circle closing toward the water, default since v5) | 'ends' (closes from the valley ends)
     damage: [2, 4, 7, 11, 16, 24, 30],  // hp per second outside, indexed by current step
   },
 
@@ -288,7 +330,22 @@ export const CONFIG = {
     effects: 1.0,          // gunshots, impacts, footsteps, birds
     ambience: 1.0,         // wind and river
     echo: true,
-    crackRadius: 30,       // a passing bullet's supersonic crack is heard this far from its path
+    crackRadius: 50,       // a passing bullet's supersonic crack is heard this far from its path
+    body: 1.0,             // your own breathing, heartbeat and ringing ears
+  },
+
+  // v5.2: the small details of being a sniper (see NOTES "v5.2").
+  feel: {
+    suppressRadius: 6,     // m: a bullet passing closer than this, or landing this close, suppresses you
+    suppressTime: 1.6,     // seconds a full suppression takes to wear off
+    flinch: 0.3,           // degrees of aim jolt from a bullet cracking right past your head
+    tinnitusMiss: 1.6,     // m: a miss this close leaves your ears ringing
+    breathing: true,       // audible breathing through the scope and after sprinting, a heartbeat while holding it
+    pulse: 0.00045,        // radians: the aim twitches with each heartbeat while you hold your breath
+    scopeShadow: true,     // the scope's eye box: a dark crescent when the rifle moves off your eye
+    mirage: true,          // heat shimmer through the scope at long range (drifts with the crosswind)
+    muzzleDust: true,      // a shot fired prone kicks up dust in front of the muzzle (others can see it)
+    hitSound: true,        // a tick when your bullet hits, and the far-off thump of the hit a moment later
   },
 
   // Player controls (saved per browser from the settings menu).
@@ -314,6 +371,20 @@ export const DEFAULT_BINDS = {
 };
 CONFIG.controls.binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
 
+// v5.2: graphics presets for the settings menu (and ?quality=low|medium|high|ultra).
+// 'high' is the default look; MSAA and grass density take effect after a reload.
+export const GRAPHICS_PRESETS = {
+  low: { renderScale: 0.7, maxPixelRatio: 1, shadowQuality: 'low', ao: false, bloom: false, sunShafts: false, reflections: false, msaa: 0, grassDensity: 0.4 },
+  medium: { renderScale: 0.85, maxPixelRatio: 1.25, shadowQuality: 'medium', ao: false, bloom: true, sunShafts: false, reflections: true, msaa: 0, grassDensity: 0.8 },
+  high: { renderScale: 1.0, maxPixelRatio: 1.5, shadowQuality: 'medium', ao: true, bloom: true, sunShafts: true, reflections: true, msaa: 4, grassDensity: 1.0 },
+  ultra: { renderScale: 1.0, maxPixelRatio: 2, shadowQuality: 'high', ao: true, bloom: true, sunShafts: true, reflections: true, msaa: 4, grassDensity: 1.5 },
+};
+// The preset the current render settings match, or 'custom'.
+export function currentPreset() {
+  for (const [name, p] of Object.entries(GRAPHICS_PRESETS)) if (Object.entries(p).every(([k, v]) => CONFIG.render[k] === v)) return name;
+  return 'custom';
+}
+
 // Persisted per-browser render settings override the defaults (see settings menu).
 try {
   const saved = JSON.parse(localStorage.getItem('sniperyard.render') || 'null');
@@ -327,7 +398,8 @@ try {
     for (const k of ['sensitivity', 'scopeSensitivity', 'invertY', 'scopeZoom']) if (k in saved) CONFIG.controls[k] = saved[k];
     if (saved.binds) for (const a in DEFAULT_BINDS) if (Array.isArray(saved.binds[a]) && saved.binds[a].length) CONFIG.controls.binds[a] = saved.binds[a];
     if (saved.fov) CONFIG.player.fovHip = saved.fov;
-    for (const k of ['master', 'effects', 'ambience']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
+    for (const k of ['master', 'effects', 'ambience', 'body']) if (saved.volume && k in saved.volume) CONFIG.audio[k] = saved.volume[k];
+    if (saved.feel && typeof saved.feel === 'object') for (const k of ['breathing', 'scopeShadow', 'mirage', 'hitSound']) if (k in saved.feel) CONFIG.feel[k] = !!saved.feel[k];
   }
 } catch (e) { /* storage unavailable */ }
 
@@ -341,7 +413,8 @@ try {
     if (s.tdmKills) CONFIG.match.tdmKills = Math.max(5, Math.min(200, s.tdmKills | 0));
     if ('ff' in s) CONFIG.match.friendlyFire = !!s.ff;
     if ('swap' in s) CONFIG.match.swapSides = !!s.swap;
-    if (s.zone === 'ends' || s.zone === 'radial') CONFIG.zone.mode = s.zone;
+    // v5 made the circle (radial) the default: zone choices saved before v5 are not kept
+    if ((s.zone === 'ends' || s.zone === 'radial') && s.zv === 5) CONFIG.zone.mode = s.zone;
     if (typeof s.camo === 'number') CONFIG.camouflageStrength = s.camo;
     if (['off', 'faint', 'bright'].includes(s.tracers)) CONFIG.weapon.tracers = s.tracers;
     if ('ball' in s) CONFIG.weapon.ballistics.enabled = !!s.ball;
@@ -352,7 +425,7 @@ export function saveRenderSettings() {
   try { localStorage.setItem('sniperyard.render', JSON.stringify(CONFIG.render)); } catch (e) { /* ignore */ }
   try {
     localStorage.setItem('sniperyard.match', JSON.stringify({
-      size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode,
+      size: CONFIG.teams.size, rounds: CONFIG.match.roundsToWin, swap: CONFIG.match.swapSides, zone: CONFIG.zone.mode, zv: 5,
       camo: CONFIG.camouflageStrength, tracers: CONFIG.weapon.tracers, ball: CONFIG.weapon.ballistics.enabled,
       mode: CONFIG.match.mode, tdmKills: CONFIG.match.tdmKills, ff: CONFIG.match.friendlyFire,
     }));
@@ -361,7 +434,8 @@ export function saveRenderSettings() {
     const C = CONFIG.controls;
     localStorage.setItem('sniperyard.controls', JSON.stringify({
       sensitivity: C.sensitivity, scopeSensitivity: C.scopeSensitivity, invertY: C.invertY, scopeZoom: C.scopeZoom, binds: C.binds,
-      fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience },
+      fov: CONFIG.player.fovHip, volume: { master: CONFIG.audio.master, effects: CONFIG.audio.effects, ambience: CONFIG.audio.ambience, body: CONFIG.audio.body },
+      feel: { breathing: CONFIG.feel.breathing, scopeShadow: CONFIG.feel.scopeShadow, mirage: CONFIG.feel.mirage, hitSound: CONFIG.feel.hitSound },
     }));
   } catch (e) { /* ignore */ }
 }
@@ -380,27 +454,42 @@ try {
   if (q.get('photo')) CONFIG.assets.photo = q.get('photo') !== '0';
   if (q.get('shafts')) CONFIG.render.sunShafts = q.get('shafts') !== '0';
   if (q.get('autores')) CONFIG.render.autoResolution = q.get('autores') !== '0';
+  if (q.get('megascans')) CONFIG.megascans.enabled = q.get('megascans') !== '0';
   if (q.get('rounds')) CONFIG.match.roundsToWin = Math.max(1, parseInt(q.get('rounds'), 10) || 2);
-  if (q.get('quality') === 'low') Object.assign(CONFIG.render, { renderScale: 0.7, shadowQuality: 'low', ao: false, msaa: 0, reflections: false, grassDensity: 0.5 });
+  if (GRAPHICS_PRESETS[q.get('quality')]) Object.assign(CONFIG.render, GRAPHICS_PRESETS[q.get('quality')]);
 } catch (e) { /* ignore */ }
 
 // ---------------------------------------------------------------- maps
-// Three sizes of the same forested river valley. The chosen map's numbers replace CONFIG.map,
-// and the numbers of rocks, bushes, fallen trees and bird flocks follow the play area so the
-// forest is as dense on every map. Trees follow the area by themselves.
-// (v0.3.1: all three about a quarter smaller than before, for more contact.)
+// Forested river valleys in three sizes (VALLEY, NARROW VALLEY, RAVINE), plus two maps added in
+// v5 with the same concept (two banks facing each other across a river nobody can cross):
+// TUSCAN HILLS (a valley of old stone hamlets, cypresses and olive groves) and BEECH RIVER (a
+// Nordic beech forest on low, rolling ground with a broad river in the middle).
+// The chosen map's numbers replace CONFIG.map, and the numbers of rocks, bushes, fallen trees
+// and bird flocks follow the play area so the forest is as dense on every map.
+//   biome:   'conifer' | 'tuscany' | 'beech' (trees, ground textures, buildings, colours)
+//   terrain: 'valley' (two slopes up to ridges) | 'lowland' (gentle, rolling banks)
+//   farHills: height of the mountain mass far behind the mountains that close off the play area
+//   (the mountains themselves follow the map size: CONFIG.map.rimHeight, terrain.js _rim)
 export const MAPS = {
   valley: {
-    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50,
+    name: 'VALLEY', size: '340 × 290 m', players: '5v5 – 20v20', zoneInterval: 50, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 340, width: 290, ridgeDist: 136, ridgeHeightNorth: 52, ridgeHeightSouth: 47, riverDeepHalfWidth: 8, riverShelfStart: 11, riverShelfEnd: 15, riverDepth: 2.6, meander: 0.85, relief: 0.9 },
   },
   narrow: {
-    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42,
+    name: 'NARROW VALLEY', size: '260 × 210 m', players: '2v2 – 10v10', zoneInterval: 42, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 260, width: 210, ridgeDist: 98, ridgeHeightNorth: 40, ridgeHeightSouth: 36, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.65, relief: 0.78 },
   },
   ravine: {
-    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36,
+    name: 'RAVINE', size: '200 × 150 m', players: '1v1 – 5v5', zoneInterval: 36, biome: 'conifer', terrain: 'valley', farHills: [90, 70],
     map: { length: 200, width: 150, ridgeDist: 70, ridgeHeightNorth: 31, ridgeHeightSouth: 28, riverDeepHalfWidth: 5, riverShelfStart: 7, riverShelfEnd: 10, riverDepth: 2.0, meander: 0.5, relief: 0.62 },
+  },
+  tuscany: {
+    name: 'TUSCAN HILLS', size: '300 × 240 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'tuscany', terrain: 'valley', farHills: [55, 40],
+    map: { length: 300, width: 240, ridgeDist: 112, ridgeHeightNorth: 38, ridgeHeightSouth: 34, riverDeepHalfWidth: 6.5, riverShelfStart: 9, riverShelfEnd: 12.5, riverDepth: 2.4, meander: 0.7, relief: 0.7 },
+  },
+  beech: {
+    name: 'BEECH RIVER', size: '320 × 260 m', players: '2v2 – 10v10', zoneInterval: 46, biome: 'beech', terrain: 'lowland', farHills: [16, 14],
+    map: { length: 320, width: 260, ridgeDist: 122, ridgeHeightNorth: 9, ridgeHeightSouth: 8, riverDeepHalfWidth: 12, riverShelfStart: 15, riverShelfEnd: 19, riverDepth: 3.0, meander: 0.9, relief: 0.55 },
   },
 };
 
@@ -419,14 +508,45 @@ export const MAP_ID = (() => {
 {
   const P = MAPS[MAP_ID];
   Object.assign(CONFIG.map, P.map);
+  CONFIG.map.biome = P.biome;
+  CONFIG.map.terrain = P.terrain;
+  CONFIG.map.farHills = P.farHills;
+  CONFIG.map.style = P.style || 'realistic';
+  // the snipers: the sculpted figure in a realistic ghillie suit on every map ('sculpted'), or the
+  // old strip suit ('strips'); a map in the stylized style (style: 'stylized', none at the moment)
+  // gets the stylized sculpted sniper
+  CONFIG.map.ghillie = P.ghillie || 'sculpted';
   const k = (P.map.length * P.map.width) / (440 * 380);
-  CONFIG.rocks.count = Math.round(340 * k);
-  CONFIG.bushes.count = Math.round(5200 * k);
+  CONFIG.rocks.count = Math.round(CONFIG.rocks.count * k * (P.biome === 'beech' ? 0.75 : 1));
+  // beech forests are open underneath; Tuscany's hillsides are drier and more open
+  CONFIG.bushes.count = Math.round(5200 * k * (P.biome === 'beech' ? 0.35 : P.biome === 'tuscany' ? 0.6 : 1));
   CONFIG.debris.logs = Math.round(240 * k);
   CONFIG.debris.stumps = Math.round(320 * k);
   CONFIG.debris.branches = Math.round(2000 * k);
   CONFIG.birds.flocks = Math.max(10, Math.round(CONFIG.birds.flocks * k));
   CONFIG.zone.interval = P.zoneInterval;
+  // light and air of the biome: warm, hazy late sun over Tuscany; soft light in the beech forest
+  if (P.biome === 'tuscany') {
+    Object.assign(CONFIG.sun, { elevation: 17, azimuth: 242, intensity: 3.7, color: 0xffd39a });
+    Object.assign(CONFIG.fog, { color: 0xd3cab4, density: 0.0012 });
+    Object.assign(CONFIG.grade, { warmth: 0.07, saturation: 1.04 });
+    CONFIG.sky.turbidity = 6;
+  } else if (P.biome === 'beech') {
+    Object.assign(CONFIG.sun, { elevation: 21, azimuth: 230, intensity: 3.5, color: 0xffe9cc });
+    Object.assign(CONFIG.fog, { color: 0xb8c5c1, density: 0.0015 });
+    CONFIG.grade.saturation = 1.06;
+  }
+  // v5.2 stylized look (Ravine): a high, clean sun, lifted shadows, a blue sky and blue air in
+  // the distance, strong but clean colour; painted textures instead of photos (textures.js),
+  // solid tiered trees (trees.js), faceted rocks (rocks.js), turquoise water (main.js)
+  if (CONFIG.map.style === 'stylized') {
+    Object.assign(CONFIG.sun, { elevation: 36, azimuth: 214, intensity: 3.0, color: 0xfff0d6, ambient: 0.55, hemi: { sky: 0xe4ecf2, ground: 0x6a7a40, intensity: 1.6 } });
+    Object.assign(CONFIG.fog, { color: 0xa3c6e6, density: 0.0012, heightFalloff: 0.02, sunScatter: 0.25 });
+    Object.assign(CONFIG.sky, { turbidity: 2.0, rayleigh: 2.2, mieCoefficient: 0.002, cloudCover: 0.3 });
+    Object.assign(CONFIG.grade, { saturation: 1.28, contrast: 1.03, warmth: 0.05, shafts: 0.2 });
+    Object.assign(CONFIG.weather, { cloudCover: 0.25, cloudShadow: 0.4 });
+    CONFIG.assets.photo = false;
+  }
 }
 
 // Choose the map for the next page load (the world is built once per load).

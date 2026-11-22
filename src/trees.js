@@ -6,18 +6,40 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { RNG, Simplex, clamp, lerp, smoothstep, hash2 } from './noise.js';
 import { patchFoliage, SHARED } from './shaders.js';
+import { leafSpray } from './cardtex.js';
 
 const VARIANTS = {
   spruce: { H: 16, r0: 0.3, crownBase: 0.08, R: 2.8, whorls: 20, branches: [8, 5], droop: [-0.4, 0.2], profile: 'cone', tex: 'spray', bark: 'barkSpruce', tint: [0.82, 0.92, 0.88] },
   fir: { H: 14, r0: 0.28, crownBase: 0.12, R: 3.1, whorls: 17, branches: [8, 5], droop: [-0.25, 0.3], profile: 'fir', tex: 'spray', bark: 'barkSpruce', tint: [0.95, 1.0, 0.9] },
   pine: { H: 19, r0: 0.32, crownBase: 0.5, R: 3.5, whorls: 10, branches: [7, 4], droop: [0.05, 0.45], profile: 'round', tex: 'pine', bark: 'barkPine', tint: [1.0, 0.97, 0.88] },
   snag: { H: 13, r0: 0.25, crownBase: 0.4, R: 1.6, whorls: 6, branches: [4, 2], droop: [-0.1, 0.2], profile: 'cone', tex: null, bark: 'barkSpruce', tint: [1, 1, 1] },
+  // v5 biomes. Broadleaf trees (broadleaf: true) get a trunk that forks into limbs and a dome
+  // of leafy cards (buildBroadleaf); the rest use the conifer builder. Their cards show a spray
+  // (cardtex.js leafSpray: the twig drawn many times, small, along a branch) so the leaves have
+  // their real size on cards metres long.
+  beech: { H: 27, r0: 0.42, crownBase: 0.36, R: 7.6, Ry: 0.6, limbs: 6, broadleaf: true, profile: 'round', tex: 'beechLeaves', spray: { scale: 0.36, shoots: 7 }, bark: 'barkBeech', tint: [0.92, 1.0, 0.86], clusters: [280, 96, 34], card: [3.0, 4.4, 6.4] },
+  beechYoung: { H: 15, r0: 0.21, crownBase: 0.28, R: 4.2, Ry: 0.62, limbs: 4, broadleaf: true, profile: 'round', tex: 'beechLeaves', spray: { scale: 0.36, shoots: 7 }, bark: 'barkBeech', tint: [0.98, 1.05, 0.88], clusters: [150, 54, 20], card: [2.2, 3.2, 4.6] },
+  olive: { H: 6.5, r0: 0.26, crownBase: 0.34, R: 3.0, Ry: 0.7, limbs: 4, broadleaf: true, gnarled: true, profile: 'round', tex: 'oliveLeaves', spray: { scale: 0.44, shoots: 6, stem: '#5d5545', seed: 5 }, bark: 'barkOlive', tint: [1.0, 1.0, 0.96], clusters: [120, 46, 18], card: [1.5, 2.2, 3.2] },
+  cypress: { H: 16, r0: 0.24, crownBase: 0.03, R: 1.4, whorls: 36, branches: [7, 5], droop: [0.4, 0.65], profile: 'cypress', tex: 'cypress', bark: 'barkPine', tint: [0.95, 1.08, 0.95] },
+  stonepine: { H: 15, r0: 0.34, crownBase: 0.64, R: 5.4, whorls: 9, branches: [10, 7], droop: [0.22, 0.08], profile: 'umbrella', tex: 'pine', bark: 'barkPine', tint: [0.95, 1.0, 0.86] },
 };
-const VARIANT_NAMES = ['spruce', 'fir', 'pine', 'snag'];
+// The tree species of each biome (only these are built).
+const BIOME_VARIANTS = {
+  conifer: ['spruce', 'fir', 'pine', 'snag'],
+  beech: ['beech', 'beechYoung', 'spruce', 'snag'],
+  tuscany: ['cypress', 'stonepine', 'olive', 'snag'],
+};
+const VARIANT_NAMES = BIOME_VARIANTS[CONFIG.map.biome] || BIOME_VARIANTS.conifer;
+// crowns drawn round (not cone-shaped) also block sight and bullets with a round profile
+export const ROUND_CROWN = (variant) => ['round', 'umbrella'].includes((VARIANTS[variant] || {}).profile);
 
 function crownRadius(profile, t) {
   if (profile === 'cone') return Math.pow(1 - t, 1.0) * (0.9 + 0.1 * Math.sin(t * 9));
   if (profile === 'fir') return Math.pow(1 - t, 0.82);
+  // Italian cypress: a slim column that tapers to a point
+  if (profile === 'cypress') return (t < 0.18 ? 0.7 + 0.3 * (t / 0.18) : Math.pow(1 - (t - 0.18) / 0.82, 0.7)) + 0.04;
+  // stone pine: a broad, flat-topped umbrella
+  if (profile === 'umbrella') return Math.min(1, 0.45 + t * 1.6) * Math.pow(Math.max(0, 1 - Math.pow(t, 5)), 0.5) + 0.03;
   // round pine crown
   return Math.pow(Math.sin(Math.PI * (0.12 + 0.88 * t)), 0.7) * (1 - 0.25 * t) + 0.05;
 }
@@ -68,13 +90,14 @@ function addCard(B, pts, widthDir, width, crownCenterY, ao0, ao1, faceN, flipV =
   }
 }
 
-function buildTrunk(B, H, r0, radial, hSegs, rng, bendSeed) {
+// taper: how much thinner the top is (0.98: to a point, as conifers; broadleaf trunks fork)
+function buildTrunk(B, H, r0, radial, hSegs, rng, bendSeed, taper = 0.98, bend = 0.25) {
   const rings = [];
-  const bx = Math.sin(bendSeed) * 0.25, bz = Math.cos(bendSeed * 1.7) * 0.25;
+  const bx = Math.sin(bendSeed) * bend, bz = Math.cos(bendSeed * 1.7) * bend;
   for (let j = 0; j <= hSegs; j++) {
     const t = j / hSegs;
     const y = t * H * 0.97;
-    let r = r0 * Math.pow(1 - t * 0.98, 0.9);
+    let r = r0 * Math.pow(1 - t * taper, 0.9);
     r *= 1 + 0.7 * Math.exp(-y * 2.5);
     const ox = bx * Math.sin(t * 2.5), oz = bz * Math.sin(t * 2.0);
     const ring = [];
@@ -103,22 +126,123 @@ const variantSeed = (name) => 11 + name.length * 7;
 // lines use this, so a shot that passes a trunk on screen also passes it in the game.
 export function trunkProfile(t) {
   const V = VARIANTS[t.variant];
+  const T = trunkShape(V);
   const bend = variantSeed(t.variant) * 0.37;
-  const bx = Math.sin(bend) * 0.25, bz = Math.cos(bend * 1.7) * 0.25;
+  const bx = Math.sin(bend) * T.bend, bz = Math.cos(bend * 1.7) * T.bend;
   const c = Math.cos(t.rot), s = Math.sin(t.rot);
-  const top = V.H * 0.97;
+  const top = T.H * 0.97;
   // denser near the ground, where the base flare narrows quickly
   const heights = [0, 0.3, 0.7, 1.3, 2.2, top * 0.3, top * 0.5, top * 0.7, top * 0.88, top];
   const out = [];
   for (const y of heights) {
     const u = y / top;
-    const r = V.r0 * Math.pow(1 - u * 0.98, 0.9) * (1 + 0.7 * Math.exp(-y * 2.5));
+    const r = V.r0 * Math.pow(1 - u * T.taper, 0.9) * (1 + 0.7 * Math.exp(-y * 2.5));
     const ox = bx * Math.sin(u * 2.5), oz = bz * Math.sin(u * 2.0);
     const q = new THREE.Vector3(t.x + (ox * c + oz * s) * t.s, t.y + y * t.s, t.z + (-ox * s + oz * c) * t.s);
     q.r = r * t.s;
     out.push(q);
   }
   return out;
+}
+
+// Height, taper and bend of a variant's drawn trunk (broadleaf trunks stop where they fork).
+function trunkShape(V) {
+  if (!V.broadleaf) return { H: V.H, taper: 0.98, bend: 0.25 };
+  return { H: V.H * (V.crownBase + (V.gnarled ? 0.08 : 0.14)), taper: 0.45, bend: V.gnarled ? 0.45 : 0.12 };
+}
+
+// A tapered tube from a to b (limbs of broadleaf trees).
+function addTube(B, a, b, r0, r1, radial, ao0 = 0.6, ao1 = 0.9) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  dir.normalize();
+  const ref = Math.abs(dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const u = new THREE.Vector3().crossVectors(dir, ref).normalize();
+  const v = new THREE.Vector3().crossVectors(dir, u);
+  const rings = [];
+  for (let j = 0; j <= 1; j++) {
+    const c = j === 0 ? a : b, r = j === 0 ? r0 : r1;
+    const ring = [];
+    for (let i = 0; i <= radial; i++) {
+      const ang = (i / radial) * Math.PI * 2;
+      _n.copy(u).multiplyScalar(Math.cos(ang)).addScaledVector(v, Math.sin(ang));
+      _v.copy(c).addScaledVector(_n, r);
+      ring.push(B.vert(_v, _n, (i / radial) * 2, j * len, j === 0 ? ao0 : ao1));
+    }
+    rings.push(ring);
+  }
+  for (let i = 0; i < radial; i++) {
+    const p = rings[0][i], q = rings[0][i + 1], r = rings[1][i], s = rings[1][i + 1];
+    B.tri(p, r, q); B.tri(q, r, s);
+  }
+}
+
+// Broadleaf tree (beech, olive): a trunk that forks into a few limbs, and a dome of leafy
+// twig cards on the crown's shell (normals bent around the crown's centre, so it shades like a
+// volume), with a dense core that blocks sight like the conifers' core.
+function buildBroadleaf(variantName, lod, seed) {
+  const V = VARIANTS[variantName];
+  const rng = new RNG(seed + lod * 101);
+  const trunkB = new GeoBuilder();
+  const leafB = new GeoBuilder();
+  const T = trunkShape(V);
+  buildTrunk(trunkB, T.H, V.r0, lod === 0 ? 10 : lod === 1 ? 6 : 4, lod === 0 ? 8 : 3, rng, variantSeed(variantName) * 0.37, T.taper, T.bend);
+  const yb = V.H * V.crownBase;
+  const yc = yb + (V.H - yb) * 0.5;
+  const Ry = (V.H - yb) * 0.5;
+  const R = V.R;
+  // limbs from the fork up into the crown
+  const rTop = V.r0 * Math.pow(1 - 0.97 * T.taper, 0.9);
+  const fork = new THREE.Vector3(0, T.H * 0.92, 0);
+  const off = rng.float(0, Math.PI * 2);
+  for (let i = 0; i < V.limbs; i++) {
+    const a = off + (i / V.limbs) * Math.PI * 2 + rng.float(-0.3, 0.3);
+    const reach = R * rng.float(0.45, 0.62);
+    const mid = new THREE.Vector3(Math.cos(a) * reach * 0.45, fork.y + (yc - fork.y) * 0.55, Math.sin(a) * reach * 0.45);
+    const end = new THREE.Vector3(Math.cos(a) * reach, yc + Ry * rng.float(0.15, 0.55), Math.sin(a) * reach);
+    const rad = lod === 0 ? 6 : 4;
+    addTube(trunkB, fork, mid, rTop * 0.62, rTop * 0.38, rad, 0.55, 0.7);
+    addTube(trunkB, mid, end, rTop * 0.38, rTop * 0.12, rad, 0.7, 0.85);
+  }
+  // leafy cards on the crown shell
+  const n = V.clusters[lod];
+  const L0 = V.card[lod];
+  const tmp = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3(), nrm = new THREE.Vector3();
+  for (let k = 0; k < n; k++) {
+    // directions biased upward (crowns are fuller on top)
+    const y = rng.float(-0.55, 1);
+    const ph = rng.float(0, Math.PI * 2);
+    const rr = Math.sqrt(Math.max(0, 1 - y * y));
+    const dir = tmp.set(Math.cos(ph) * rr, y, Math.sin(ph) * rr);
+    // most on the shell, some deeper in (fills the crown, darker)
+    const f = rng.chance(0.22) ? rng.float(0.3, 0.6) : 0.62 + 0.38 * Math.sqrt(rng.next());
+    const lumpy = 1 + 0.12 * Math.sin(ph * 3 + y * 4) + 0.08 * Math.sin(ph * 7);
+    const p = new THREE.Vector3(dir.x * R * f * lumpy, yc + dir.y * Ry * f, dir.z * R * f * lumpy);
+    nrm.set(dir.x / R, dir.y / Ry, dir.z / R).normalize();
+    t1.set(rng.float(-1, 1), rng.float(-0.4, 0.4), rng.float(-1, 1)).cross(nrm).normalize();
+    t2.crossVectors(nrm, t1).normalize();
+    const L = L0 * rng.float(0.8, 1.2);
+    const pts = [
+      p.clone().addScaledVector(t1, -L * 0.45),
+      p.clone().addScaledVector(nrm, L * 0.07),
+      p.clone().addScaledVector(t1, L * 0.55).addScaledVector(nrm, -L * 0.05),
+    ];
+    const inner = 0.5 + 0.5 * (y * 0.5 + 0.5);
+    const ao0 = lerp(0.42, 0.7, inner) * (f < 0.75 ? 0.85 : 1);
+    const ao1 = lerp(0.75, 1.0, inner) * rng.float(0.92, 1.08);
+    addCard(leafB, pts, t2, L * 0.55, yc, ao0, ao1, nrm.clone());
+    if (lod === 0 && rng.chance(0.4)) addCard(leafB, pts, nrm, L * 0.42, yc, ao0 * 0.9, ao1 * 0.95, t2.clone());
+  }
+  // dense core (this is what blocks sight and bullets inside the crown)
+  const fillers = lod === 0 ? 6 : lod === 1 ? 3 : 2;
+  for (let fi = 0; fi < fillers; fi++) {
+    const a = (fi / fillers) * Math.PI;
+    const d = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+    const pts = [];
+    for (let sgm = 0; sgm <= 3; sgm++) pts.push(new THREE.Vector3(0, lerp(yb + Ry * 0.25, yc + Ry * 0.75, sgm / 3), 0));
+    addCard(leafB, pts, d, R * 0.95, yc, 0.32, 0.5, new THREE.Vector3(-d.z, 0, d.x));
+  }
+  return { trunk: trunkB.build(), leaves: leafB.build(), height: V.H, radius: R };
 }
 
 function buildConifer(variantName, lod, seed) {
@@ -192,6 +316,77 @@ function buildConifer(variantName, lod, seed) {
     }
   }
   return { trunk: trunkB.build(), leaves: isSnag ? null : leafB.build(), height: H, radius: V.R };
+}
+
+// --------------------------------------------------------------------------- v5.2 stylized
+// The stylized look (Ravine): solid crowns with a clear silhouette instead of alpha cards.
+// Spruce and fir: stacked tiers, each a cone with a jagged, drooping rim, shaded by a colour
+// ramp from the dark rim to the light top (rampTexture in textures.js) and lit with soft,
+// rounded normals; their size follows the same crown profile as the realistic trees, so sight
+// lines and bullets meet the same crown. Pine: a round crown of a few soft lumps. Dead snags are
+// built as before. A crown is a few hundred triangles; there are no alpha cards to sort or test.
+const STYLIZED_CROWN = { spruce: 'crownSpruce', fir: 'crownFir', pine: 'crownPine' };
+
+function buildStylized(variantName, lod, seed) {
+  const V = VARIANTS[variantName];
+  if (!STYLIZED_CROWN[variantName]) return buildConifer(variantName, lod, seed);
+  const rng = new RNG(seed);
+  const trunkB = new GeoBuilder(), leafB = new GeoBuilder();
+  const H = V.H;
+  buildTrunk(trunkB, H, V.r0 * 1.1, lod === 0 ? 7 : 5, lod === 0 ? 4 : 2, rng, seed * 0.37, 0.98, 0.12);
+  const yb = H * V.crownBase, crownH = H - yb;
+  const S = lod === 0 ? 14 : lod === 1 ? 10 : 7;
+  if (V.profile === 'round') {
+    // lumps: one on top, a ring of smaller ones below it
+    const n = lod === 0 ? 6 : lod === 1 ? 5 : 4;
+    const ico = new THREE.IcosahedronGeometry(1, lod === 0 ? 2 : 1);
+    const P = ico.attributes.position;
+    for (let b = 0; b < n; b++) {
+      const top = b === 0;
+      const a = (b / (n - 1)) * Math.PI * 2 + rng.float(-0.3, 0.3);
+      const c = top ? new THREE.Vector3(0, yb + crownH * 0.66, 0)
+        : new THREE.Vector3(Math.cos(a) * V.R * 0.55, yb + crownH * rng.float(0.32, 0.5), Math.sin(a) * V.R * 0.55);
+      const r = V.R * (top ? 0.72 : rng.float(0.5, 0.6));
+      const base = leafB.pos.length / 3;
+      for (let i = 0; i < P.count; i++) {
+        _n.set(P.getX(i), P.getY(i), P.getZ(i)).normalize();
+        const k = 1 + 0.08 * Math.sin(_n.x * 7 + _n.z * 5 + b);
+        _v.set(c.x + _n.x * r * k, c.y + _n.y * r * 0.78 * k, c.z + _n.z * r * k);
+        leafB.vert(_v, _n, 0.5, clamp(0.5 + _n.y * 0.5, 0, 1), 0.62 + 0.38 * (_n.y * 0.5 + 0.5));
+      }
+      for (let i = 0; i < P.count; i += 3) leafB.tri(base + i, base + i + 1, base + i + 2);
+    }
+    ico.dispose();
+    return { trunk: trunkB.build(), leaves: leafB.build(), height: H, radius: V.R };
+  }
+  const N = V.profile === 'fir' ? (lod === 0 ? 5 : lod === 1 ? 4 : 3) : (lod === 0 ? 6 : lod === 1 ? 5 : 4);
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N;
+    const y0 = yb + t0 * crownH * 0.94;
+    const y1 = yb + Math.min(1.03, (i + 1.45) / N) * crownH;
+    const R = Math.max(0.45, V.R * crownRadius(V.profile, t0 + 0.02) * 1.08);
+    const rot = rng.float(0, Math.PI * 2);
+    const rim = [], mid = [];
+    for (let k = 0; k <= S; k++) {
+      const a = rot + (k / S) * Math.PI * 2;
+      const kk = k % S;
+      const tip = kk % 2 === 0;
+      const rr = R * (tip ? 1.0 : 0.8) * (0.95 + 0.1 * Math.sin(kk * 2.3 + i));
+      const ca = Math.cos(a), sa = Math.sin(a);
+      _n.set(ca, 0.55, sa).normalize();
+      rim.push(leafB.vert(_v.set(ca * rr, y0 - (tip ? R * 0.12 : 0), sa * rr), _n, k / S, 0, 0.66));
+      _n.set(ca, 1.0, sa).normalize();
+      mid.push(leafB.vert(_v.set(ca * R * 0.6, lerp(y0, y1, 0.42), sa * R * 0.6), _n, k / S, 0.5, 0.86));
+    }
+    const apex = leafB.vert(_v.set(0, y1, 0), _up.set(0, 1, 0), 0.5, 1, 1.0);
+    const under = leafB.vert(_v.set(0, y0 + (y1 - y0) * 0.16, 0), _n.set(0, -1, 0), 0.5, 0.04, 0.4);
+    for (let k = 0; k < S; k++) {
+      leafB.tri(rim[k], mid[k], rim[k + 1]); leafB.tri(rim[k + 1], mid[k], mid[k + 1]);
+      leafB.tri(mid[k], apex, mid[k + 1]);
+      leafB.tri(rim[k + 1], under, rim[k]);
+    }
+  }
+  return { trunk: trunkB.build(), leaves: leafB.build(), height: H, radius: V.R };
 }
 
 // --------------------------------------------------------------------------- impostors
@@ -328,6 +523,7 @@ export class Forest {
     this.noise = new Simplex(seed + 23);
     this._buildVariants(renderer, textures);
     this._place();
+    this._buildGrid();
     this._buildInstances();
     this.frustum = new THREE.Frustum();
     this._pm = new THREE.Matrix4();
@@ -339,20 +535,27 @@ export class Forest {
     this.variants = {};
     for (const name of VARIANT_NAMES) {
       const V = VARIANTS[name];
-      const lod0 = buildConifer(name, 0, variantSeed(name));
-      const lod1 = buildConifer(name, 1, variantSeed(name));
-      const lod2 = buildConifer(name, 2, variantSeed(name));
+      const stylized = CONFIG.map.style === 'stylized' && STYLIZED_CROWN[name] && T[STYLIZED_CROWN[name]];
+      const build = V.broadleaf ? buildBroadleaf : stylized ? buildStylized : buildConifer;
+      const leafTex = V.spray && T[V.tex] ? leafSpray(T[V.tex], V.spray) : T[V.tex];
+      const lod0 = build(name, 0, variantSeed(name));
+      const lod1 = build(name, 1, variantSeed(name));
+      const lod2 = build(name, 2, variantSeed(name));
       const barkMat = new THREE.MeshStandardMaterial({
         map: T[V.bark].map, normalMap: T[V.bark].normalMap, roughness: 0.95, vertexColors: true,
       });
       patchFoliage(barkMat, { sway: 0.0025, flutter: 0, translucency: 0, noFlip: false, key: 'bark' });
       let leafMat = null;
-      if (V.tex) {
+      if (stylized) {
+        // solid crown: the colour ramp as its map (opaque), soft light, a little sway
+        leafMat = new THREE.MeshStandardMaterial({ map: T[STYLIZED_CROWN[name]], side: THREE.DoubleSide, vertexColors: true, roughness: 0.92 });
+        patchFoliage(leafMat, { sway: 0.003, flutter: 0, translucency: 0.12, key: 'crown' });
+      } else if (V.tex) {
         leafMat = new THREE.MeshStandardMaterial({
-          map: T[V.tex], alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.82,
+          map: leafTex, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true, roughness: 0.82,
           alphaToCoverage: CONFIG.render.msaa > 0,
         });
-        patchFoliage(leafMat, { sway: 0.004, flutter: 0.035, translucency: 0.35, key: 'needles' });
+        patchFoliage(leafMat, V.broadleaf ? { sway: 0.005, flutter: 0.05, translucency: 0.5, key: 'leaves' } : { sway: 0.004, flutter: 0.035, translucency: 0.35, key: 'needles' });
       }
       const width = V.R * 2.2, height = V.H * 1.02;
       const imp = bakeImpostor(renderer, [lod0.trunk, lod0.leaves], [barkMat, leafMat || barkMat], width, height);
@@ -363,8 +566,31 @@ export class Forest {
         alphaToCoverage: CONFIG.render.msaa > 0,
       });
       patchFoliage(impMat, { sway: 0.003, flutter: 0, translucency: 0.35, billboard: true, noFlip: false, key: 'impostor' });
-      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(T[V.tex]) : null, shadowBark: shadowOnlyMaterial(null) };
+      this.variants[name] = { V, lod0, lod1, lod2, barkMat, leafMat, impGeo, impMat, shadowLeaf: leafMat ? shadowOnlyMaterial(stylized ? T[STYLIZED_CROWN[name]] : leafTex) : null, shadowBark: shadowOnlyMaterial(null) };
     }
+  }
+
+  // Spatial hash of the trees (8 m cells) for treesNear().
+  _buildGrid() {
+    this._grid = new Map();
+    for (const t of this.trees) {
+      const k = `${Math.floor(t.x / 8)},${Math.floor(t.z / 8)}`;
+      let l = this._grid.get(k);
+      if (!l) { l = []; this._grid.set(k, l); }
+      l.push(t);
+    }
+  }
+
+  // Trees whose position is within r of (x, z) (roughly: whole cells).
+  treesNear(x, z, r) {
+    const out = [];
+    for (let j = Math.floor((z - r) / 8); j <= Math.floor((z + r) / 8); j++) {
+      for (let i = Math.floor((x - r) / 8); i <= Math.floor((x + r) / 8); i++) {
+        const l = this._grid.get(`${i},${j}`);
+        if (l) for (const t of l) out.push(t);
+      }
+    }
+    return out;
   }
 
   // Tree density function (0..1)
@@ -378,11 +604,32 @@ export class Forest {
     d *= smoothstep(1.3, 5, h);
     const nrm = t.normalAt(x, z);
     d *= 1 - smoothstep(0.2, 0.35, 1 - nrm.y);
+    // Tuscany: open, golden hillsides between the groves
+    if (CONFIG.map.biome === 'tuscany') d *= smoothstep(-0.25, 0.3, this.noise.fbm2(x / 70 + 3, z / 70 - 8, 2));
+    // beech: a closed high forest (fewer, much bigger trees: see the spacing in _place)
+    if (CONFIG.map.biome === 'beech') d = clamp(d * 1.25 + 0.15, 0, 1) * smoothstep(1.3, 3.5, h);
     return clamp(d, 0, 1);
   }
 
   _chooseVariant(x, z, h) {
     const r = this.rng.next();
+    const biome = CONFIG.map.biome;
+    if (biome === 'beech') {
+      // tall beech forest with younger beeches between, a dead tree now and then, and here and
+      // there a dark patch of planted spruce
+      if (r < 0.025) return 'snag';
+      if (this.noise.noise2(x / 75 + 40, z / 75) > 0.52) return 'spruce';
+      return this.rng.next() < 0.74 ? 'beech' : 'beechYoung';
+    }
+    if (biome === 'tuscany') {
+      // cypresses around the hamlets and along the ridges, olive groves on the benches,
+      // umbrella pines scattered over the rest
+      if (r < 0.02) return 'snag';
+      if (!this.terrain.isFree(x, z, 14)) return this.rng.next() < 0.7 ? 'cypress' : 'olive';
+      if (this.noise.noise2(x / 55 - 17, z / 55 + 5) > 0.18) return this.rng.next() < 0.85 ? 'olive' : 'cypress';
+      const q = this.rng.next();
+      return q < 0.45 ? 'stonepine' : q < 0.78 ? 'cypress' : 'olive';
+    }
     if (r < 0.04) return 'snag';
     // more pines toward the ridge (ridge heights differ between maps)
     const hn = clamp(h / (60 * CONFIG.map.ridgeHeightNorth / 64), 0, 1);
@@ -395,10 +642,11 @@ export class Forest {
   _place() {
     const t = this.terrain;
     const M = CONFIG.map;
-    const cell = CONFIG.trees.minSpacing;
+    const biome = CONFIG.map.biome;
+    const cell = biome === 'beech' ? 7.2 : biome === 'tuscany' ? 5.0 : CONFIG.trees.minSpacing;
     const hx = M.length / 2 + 10, hz = M.width / 2 + 10;
     // play area (+10 m margin)
-    const accept = 0.62;
+    const accept = biome === 'beech' ? 0.8 : 0.62;
     const cellsX = Math.ceil((hx * 2) / cell), cellsZ = Math.ceil((hz * 2) / cell);
     const occ = new Int32Array(cellsX * cellsZ).fill(-1);
     for (let j = 0; j < cellsZ; j++) {
@@ -407,6 +655,7 @@ export class Forest {
         const z = -hz + (j + this.rng.float(0.1, 0.9)) * cell;
         const d = this.density(x, z);
         if (this.rng.next() > d * accept) continue;
+        if (!t.isFree(x, z, 0.8)) continue;
         // spacing check against neighbours
         let ok = true;
         for (let dj = -1; dj <= 1 && ok; dj++) for (let di = -1; di <= 1 && ok; di++) {
@@ -424,20 +673,7 @@ export class Forest {
       }
     }
     this.playCount = this.trees.length;
-    // outer scenery: coarser grid
-    const E = CONFIG.map.terrainExtent / 2 - 40;
-    const oc = 9;
-    for (let z = -E; z < E; z += oc) {
-      for (let x = -E; x < E; x += oc) {
-        const px = x + this.rng.float(0, oc), pz = z + this.rng.float(0, oc);
-        if (Math.abs(px) < hx && Math.abs(pz) < hz) continue;
-        const h = t.heightAt(px, pz);
-        if (h > 175) continue;
-        const d = this.density(px, pz) * (1 - smoothstep(110, 175, h));
-        if (this.rng.next() > d * 0.85) continue;
-        this._addTree(px, pz, true);
-      }
-    }
+    // (no scenery forest outside since v5.1: the play area ends in bare mountains)
   }
 
   _addTree(x, z, outer) {
@@ -486,18 +722,25 @@ export class Forest {
       this.colors.set(t.tint, i * 3);
     }
     this.buckets = {};
+    // Near trees are drawn in full detail, which the water's mirror image skips for speed; these
+    // lighter copies of the same instances stand in for them in the reflection only (otherwise
+    // the river mirrors a bare bank and the sky, and looks milky).
+    this.reflectionProxies = [];
     for (const name of VARIANT_NAMES) {
       const v = this.variants[name];
       const c = counts[name];
       const l0 = [makeInstanced(v.lod0.trunk, v.barkMat, c)];
       if (v.lod0.leaves) l0.push(makeInstanced(v.lod0.leaves, v.leafMat, c));
+      const rp = [makeInstanced(v.lod1.trunk, v.barkMat, c)];
+      if (v.lod1.leaves) rp.push(makeInstanced(v.lod1.leaves, v.leafMat, c));
+      for (const m of rp) { m.visible = false; m.castShadow = false; this.reflectionProxies.push(m); }
       const l1 = [makeInstanced(v.lod1.trunk, v.barkMat, c)];
       if (v.lod1.leaves) l1.push(makeInstanced(v.lod1.leaves, v.leafMat, c));
       const imp = [makeInstanced(v.impGeo, v.impMat, c)];
       const sh = [makeInstanced(v.lod2.trunk, v.shadowBark, c, { castShadow: true, receiveShadow: false })];
       if (v.lod2.leaves) sh.push(makeInstanced(v.lod2.leaves, v.shadowLeaf, c, { castShadow: true, receiveShadow: false }));
-      for (const mm of [...l0, ...l1, ...imp, ...sh]) this.group.add(mm);
-      this.buckets[name] = { l0: new Bucket(l0), l1: new Bucket(l1), imp: new Bucket(imp), sh: new Bucket(sh) };
+      for (const mm of [...l0, ...l1, ...imp, ...sh, ...rp]) this.group.add(mm);
+      this.buckets[name] = { l0: new Bucket([...l0, ...rp]), l1: new Bucket(l1), imp: new Bucket(imp), sh: new Bucket(sh) };
     }
   }
 
@@ -605,6 +848,28 @@ function buildShrub(lod, rng) {
   return B.build();
 }
 
+// v5.2 stylized: a bush of a few soft lumps (no alpha cards), shaded by a colour ramp.
+function buildStylizedShrub(lod, rng) {
+  const B = new GeoBuilder();
+  const ico = new THREE.IcosahedronGeometry(1, lod === 0 ? 1 : 0);
+  const P = ico.attributes.position;
+  const n = lod === 0 ? 4 : 2;
+  for (let b = 0; b < n; b++) {
+    const a = (b / n) * Math.PI * 2 + rng.float(-0.4, 0.4);
+    const c = b === 0 ? new THREE.Vector3(0, 0.55, 0) : new THREE.Vector3(Math.cos(a) * 0.38, rng.float(0.35, 0.45), Math.sin(a) * 0.38);
+    const r = b === 0 ? 0.55 : rng.float(0.38, 0.46);
+    const base = B.pos.length / 3;
+    for (let i = 0; i < P.count; i++) {
+      _n.set(P.getX(i), P.getY(i), P.getZ(i)).normalize();
+      _v.set(c.x + _n.x * r, Math.max(0.02, c.y + _n.y * r * 0.85), c.z + _n.z * r);
+      B.vert(_v, _n, 0.5, clamp((_v.y) / 1.1, 0, 1), 0.65 + 0.35 * (_n.y * 0.5 + 0.5));
+    }
+    for (let i = 0; i < P.count; i += 3) B.tri(base + i, base + i + 1, base + i + 2);
+  }
+  ico.dispose();
+  return B.build();
+}
+
 export class Undergrowth {
   constructor(scene, terrain, forest, textures, seed) {
     this.terrain = terrain;
@@ -619,11 +884,15 @@ export class Undergrowth {
     fernTex.rotation = -Math.PI / 2;
     const fernMat = new THREE.MeshStandardMaterial({ map: fernTex, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.85, alphaToCoverage: CONFIG.render.msaa > 0 });
     patchFoliage(fernMat, { sway: 0.05, flutter: 0.03, translucency: 0.7, key: 'fern' });
-    const shrubMat = new THREE.MeshStandardMaterial({ map: textures.leaves, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.8, alphaToCoverage: CONFIG.render.msaa > 0 });
-    patchFoliage(shrubMat, { sway: 0.04, flutter: 0.025, translucency: 0.6, key: 'shrub' });
+    const solidBush = CONFIG.map.style === 'stylized' && textures.crownBush;
+    const shrubMat = solidBush
+      ? new THREE.MeshStandardMaterial({ map: textures.crownBush, vertexColors: true, roughness: 0.92 })
+      : new THREE.MeshStandardMaterial({ map: textures.leaves, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.8, alphaToCoverage: CONFIG.render.msaa > 0 });
+    patchFoliage(shrubMat, solidBush ? { sway: 0.02, flutter: 0, translucency: 0.12, key: 'bush' } : { sway: 0.04, flutter: 0.025, translucency: 0.6, key: 'shrub' });
+    const shrub = solidBush ? buildStylizedShrub : buildShrub;
     const types = [
       { name: 'fern', lod0: buildFern(0, this.rng), lod1: buildFern(1, this.rng), mat: fernMat, radius: 0.9 },
-      { name: 'shrub', lod0: buildShrub(0, this.rng), lod1: buildShrub(1, this.rng), mat: shrubMat, radius: 0.8 },
+      { name: 'shrub', lod0: shrub(0, this.rng), lod1: shrub(1, this.rng), mat: shrubMat, radius: 0.8 },
     ];
     this.types = types;
     this.items = [];
@@ -663,6 +932,7 @@ export class Undergrowth {
       const x = this.rng.float(-hx, hx), z = this.rng.float(-hz, hz);
       const h = t.heightAt(x, z);
       if (h < 0.9) continue;
+      if (!t.isFree(x, z, 0.3)) continue;
       const canopy = t.canopyAt(x, z);
       const nrm = t.normalAt(x, z);
       if (nrm.y < 0.8) continue;

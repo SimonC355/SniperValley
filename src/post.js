@@ -284,9 +284,104 @@ class SunShaftsPass extends Pass {
   }
 }
 
+// v5.3: the eye adapting. The scene's brightness (log luminance on a 64×36 grid, the middle of
+// the view weighted most; measured before the rifle is drawn) is followed over a second or two,
+// and the final pass opens up or stops down toward a set mid grey, within limits (config.js
+// render.autoExposure): the dark conifer forest opens up by up to 1.8 stops, Tuscany's sunny
+// hills by about half a stop, and a view full of bright sky stops down.
+const AE_LUM_FRAG = /* glsl */`
+uniform sampler2D tDiffuse;
+uniform vec2 uCell;
+varying vec2 vUv;
+void main() {
+  float s = 0.0;
+  for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
+    vec3 c = texture2D(tDiffuse, vUv + (vec2(float(x), float(y)) - 1.5) * 0.25 * uCell).rgb;
+    s += clamp(log2(max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-4)), -10.0, 3.0);
+  }
+  gl_FragColor = vec4(s / 16.0, 0.0, 0.0, 1.0);
+}`;
+// 64×36 -> 8×6 blocks: (sum of weight × log luminance, sum of weights)
+const AE_BLOCK_FRAG = /* glsl */`
+uniform sampler2D tLum;
+void main() {
+  ivec2 b = ivec2(gl_FragCoord.xy) * 8;
+  b.y = int(gl_FragCoord.y) * 6;
+  float s = 0.0, ws = 0.0;
+  for (int y = 0; y < 6; y++) for (int x = 0; x < 8; x++) {
+    ivec2 q = b + ivec2(x, y);
+    vec2 p = (vec2(q) + 0.5) / vec2(64.0, 36.0) - 0.5;
+    float w = exp(-dot(p * vec2(1.0, 0.8), p * vec2(1.0, 0.8)) * 7.0);
+    s += texelFetch(tLum, q, 0).r * w;
+    ws += w;
+  }
+  gl_FragColor = vec4(s, ws, 0.0, 1.0);
+}`;
+const AE_ADAPT_FRAG = /* glsl */`
+uniform sampler2D tBlocks, tPrev;
+uniform float uDt, uFirst;
+void main() {
+  vec2 s = vec2(0.0);
+  for (int y = 0; y < 6; y++) for (int x = 0; x < 8; x++) s += texelFetch(tBlocks, ivec2(x, y), 0).rg;
+  float target = s.x / max(s.y, 1e-4);
+  float prev = texelFetch(tPrev, ivec2(0), 0).r;
+  // stopping down for bright light is quicker than opening up in the dark
+  float k = uFirst > 0.5 ? 1.0 : 1.0 - exp(-uDt * (target > prev ? 2.2 : 1.1));
+  gl_FragColor = vec4(mix(prev, target, k), 0.0, 0.0, 1.0);
+}`;
+
+class AutoExposurePass extends Pass {
+  constructor(out) {
+    super();
+    this.needsSwap = false;
+    this.out = out;   // the final pass's tAdapt uniform
+    const mk = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    this.lum = mk(64, 36);
+    this.blocks = mk(8, 6);
+    this.adapt = [mk(1, 1), mk(1, 1)];
+    this.cur = 0;
+    this.first = true;
+    const mat = (frag, uniforms) => new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false });
+    this.lumMat = mat(AE_LUM_FRAG, { tDiffuse: { value: null }, uCell: { value: new THREE.Vector2(1 / 64, 1 / 36) } });
+    this.blockMat = mat(AE_BLOCK_FRAG, { tLum: { value: this.lum.texture } });
+    this.adaptMat = mat(AE_ADAPT_FRAG, { tBlocks: { value: this.blocks.texture }, tPrev: { value: null }, uDt: { value: 0 }, uFirst: { value: 1 } });
+    this.quad = new FullScreenQuad(null);
+  }
+
+  render(renderer, writeBuffer, readBuffer, deltaTime) {
+    this.lumMat.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.lum);
+    this.quad.material = this.lumMat;
+    this.quad.render(renderer);
+    renderer.setRenderTarget(this.blocks);
+    this.quad.material = this.blockMat;
+    this.quad.render(renderer);
+    const prev = this.adapt[this.cur], next = this.adapt[1 - this.cur];
+    const u = this.adaptMat.uniforms;
+    u.tPrev.value = prev.texture;
+    u.uDt.value = Math.min(Math.max(deltaTime || 0, 0), 0.1);
+    u.uFirst.value = this.first ? 1 : 0;
+    renderer.setRenderTarget(next);
+    this.quad.material = this.adaptMat;
+    this.quad.render(renderer);
+    this.cur = 1 - this.cur;
+    this.first = false;
+    this.out.value = next.texture;
+  }
+
+  // the adapted log2 luminance (debugging and tuning)
+  read(renderer) {
+    const buf = new Uint16Array(4);
+    renderer.readRenderTargetPixels(this.adapt[this.cur], 0, 0, 1, 1, buf);
+    return THREE.DataUtils.fromHalfFloat(buf[0]);
+  }
+}
+
 const FINAL_FRAG = /* glsl */`
 uniform sampler2D tDiffuse;
 uniform float uExposure;
+uniform sampler2D tAdapt;  // v5.3: the adapted log2 luminance (AutoExposurePass)
+uniform vec4 uAE;          // its key (log2), strength, most stops down, most stops up
 uniform float uVignette;
 uniform float uGrain;
 uniform float uTime;
@@ -298,6 +393,11 @@ uniform float uOutside;
 uniform float uFade;
 uniform vec2 uReticleOffset;
 uniform vec3 uGrade; // saturation, contrast, warmth
+uniform float uSharpen;
+uniform float uSuppress;  // v5.2: under fire 0..1 (colour drains, the edges darken and blur)
+uniform float uKick;      // v5.2: own shot, the picture jumps (vertical blur) 0..1
+uniform vec3 uEye;        // v5.2: scope eye box: offset (lens units) and the tunnel as the rifle comes up
+uniform vec2 uMirage;     // v5.2: heat shimmer strength, crosswind (m/s)
 varying vec2 vUv;
 
 vec3 RRTAndODTFit(vec3 v) {
@@ -325,20 +425,53 @@ void main() {
   float r = length(c);
   const float lensR = 0.47;
   vec3 col;
+  vec2 suv = uv;   // where the picture is read (the lens bends it)
   if (uScope > 0.001) {
     float rn = clamp(r / lensR, 0.0, 1.2);
     vec2 cd = c * (1.0 + 0.085 * rn * rn * uScope);
+    // heat mirage: fine wavy bands that boil upward and drift with the crosswind
+    if (uMirage.x > 0.001) {
+      float tm = uTime;
+      float a = sin(cd.y * 380.0 - tm * 5.0 + sin(cd.x * 55.0 - uMirage.y * tm * 1.6) * 1.8);
+      float b = sin(cd.y * 230.0 + cd.x * 28.0 - tm * 3.7 - uMirage.y * cd.x * 4.0);
+      cd += vec2(a * 0.6 + b * 0.4, a * b * 0.8) * uMirage.x * 0.0028;
+    }
     vec2 duv = cd / vec2(uAspect, 1.0) + 0.5;
+    suv = duv;
     vec2 dir = c / max(r, 1e-4);
     float ca = 0.004 * rn * rn * uScope;
     vec2 cao = dir * ca / vec2(uAspect, 1.0);
     col.r = texture2D(tDiffuse, duv + cao).r;
     col.g = texture2D(tDiffuse, duv).g;
     col.b = texture2D(tDiffuse, duv - cao).b;
+    col = max(col, 0.0);
   } else {
-    col = texture2D(tDiffuse, uv).rgb;
+    col = max(texture2D(tDiffuse, uv).rgb, 0.0);
+    // v5: light sharpening (an unsharp mask limited to a share of the pixel's own brightness,
+    // so edges get crisper without halos)
+    if (uSharpen > 0.001) {
+      vec2 px = 1.0 / uRes;
+      vec3 nb = texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb
+              + texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb + texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb;
+      vec3 detail = col - nb * 0.25;
+      col = max(col + clamp(detail, -0.3 * col, 0.3 * col) * uSharpen, 0.0);
+    }
   }
-  col *= uExposure;
+  // v5.2: blur. The own shot smears the picture vertically for a moment; under fire the edges
+  // of the view go soft.
+  float sEdge = smoothstep(0.18, 0.75, length((vUv - 0.5) * vec2(uAspect * 0.75, 1.0)));
+  float sb = uSuppress * sEdge * 4.0;
+  if (uKick > 0.01 || sb > 0.05) {
+    vec2 px = 1.0 / uRes;
+    vec2 kv = vec2(0.0, uKick * 7.0) * px;
+    vec2 sv = vec2(sb) * px;
+    vec3 acc = texture2D(tDiffuse, suv + kv).rgb + texture2D(tDiffuse, suv - kv).rgb
+             + texture2D(tDiffuse, suv + kv * 2.0).rgb + texture2D(tDiffuse, suv - kv * 2.0).rgb
+             + texture2D(tDiffuse, suv + vec2(sv.x, 0.0)).rgb + texture2D(tDiffuse, suv - vec2(sv.x, 0.0)).rgb
+             + texture2D(tDiffuse, suv + vec2(0.0, sv.y)).rgb + texture2D(tDiffuse, suv - vec2(0.0, sv.y)).rgb;
+    col = mix(col, acc * 0.125, clamp(max(uKick * 1.2, sb * 0.5), 0.0, 0.85));
+  }
+  col *= uExposure * exp2(clamp((uAE.x - texture2D(tAdapt, vec2(0.5)).r) * uAE.y, -uAE.z, uAE.w));
   // grading in linear HDR: log-space contrast around mid grey, saturation, split toning
   col = 0.18 * exp2(log2(max(col, vec3(1e-5)) / 0.18) * uGrade.y);
   float lumG = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -360,6 +493,11 @@ void main() {
     float mask = smoothstep(lensR + px * 1.5, lensR - px * 1.5, r);
     float rim = smoothstep(lensR - px * 10.0, lensR, r) * mask;
     col = mix(col, col * 0.25 + vec3(0.02), rim * uScope);
+    // v5.2: the eye box. With the eye off the scope's axis (a fast swing, walking, the recoil)
+    // a dark crescent closes in from one side; as the rifle comes up the picture opens from a tunnel.
+    float er = lensR * 1.12 * (1.0 - 0.6 * uEye.z);
+    float eyeShade = smoothstep(er, er * mix(0.9, 0.7, uEye.z), length(c - uEye.xy));
+    col *= mix(1.0, mix(0.02, 1.0, eyeShade), uScope);
     // reticle (slightly offset by sway lag)
     vec2 q = c - uReticleOffset;
     float lw = px * 0.9;
@@ -378,6 +516,13 @@ void main() {
     float ret = clamp(max(max(h, v), max(max(hp, vp), dots)), 0.0, 1.0) * step(r, lensR);
     col = mix(col, vec3(0.01), ret * 0.92 * uScope);
     col *= mix(1.0, mask, uScope);
+  }
+
+  // v5.2: suppressed: the colour drains and the view narrows
+  if (uSuppress > 0.001) {
+    float lumS = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(col, vec3(lumS), uSuppress * 0.55);
+    col *= 1.0 - uSuppress * sEdge * 0.6;
   }
 
   // damage / outside zone tint
@@ -410,6 +555,12 @@ export class PostFX {
     this.composer.addPass(this.ssao);
     this.shafts = new SunShaftsPass();
     this.composer.addPass(this.shafts);
+    this.adaptTex = { value: new THREE.DataTexture(new Uint8Array(4), 1, 1) };
+    this.adaptTex.value.needsUpdate = true;
+    const AE = CONFIG.render.autoExposure;
+    this.ae = new AutoExposurePass(this.adaptTex);
+    this.ae.enabled = !!AE && CONFIG.map.style !== 'stylized';
+    this.composer.addPass(this.ae);
     if (vmScene) {
       this.vmPass = new RenderPass(vmScene, vmCamera);
       this.vmPass.clear = false;
@@ -425,8 +576,11 @@ export class PostFX {
       uniforms: {
         tDiffuse: { value: null },
         uExposure: { value: CONFIG.render.exposure },
-        uVignette: { value: CONFIG.render.vignette },
-        uGrain: { value: CONFIG.render.grain },
+        tAdapt: this.adaptTex,
+        uAE: { value: new THREE.Vector4(0, 0, 0, 0) },   // set below when the eye adapts
+        // the stylized look: clean picture (no grain), a softer vignette, little sharpening
+        uVignette: { value: CONFIG.map.style === 'stylized' ? 0.16 : CONFIG.render.vignette },
+        uGrain: { value: CONFIG.map.style === 'stylized' ? 0 : CONFIG.render.grain },
         uTime: { value: 0 },
         uScope: { value: 0 },
         uAspect: { value: 1 },
@@ -436,10 +590,16 @@ export class PostFX {
         uFade: { value: 0 },
         uReticleOffset: { value: new THREE.Vector2() },
         uGrade: { value: new THREE.Vector3(CONFIG.grade.saturation, CONFIG.grade.contrast, CONFIG.grade.warmth) },
+        uSharpen: { value: CONFIG.map.style === 'stylized' ? 0.25 : CONFIG.render.sharpen ?? 0.6 },
+        uSuppress: { value: 0 },
+        uKick: { value: 0 },
+        uEye: { value: new THREE.Vector3() },
+        uMirage: { value: new THREE.Vector2() },
       },
     }));
     this.composer.addPass(this.final);
     this.uniforms = this.final.material.uniforms;
+    if (this.ae.enabled) this.uniforms.uAE.value.set(AE.key, AE.strength, AE.down, AE.up);
   }
 
   setSize(w, h, pixelRatio) {

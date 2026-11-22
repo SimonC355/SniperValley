@@ -91,6 +91,15 @@ export function installHeightFog() {
 #ifdef USE_FOG
   gl_FragColor.rgb = heightFog(gl_FragColor.rgb, vFogWorldPos);
 #endif`;
+  // Stylized look: matte surfaces (ground, rocks, bark, cloth) don't mirror the sky. Seen at a
+  // low angle the sky reflection turned the sandy river banks into blue-grey glass; glossy things
+  // (the rifle, the scope) keep it. The soft light from the sky (irradiance) is untouched.
+  if (CONFIG.map.style === 'stylized' && !C.lights_fragment_maps.includes('STYLIZED_MATTE')) {
+    C.lights_fragment_maps += /* glsl */`
+#if defined( RE_IndirectSpecular ) && defined( STANDARD )
+  radiance *= mix(1.0, 0.15, smoothstep(0.35, 0.75, roughnessFactor)); // STYLIZED_MATTE
+#endif`;
+  }
 }
 
 // Patch a MeshStandardMaterial used for alpha-cut foliage cards:
@@ -98,8 +107,16 @@ export function installHeightFog() {
 //  - leaf flutter at card tips (uv.x)
 //  - normals are NOT flipped for back faces (we author volumetric "spherical" normals)
 //  - alpha is boosted per mip level so cards don't thin out with distance
-//  - simple sun translucency when back-lit
+//  - sun translucency when back-lit, where the sun reaches the leaf (its shadow and the clouds)
 //  - optional cylindrical billboarding (impostors)
+// The light chunk with the sun's colour after its shadow and the clouds kept in foliageSun.
+function lightsKeepingSun() {
+  const C = THREE.ShaderChunk.lights_fragment_begin;
+  const call = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  const i = C.indexOf('directionalLights[ i ]'), j = C.indexOf(call, i);
+  if (i < 0 || j < 0) return 'foliageSun = uSunColor;\n' + C;
+  return C.slice(0, j) + 'foliageSun = directLight.color;\n\t\t' + C.slice(j);
+}
 export function patchFoliage(material, { sway = 0.004, flutter = 0.03, translucency = 0.6, billboard = false, noFlip = true, key = 'foliage' } = {}) {
   material.defines = material.defines || {};
   material.defines.FOLIAGE_SWAY = f(sway);
@@ -180,11 +197,28 @@ varying float vFoliageAO;`)
 #endif
 #include <alphatest_fragment>`)
       .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '#ifndef NO_FLIP\nnormal *= faceDirection;\n#endif'))
+      // a card seen from its back (its normal turned away from you, as on the sun side of a crown
+      // when you look toward the sun) doesn't mirror the light: at that grazing angle the Fresnel
+      // term went to 1 and the sun side of every crown turned cream-white like paper
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+{
+  float facing = smoothstep(-0.05, 0.3, dot(normal, normalize(vViewPosition)));
+  material.specularColor *= facing;
+  material.specularColorBlended *= facing;
+  material.specularF90 *= facing;
+}`)
+      .replace('#include <lights_fragment_begin>', 'vec3 foliageSun = vec3(0.0);\n' + lightsKeepingSun())
+      // light through the leaves: only where the sun reaches them (the crown's rim glows when
+      // back-lit, its shaded inside stays dark; it all glowed like paper before), and the
+      // colour deeper than the leaf's own (light passing through a leaf is filtered twice)
       .replace('#include <opaque_fragment>', `
 {
   vec3 vdir = normalize(-vViewPosition);
   float tr = pow(max(dot(-vdir, uSunDirView), 0.0), 3.0);
-  outgoingLight += diffuseColor.rgb * uSunColor * tr * FOLIAGE_TRANSLUCENCY * (0.35 + 0.65 * vFoliageAO);
+  vec3 through = diffuseColor.rgb * min(diffuseColor.rgb * 2.4 + 0.3, vec3(1.2));
+  vec3 tl = through * foliageSun * tr * FOLIAGE_TRANSLUCENCY * (0.35 + 0.65 * vFoliageAO) * 1.4;
+  // softly limited: a light, yellow-green fern frond against the sun glowed like a lamp
+  outgoingLight += tl / (1.0 + max(tl.r, max(tl.g, tl.b)) * 0.6);
 }
 #include <opaque_fragment>`);
   };

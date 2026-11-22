@@ -1,5 +1,5 @@
 // Shooting: bolt-action fire, hitscan (default) or simulated projectiles (optional travel
-// time, drop and wind), hit resolution against body hitboxes, impacts, tracers, near-miss
+// time, drop and wind), hit resolution against body hitboxes, impacts, bullet trails, near-miss
 // cracks and reveal events (shot sound + muzzle flash).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
@@ -19,6 +19,8 @@ export class Combat {
     this.onKill = null;       // (shooter, victim, distance, part, hitPoint)
     this.onShot = null;       // (shooter)
     this.listener = null;     // the player combatant (for near-miss cracks)
+    this.onNearMiss = null;   // (shooter, miss, closestPoint, dir): a bullet passed the listener within feel.suppressRadius
+    this.onNearImpact = null; // (shooter, distance, point, kind): a bullet landed that close to the listener
     this.onFired = null;      // (shooter, origin, dir, time) for shots simulated here (LAN sync)
     this.onClaim = null;      // (shooter, victim, part, point, dist) when claimHits is on
     this.claimHits = false;   // joined LAN client: hits are claims the host confirms
@@ -86,6 +88,16 @@ export class Combat {
     // reveal: muzzle flash (visual) + shot (sound)
     if (!shooter.isPlayer) this.effects.muzzleFlash(muzzle);
     else { this.effects.light.position.copy(muzzle); this.effects.light.intensity = 250; this.effects.lightT = 0.06; }
+    // v5.2: fired prone, the muzzle blast kicks up the ground in front of the rifle
+    if (shooter.stance === 'prone' && CONFIG.feel.muzzleDust) {
+      _v.set(dir.x, 0, dir.z);
+      if (_v.lengthSq() > 1e-6) {
+        _v.normalize();
+        const gx = muzzle.x + _v.x * 0.5, gz = muzzle.z + _v.z * 0.5;
+        const gy = this.terrain.heightAt(gx, gz);
+        if (gy > CONFIG.map.waterLevel + 0.05 && muzzle.y - gy < 1.4) this.effects.blastDust(_p.set(gx, gy + 0.08, gz), _v);
+      }
+    }
     this.audio.shot(muzzle, shooter.isPlayer);
     const base = { position: muzzle.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id };
     this.bus.emit({ type: 'flash', ...base });
@@ -96,7 +108,10 @@ export class Combat {
       this.projectiles.push({
         shooter, pos: origin.clone(), vel: dir.clone().multiplyScalar(W.ballistics.muzzleVelocity),
         start: muzzle.clone(), origin: origin.clone(), age: 0, travelled: 0, nearMissDone: false, visual,
+        trail: this.effects.startTrail(muzzle, shooter.isPlayer),   // follows the real arc
       });
+      const pr = this.projectiles[this.projectiles.length - 1];
+      pr.trailGen = pr.trail ? pr.trail.gen : 0;   // the pooled trail may be reused for a later shot
     } else {
       this._trace(shooter, origin, dir, W.range, muzzle, time, 0, { visual });
     }
@@ -127,6 +142,7 @@ export class Combat {
     }
     const endT = best ? best.t : tWorld;
     const end = new THREE.Vector3().copy(origin).addScaledVector(dir, endT);
+    this.lastEnd = end;
     // near-miss crack for the listening player
     const L = this.listener;
     if (L && L.alive && L !== shooter && (!best || best.c !== L) && !ctx.nearMissDone) {
@@ -137,11 +153,13 @@ export class Combat {
       // the supersonic crack is heard well off the bullet's path (a whip-like "PISK")
       if (miss < CONFIG.audio.crackRadius && travelledBefore + t > 12) {
         ctx.nearMissDone = true;
-        this.audio.crack(closest, miss);
-        if (this.onNearMiss && miss < 5) this.onNearMiss(shooter, miss);
+        this.audio.crack(closest, miss, dir);
+        if (this.onNearMiss && miss < CONFIG.feel.suppressRadius) this.onNearMiss(shooter, miss, closest, dir);
       }
     }
-    if (tracerFrom) this.effects.tracer(tracerFrom, end);
+    // the trail's head reaches the impact a moment later: the puff waits for it
+    const trail = tracerFrom ? this.effects.bulletTrail(tracerFrom, end, shooter.isPlayer) : null;
+    const arrive = trail ? trail.lastT : 0;
     if (best) {
       // a replayed shot stops at the body; the host's kill message does the rest
       if (ctx.visual) return true;
@@ -152,9 +170,14 @@ export class Combat {
     }
     if (kind) {
       const k = kind === 'terrain' ? (this.terrain.canopyAt(end.x, end.z) > 0.5 ? 'forest' : 'ground') : (kind === 'log' || kind === 'stump' ? 'tree' : kind);
-      this.effects.impact(end, k === 'forest' ? 'ground' : k);
+      this.effects.impact(end, k === 'forest' ? 'ground' : k, undefined, arrive);
       this.audio.impact(end, k);
       this.bus.emit({ type: 'impact', position: end.clone(), time, sourceTeam: shooter.team, sourceId: shooter.id, kind: k });
+      // v5.2: a bullet landing right next to the listening player suppresses them too
+      if (L && L.alive && L !== shooter && this.onNearImpact) {
+        const di = end.distanceTo(L.eyePos(_o));
+        if (di < CONFIG.feel.suppressRadius) this.onNearImpact(shooter, di, end, k);
+      }
       return true;
     }
     return false;
@@ -190,15 +213,19 @@ export class Combat {
         const len = seg.length();
         if (len < 1e-6) continue;
         const dir = seg.clone().divideScalar(len);
+        const tStep = pr.age + (dt - remaining);
+        if (pr.trail && pr.trail.gen !== pr.trailGen) pr.trail = null;
         if (this._trace(pr.shooter, prev, dir, len, null, time, pr.travelled, pr)) {
-          // show the whole flight path as a tracer on impact
-          this.effects.tracer(pr.start, prev.clone().addScaledVector(dir, len * 0.5));
+          if (pr.trail) pr.trail.add(this.lastEnd, tStep - h * (1 - prev.distanceTo(this.lastEnd) / len));
           done = true;
-        }
+        } else if (pr.trail) pr.trail.add(pr.pos, tStep);
         pr.travelled += len;
       }
       pr.age += dt;
-      if (done || pr.age > 3 || pr.pos.y < -50) this.projectiles.splice(i, 1);
+      if (done || pr.age > 3 || pr.pos.y < -50) {
+        if (pr.trail) pr.trail.close();
+        this.projectiles.splice(i, 1);
+      }
     }
   }
 }

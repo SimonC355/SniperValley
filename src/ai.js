@@ -70,7 +70,7 @@ export class SpotMap {
         if (T.waterDepthAt(x, z) > 0) continue;
         const n = T.normalAt(x, z);
         if (n.y < 0.84) continue;
-        if (world.query(x, z, 1.1, ['tree', 'rock', 'log', 'stump']).length) continue;
+        if (world.query(x, z, 1.1, ['tree', 'rock', 'log', 'stump', 'solid']).length) continue;
         const h = T.heightAt(x, z);
         const eye = new THREE.Vector3(x, h + 0.55, z);
         let vis = 0;
@@ -81,7 +81,7 @@ export class SpotMap {
           if (world.lineOfSight(eye, tp)) vis++;
         }
         if (vis === 0) continue;
-        const cover = Math.min(1, world.query(x, z, 3, ['tree', 'rock', 'bush', 'log', 'stump']).length * 0.3);
+        const cover = Math.min(1, world.query(x, z, 3, ['tree', 'rock', 'bush', 'log', 'stump', 'solid']).length * 0.3);
         const height = dz / dzMax;
         const canopy = T.canopyAt(x, z);
         cands.push({
@@ -674,8 +674,24 @@ class AIBrain {
     let mx = dx / dist, mz = dz / dist;
     if (this.detour && time < this.detour.until) { mx = this.detour.x; mz = this.detour.z; }
     // avoid trunks/rocks ahead
-    const ahead = g.world.query(cb.pos.x + mx * 1.6, cb.pos.z + mz * 1.6, 1.6, ['tree', 'rock', 'stump', 'log']);
+    const ahead = g.world.query(cb.pos.x + mx * 1.6, cb.pos.z + mz * 1.6, 1.6, ['tree', 'rock', 'stump', 'log', 'solid']);
     for (const o of ahead) {
+      if (o.kind === 'solid') {
+        // a building or wall: walk along its nearest side, the way that leads to the target
+        const ox = cb.pos.x - o.x, oz = cb.pos.z - o.z;
+        const lx = ox * o.cos + oz * o.sin, lz = -ox * o.sin + oz * o.cos;
+        let nlx = lx - clamp(lx, -o.hx, o.hx), nlz = lz - clamp(lz, -o.hz, o.hz);
+        const nl = Math.hypot(nlx, nlz);
+        if (nl < 1e-6) { if (Math.abs(lx) / o.hx > Math.abs(lz) / o.hz) { nlx = Math.sign(lx); nlz = 0; } else { nlx = 0; nlz = Math.sign(lz); } } else { nlx /= nl; nlz /= nl; }
+        const nx = nlx * o.cos - nlz * o.sin, nz = nlx * o.sin + nlz * o.cos;
+        if (mx * nx + mz * nz < 0.2) {
+          let tx = -nz, tz = nx;
+          if (tx * dx + tz * dz < 0) { tx = -tx; tz = -tz; }
+          mx = tx * 0.9 + nx * 0.1; mz = tz * 0.9 + nz * 0.1;
+          const l = Math.hypot(mx, mz) || 1; mx /= l; mz /= l;
+        }
+        break;
+      }
       if (o.kind === 'log') {
         // walk around a fallen log: follow it toward the end nearer the target
         const lx = o.b.x - o.a.x, lz = o.b.z - o.a.z, ll = Math.hypot(lx, lz) || 1;

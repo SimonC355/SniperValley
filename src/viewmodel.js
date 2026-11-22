@@ -2,9 +2,94 @@
 // animation, recoil, look sway and the player's own muzzle flash. Rendered in a separate
 // scene on top of the world (depth cleared) so it never clips into trees.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CONFIG } from './config.js';
 import { FX_TEX } from './effects.js';
 import { RNG } from './noise.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RIFLE_SCOPE_Y, RIFLE_BORE_Y, BOLT_AT } from './sculptedsniper.js';
+import { sniperPieces, sniperBodyMaterial, ghillieCardMaterial } from './sniperparts.js';
+
+const _up = new THREE.Vector3(), _g = new THREE.Vector3(), _xAxis = new THREE.Vector3(1, 0, 0);
+
+function meshAt(geo, mat, x, y, z) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  return m;
+}
+
+// Fine stipple/noise for roughness and bump (cerakote, rubber, gloves).
+function stippleTexture() {
+  const n = 128;
+  const d = new Uint8Array(n * n * 4);
+  let s = 12345;
+  for (let i = 0; i < n * n; i++) {
+    s = (s * 16807) % 2147483647;
+    const v = 150 + ((s / 2147483647) * 105) | 0;
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255;
+  }
+  const t = new THREE.DataTexture(d, n, n, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(6, 6);
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
+// A picatinny rail along -z: base and cross slots.
+function railGeometry(len, w) {
+  const parts = [new THREE.BoxGeometry(w * 0.7, 0.005, len)];
+  const n = Math.floor(len / 0.01);
+  for (let i = 0; i < n; i++) {
+    const g = new THREE.BoxGeometry(w, 0.004, 0.0052);
+    g.translate(0, 0.0045, -len / 2 + (i + 0.5) * (len / n));
+    parts.push(g);
+  }
+  return mergeGeometries(parts);
+}
+
+// Heavy barrel with flutes: a star cross-section extruded along the bore.
+function flutedBarrel(r0, r1, len, flutes) {
+  const sh = new THREE.Shape();
+  const N = flutes * 4;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const k = i % 4;
+    const r = k === 1 || k === 2 ? r0 * 0.86 : r0;
+    if (i === 0) sh.moveTo(Math.cos(a) * r, Math.sin(a) * r); else sh.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  const g = new THREE.ExtrudeGeometry(sh, { depth: len * 0.6, bevelEnabled: false, steps: 1 });
+  g.translate(0, 0, -len * 0.3);
+  // plain taper toward the muzzle and a short chamber section
+  const tip = new THREE.CylinderGeometry(r1, r0 * 0.93, len * 0.3, 20);
+  tip.rotateX(Math.PI / 2);
+  tip.translate(0, 0, -len * 0.45);
+  const ch = new THREE.CylinderGeometry(r0, r0 * 1.12, len * 0.12, 20);
+  ch.rotateX(-Math.PI / 2);
+  ch.translate(0, 0, len * 0.36);
+  const parts = [g.toNonIndexed(), tip.toNonIndexed(), ch.toNonIndexed()];
+  for (const p of parts) { p.deleteAttribute('uv'); }
+  const m = mergeGeometries(parts);
+  m.computeVertexNormals();
+  return m;
+}
+
+// A turret knob with knurled ridges.
+function knurledKnob(r, h) {
+  const parts = [new THREE.CylinderGeometry(r, r, h, 24)];
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const g = new THREE.BoxGeometry(0.0016, h * 0.8, 0.0016);
+    g.translate(Math.cos(a) * r, 0, Math.sin(a) * r);
+    parts.push(g);
+  }
+  const cap = new THREE.CylinderGeometry(r * 0.55, r * 0.9, h * 0.25, 20);
+  cap.translate(0, h * 0.6, 0);
+  parts.push(cap);
+  return mergeGeometries(parts.map((p) => { const q = p.toNonIndexed(); q.deleteAttribute('uv'); return q; }));
+}
 
 function cyl(r0, r1, len, seg = 16) {
   const g = new THREE.CylinderGeometry(r0, r1, len, seg, 1);
@@ -23,112 +108,162 @@ export class Viewmodel {
     vmScene.add(this.sun);
     this.hemi = new THREE.HemisphereLight(0x9fb4c8, 0x2a2416, 0.5);
     vmScene.add(this.hemi);
+    // the stylized look: the world's own soft sky light and clean sun, so the rifle and the
+    // sleeves have the same colours as the snipers out there
+    if (CONFIG.map.style === 'stylized' && CONFIG.sun.hemi) {
+      this.sun.color.setHex(CONFIG.sun.color);
+      this.hemi.color.setHex(CONFIG.sun.hemi.sky);
+      this.hemi.groundColor.setHex(CONFIG.sun.hemi.ground);
+      this.hemi.intensity = 1.1;
+      vmScene.environmentIntensity = 0.4;
+    }
 
-    const metal = new THREE.MeshStandardMaterial({ color: 0x1c1d1b, metalness: 0.75, roughness: 0.42 });
-    const metalDark = new THREE.MeshStandardMaterial({ color: 0x111211, metalness: 0.6, roughness: 0.5 });
-    const stockMat = new THREE.MeshStandardMaterial({ color: 0x3d3c2a, roughness: 0.85, metalness: 0 });
-    const lensMat = new THREE.MeshStandardMaterial({ color: 0x0b1420, metalness: 0.9, roughness: 0.08, emissive: 0x020406 });
-    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x2d2a1f, roughness: 0.9 });
-    const stripMat = new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.4, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+    // v5: a modern precision rifle in a chassis (it used to be a handful of plain cylinders).
+    // Materials: cerakote (stippled), black anodised aluminium, blued steel, rubber and
+    // coated glass; a small noise texture breaks up the roughness so it doesn't look plastic.
+    const stipple = stippleTexture();
+    const cerakote = new THREE.MeshStandardMaterial({ color: 0x6b6446, roughness: 0.72, metalness: 0.1, roughnessMap: stipple, bumpMap: stipple, bumpScale: 0.6 });
+    const anod = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.46, metalness: 0.7, roughnessMap: stipple });
+    const metal = new THREE.MeshStandardMaterial({ color: 0x232527, roughness: 0.32, metalness: 0.85, roughnessMap: stipple });
+    const metalDark = new THREE.MeshStandardMaterial({ color: 0x101112, roughness: 0.45, metalness: 0.65, roughnessMap: stipple });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x141513, roughness: 0.92, metalness: 0, bumpMap: stipple, bumpScale: 1.2 });
+    const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x06101a, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, emissive: 0x03100c, emissiveIntensity: 0.6, sheen: 1, sheenColor: 0x2a6a50 });
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x2f2c21, roughness: 0.88, bumpMap: stipple, bumpScale: 1.5 });
+    // the sculpted sniper's pieces: stylized (its rifle, sleeves, gloves and solid leaves) or
+    // realistic (this rifle, with its sleeves, gloves and jute)
+    const pieces = sniperPieces();
+    this.stylized = !!pieces && pieces.look === 'stylized' && CONFIG.map.style === 'stylized';
+    const realArms = !!pieces && pieces.look === 'real' && CONFIG.map.style !== 'stylized';
+    const stripMat = this.stylized
+      ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: true, roughness: 0.9 })
+      : new THREE.MeshStandardMaterial({ map: textures.ghillie, alphaTest: 0.4, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+    // (leaves: both sides lit like the front, as if the light came through them)
+    if (this.stylized) {
+      stripMat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>',
+          THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
+      };
+    }
 
     const rifle = new THREE.Group();
     this.rifle = rifle;
-    // stock: side profile extruded along X
-    const sh = new THREE.Shape();
-    sh.moveTo(0.30, -0.105);
-    sh.lineTo(0.30, 0.03);
-    sh.lineTo(0.12, 0.035);
-    sh.lineTo(0.05, 0.012);
-    sh.lineTo(0.0, 0.012);
-    sh.lineTo(-0.44, 0.008);
-    sh.lineTo(-0.44, -0.035);
-    sh.lineTo(-0.05, -0.04);
-    sh.lineTo(-0.02, -0.1);
-    sh.lineTo(0.035, -0.1);
-    sh.lineTo(0.06, -0.045);
-    sh.lineTo(0.16, -0.05);
-    sh.lineTo(0.30, -0.105);
-    const stockGeo = new THREE.ExtrudeGeometry(sh, { depth: 0.042, bevelEnabled: true, bevelThickness: 0.007, bevelSize: 0.006, bevelSegments: 2 });
-    stockGeo.translate(0, 0, -0.021);
-    // shape is in XY; map shape-x -> rifle z, shape-y -> rifle y
-    stockGeo.rotateY(-Math.PI / 2);
-    const stock = new THREE.Mesh(stockGeo, stockMat);
-    rifle.add(stock);
-    const receiver = new THREE.Mesh(cyl(0.017, 0.017, 0.24), metal);
-    receiver.position.set(0, 0.022, -0.08);
-    rifle.add(receiver);
-    const barrel = new THREE.Mesh(cyl(0.012, 0.0095, 0.6), metal);
-    barrel.position.set(0, 0.022, -0.5);
-    rifle.add(barrel);
-    const muzzle = new THREE.Mesh(cyl(0.013, 0.013, 0.05), metalDark);
-    muzzle.position.set(0, 0.022, -0.815);
-    rifle.add(muzzle);
-    this.muzzlePoint = new THREE.Vector3(0, 0.022, -0.86);
-    // scope
+    const add = (geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.rotation.set(rx, ry, rz);
+      rifle.add(m);
+      return m;
+    };
+    const rbox = (w, h, d, r = 0.004, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, Math.min(r, w / 2, h / 2, d / 2) * 0.999);
+    const BORE = 0.022;
+    // receiver and the long rail on top
+    add(rbox(0.036, 0.042, 0.23, 0.008), anod, 0, BORE, -0.07);
+    add(railGeometry(0.3, 0.021), anod, 0, BORE + 0.024, -0.1);
+    // fluted heavy barrel
+    const barrel = flutedBarrel(0.0118, 0.0098, 0.58, 8);
+    add(barrel, metal, 0, BORE, -0.48);
+    // muzzle brake with ports
+    add(rbox(0.032, 0.03, 0.066, 0.006), metalDark, 0, BORE, -0.805);
+    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(0.003, 0.016, 0.011), new THREE.MeshBasicMaterial({ color: 0x050505 }), sx * 0.0162, BORE, -0.785 - i * 0.018);
+    this.muzzlePoint = new THREE.Vector3(0, BORE, -0.845);
+    // chassis: handguard with M-LOK slots, magazine well, grip, skeleton stock
+    add(rbox(0.054, 0.05, 0.42, 0.012, 3), cerakote, 0, BORE - 0.004, -0.28);
+    for (const sx of [-1, 1]) for (let i = 0; i < 5; i++) add(rbox(0.004, 0.009, 0.034, 0.002), metalDark, sx * 0.0265, BORE - 0.006, -0.15 - i * 0.055);
+    for (let i = 0; i < 4; i++) add(rbox(0.012, 0.004, 0.034, 0.002), metalDark, 0, BORE - 0.03, -0.18 - i * 0.06);
+    add(rbox(0.048, 0.03, 0.2, 0.008), cerakote, 0, BORE - 0.03, -0.05);
+    add(rbox(0.026, 0.07, 0.07, 0.006), anod, 0, BORE - 0.075, -0.06, 0.12);            // magazine
+    add(rbox(0.028, 0.012, 0.075, 0.004), metalDark, 0, BORE - 0.11, -0.064, 0.12);     // its base plate
+    const guard = add(new THREE.TorusGeometry(0.022, 0.0035, 8, 16, Math.PI), anod, 0, BORE - 0.05, 0.022);
+    guard.rotation.set(Math.PI, Math.PI / 2, 0);
+    add(rbox(0.006, 0.022, 0.006, 0.002), metal, 0, BORE - 0.05, 0.02, 0.35);           // trigger
+    add(rbox(0.03, 0.095, 0.04, 0.012, 3), rubber, 0, BORE - 0.085, 0.068, -0.32);      // grip
+    add(rbox(0.032, 0.03, 0.26, 0.01), cerakote, 0, BORE + 0.002, 0.17);                // stock top tube
+    add(rbox(0.036, 0.03, 0.15, 0.012, 3), rubber, 0, BORE + 0.03, 0.19);               // cheek riser
+    add(rbox(0.026, 0.024, 0.22, 0.008), cerakote, 0, BORE - 0.07, 0.19, -0.24);        // lower spine
+    add(rbox(0.04, 0.15, 0.03, 0.012, 3), rubber, 0, BORE - 0.035, 0.305);              // butt pad
+    add(rbox(0.02, 0.04, 0.03, 0.006), anod, 0, BORE - 0.105, 0.24);                    // monopod
+    // folded bipod under the handguard
+    add(rbox(0.04, 0.02, 0.03, 0.005), anod, 0, BORE - 0.04, -0.44);
+    for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(0.0045, 0.004, 0.2, 8), anod, sx * 0.012, BORE - 0.042, -0.34, Math.PI / 2);
+    // scope: lathe profile (eyepiece, 30 mm tube, turret saddle, objective bell)
     const scope = new THREE.Group();
     scope.position.set(0, 0.088, 0);
-    const tube = new THREE.Mesh(cyl(0.0135, 0.0135, 0.25), metalDark);
-    tube.position.z = -0.12;
-    scope.add(tube);
-    const obj = new THREE.Mesh(cyl(0.0135, 0.026, 0.06), metalDark);
-    obj.position.z = -0.27;
-    scope.add(obj);
-    const objEnd = new THREE.Mesh(cyl(0.026, 0.026, 0.05), metalDark);
-    objEnd.position.z = -0.325;
-    scope.add(objEnd);
-    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.023, 24), lensMat);
-    lens.position.z = -0.351;
-    lens.rotation.y = Math.PI;
+    const prof = [
+      [0.0, 0.07], [0.0205, 0.07], [0.022, 0.064], [0.0215, 0.035], [0.017, 0.022], [0.015, 0.012], [0.015, -0.12], [0.0152, -0.2], [0.02, -0.235],
+      [0.0285, -0.27], [0.029, -0.33], [0.0275, -0.337], [0.0, -0.337],
+    ];
+    // (lathe points run front to rear so the faces point outward; the lathe's y becomes z)
+    const scopeGeo = new THREE.LatheGeometry(prof.slice().reverse().map(([r, z]) => new THREE.Vector2(r, z)), 40);
+    scopeGeo.rotateX(Math.PI / 2);
+    scope.add(new THREE.Mesh(scopeGeo, anod));
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.0262, 40), lensMat);
+    lens.position.z = -0.3375; lens.rotation.y = Math.PI;
     scope.add(lens);
-    const ocu = new THREE.Mesh(cyl(0.021, 0.0135, 0.07), metalDark);
-    ocu.position.z = 0.03;
-    scope.add(ocu);
-    const ocuLens = new THREE.Mesh(new THREE.CircleGeometry(0.018, 24), lensMat);
-    ocuLens.position.z = 0.066;
+    const ocuLens = new THREE.Mesh(new THREE.CircleGeometry(0.019, 32), lensMat);
+    ocuLens.position.z = 0.0705;
     scope.add(ocuLens);
-    const turretT = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.03, 12), metalDark);
-    turretT.position.set(0, 0.02, -0.12);
-    scope.add(turretT);
-    const turretS = turretT.clone();
-    turretS.rotation.z = Math.PI / 2;
-    turretS.position.set(0.02, 0, -0.12);
-    scope.add(turretS);
-    for (const z of [-0.04, -0.17]) {
-      const ring = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.06, 0.018), metal);
-      ring.position.set(0, -0.035, z);
+    scope.add(meshAt(rbox(0.04, 0.034, 0.05, 0.008), anod, 0, 0, -0.075));                // turret saddle
+    scope.add(meshAt(knurledKnob(0.0125, 0.02), metalDark, 0, 0.026, -0.075));             // elevation
+    const wind = meshAt(knurledKnob(0.011, 0.016), metalDark, 0.026, 0, -0.075);
+    wind.rotation.z = -Math.PI / 2;
+    scope.add(wind);
+    const para = meshAt(knurledKnob(0.009, 0.012), metalDark, -0.024, 0, -0.075);
+    para.rotation.z = Math.PI / 2;
+    scope.add(para);
+    scope.add(meshAt(new THREE.TorusGeometry(0.0205, 0.0025, 6, 32), metalDark, 0, 0, 0.03));   // power ring
+    for (const z of [-0.025, -0.15]) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.0165, 0.004, 8, 24), anod);
+      ring.position.set(0, 0, z);
       scope.add(ring);
+      scope.add(meshAt(rbox(0.026, 0.03, 0.016, 0.004), anod, 0, -0.03, z));
     }
     rifle.add(scope);
     // bolt (handle rotates about the bore axis, then slides back)
     const bolt = new THREE.Group();
-    bolt.position.set(0, 0.022, 0.015);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.06, 8), metal);
+    bolt.position.set(0, BORE, 0.015);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.0055, 0.058, 10), metal);
     handle.rotation.z = Math.PI / 2;
-    handle.position.set(0.035, -0.006, 0);
+    handle.position.set(0.034, -0.006, 0);
     bolt.add(handle);
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.011, 12, 8), metal);
+    const knob = new THREE.Mesh(rbox(0.024, 0.02, 0.02, 0.009, 3), anod);   // tactical knob
     knob.position.set(0.068, -0.012, 0);
     bolt.add(knob);
-    const boltBody = new THREE.Mesh(cyl(0.012, 0.012, 0.06), metal);
+    const boltBody = new THREE.Mesh(new THREE.CylinderGeometry(0.0115, 0.0115, 0.062, 16), metal);
+    boltBody.rotation.x = Math.PI / 2;
     boltBody.position.z = 0.02;
     bolt.add(boltBody);
     this.bolt = bolt;
     rifle.add(bolt);
-    // trigger guard
-    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.003, 6, 12, Math.PI), metal);
-    guard.rotation.y = Math.PI / 2;
-    guard.rotation.x = Math.PI;
-    guard.position.set(0, -0.035, -0.05);
-    rifle.add(guard);
 
-    // burlap strips wrapped on stock and forend
+    // stylized look: the snipers' own sculpted rifle instead, raised so its scope sits where
+    // this one's does (on the eye when aiming) and moved forward so its stock stays clear of
+    // the camera; its bolt handle turns and slides like this one's
+    const sculpted = this.stylized;
+    const vmMat = sculpted || realArms ? sniperBodyMaterial() : null;
     const rng = new RNG(5);
-    const strips = this._strips(rng, [
-      { z0: 0.08, z1: 0.28, y: -0.03, n: 10 },
-      { z0: -0.4, z1: -0.12, y: -0.02, n: 12 },
-      { z0: -0.25, z1: -0.05, y: 0.11, n: 6 },
-    ], 0.05, 0.11);
-    rifle.add(new THREE.Mesh(strips, stripMat));
+    if (sculpted) {
+      rifle.clear();
+      const dy = 0.088 - RIFLE_SCOPE_Y, dz = -0.045;
+      const body = new THREE.Mesh(pieces.rifle, vmMat);
+      body.position.set(0, dy, dz);
+      rifle.add(body);
+      const sb = new THREE.Group();
+      sb.position.set(0, RIFLE_BORE_Y + dy, 0.015);
+      const handleMesh = new THREE.Mesh(pieces.bolt, vmMat);
+      handleMesh.position.set(BOLT_AT[0], BOLT_AT[1] - RIFLE_BORE_Y, BOLT_AT[2] + dz - 0.015);
+      sb.add(handleMesh);
+      this.bolt = sb;
+      rifle.add(sb);
+      this.muzzlePoint.set(0, RIFLE_BORE_Y + dy, -0.865 + dz - 0.01);
+    } else {
+      // burlap strips wrapped on stock and forend
+      const strips = this._strips(rng, [
+        { z0: 0.08, z1: 0.28, y: -0.03, n: 10 },
+        { z0: -0.4, z1: -0.12, y: -0.02, n: 12 },
+        { z0: -0.25, z1: -0.05, y: 0.11, n: 6 },
+      ], 0.05, 0.11);
+      rifle.add(new THREE.Mesh(strips, stripMat));
+    }
 
     // arms with ghillie sleeves
     const arms = new THREE.Group();
@@ -148,8 +283,21 @@ export class Viewmodel {
       g.add(new THREE.Mesh(sleeve, stripMat));
       return g;
     };
-    arms.add(mkArm(new THREE.Vector3(0.0, -0.06, -0.02), new THREE.Vector3(0.17, -0.28, 0.28)));
-    arms.add(mkArm(new THREE.Vector3(0.0, -0.045, -0.33), new THREE.Vector3(-0.17, -0.3, -0.02)));
+    if (realArms) {
+      // the realistic ghillie's sleeves and fingerless gloves round this rifle's pistol grip and
+      // under its handguard, with jute hanging from the sleeves
+      arms.add(new THREE.Mesh(pieces.fpArms.solid, vmMat));
+      arms.add(new THREE.Mesh(pieces.fpArms.strands, ghillieCardMaterial(textures)));
+    } else if (sculpted) {
+      // the stylized sniper's own sleeves and fingerless gloves (the right fist round the
+      // pistol grip, the left hand cupped under the fore-end), leaves on the sleeves
+      const fp = pieces.fpArms;
+      arms.add(new THREE.Mesh(fp.solid, vmMat));
+      arms.add(new THREE.Mesh(fp.leaves, stripMat));
+    } else {
+      arms.add(mkArm(new THREE.Vector3(0.0, -0.06, -0.02), new THREE.Vector3(0.17, -0.28, 0.28)));
+      arms.add(mkArm(new THREE.Vector3(0.0, -0.045, -0.33), new THREE.Vector3(-0.17, -0.3, -0.02)));
+    }
     rifle.add(arms);
 
     // own muzzle flash
@@ -160,6 +308,24 @@ export class Viewmodel {
 
     rifle.traverse((o) => { o.frustumCulled = false; });
     vmCamera.add(rifle);
+
+    // v5.2: the empty case thrown out to the right when the bolt comes back
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0xc9a04a, roughness: 0.28, metalness: 1, envMap: environment || null, envMapIntensity: 1.2 });
+    const caseGeo = mergeGeometries([
+      new THREE.CylinderGeometry(0.0062, 0.0064, 0.04, 12).translate(0, -0.006, 0),
+      new THREE.CylinderGeometry(0.0039, 0.0062, 0.008, 12).translate(0, 0.018, 0),
+      new THREE.CylinderGeometry(0.0039, 0.0039, 0.007, 12).translate(0, 0.0255, 0),
+    ]);
+    this.brass = new THREE.Mesh(caseGeo, brassMat);
+    this.brass.visible = false;
+    this.brass.frustumCulled = false;
+    vmCamera.add(this.brass);
+    this.brassV = new THREE.Vector3();
+    this.brassW = new THREE.Vector3();
+    this.brassT = -1;
+    this.ejectPort = new THREE.Vector3(0.024, BORE + 0.012, -0.02);
+    this.ejected = true;
+    this.vmCamera = vmCamera;
 
     this.hip = new THREE.Vector3(0.17, -0.185, -0.43);
     this.ads = new THREE.Vector3(0, -0.088, -0.13);
@@ -231,10 +397,42 @@ export class Viewmodel {
   }
 
   onFire(time) {
+    this.ejected = false;
     this.kick = 1;
     this.flashT = 0.055;
     this.shotTime = time;
     this.flash.material.rotation = Math.random() * Math.PI;
+  }
+
+  // The case: out of the ejection port at the end of the back stroke, spinning away to the
+  // right and falling. It lives in camera space, so turning the view swings it the other way
+  // (as if it stayed where it was in the world).
+  _updateBrass(dt, ts, player, dyaw, dpitch) {
+    const b = this.brass;
+    if (!this.ejected && ts >= 0.6) {
+      this.ejected = true;
+      this.rifle.updateMatrixWorld(true);
+      b.position.copy(this.rifle.localToWorld(this.ejectPort.clone()));
+      this.vmCamera.worldToLocal(b.position);
+      b.quaternion.copy(this.rifle.quaternion);
+      b.rotateX(Math.PI / 2);
+      this.brassV.set(1.1 + Math.random() * 0.5, 0.8 + Math.random() * 0.4, 0.15 + Math.random() * 0.3);
+      this.brassW.set(10 + Math.random() * 8, (Math.random() - 0.5) * 6, 6 + Math.random() * 6);
+      this.brassT = 0;
+    }
+    if (this.brassT < 0) { b.visible = false; return; }
+    this.brassT += dt;
+    if (this.brassT > 0.8 || b.position.y < -0.7) { this.brassT = -1; b.visible = false; return; }
+    b.visible = this.rifle.visible;
+    // the view turned: the case stays put in the world
+    const p = player.pitch;
+    const upC = _up.set(0, Math.cos(p), -Math.sin(p));
+    b.position.applyAxisAngle(upC, -dyaw); this.brassV.applyAxisAngle(upC, -dyaw);
+    b.position.applyAxisAngle(_xAxis, -dpitch); this.brassV.applyAxisAngle(_xAxis, -dpitch);
+    // gravity is "down" in the world, seen from the camera
+    this.brassV.addScaledVector(_g.set(0, -Math.cos(p), Math.sin(p)), 9.8 * dt);
+    b.position.addScaledVector(this.brassV, dt);
+    b.rotateX(this.brassW.x * dt); b.rotateY(this.brassW.y * dt); b.rotateZ(this.brassW.z * dt);
   }
 
   update(dt, time, player, sunDirView, inShade) {
@@ -266,6 +464,7 @@ export class Viewmodel {
     const back = ph(0.4, 0.62) - ph(0.62, 0.85);
     this.bolt.rotation.z = up * 1.3;
     this.bolt.position.z = 0.015 + back * 0.085;
+    this._updateBrass(dt, ts, player, dyaw, dpitch);
     const cycling = ts < 1.05 ? Math.sin(Math.min(1, ts / 1.05) * Math.PI) : 0;
     this.rifle.rotation.set(k * 0.12 - this.sprintBlend * 0.5 + cycling * 0.05, -0.03 * (1 - ads) + this.sprintBlend * 0.5, 0.02 * (1 - ads) - cycling * 0.18);
     // own muzzle flash
@@ -282,6 +481,9 @@ export class Viewmodel {
     const sun = typeof inShade === 'number' ? inShade : inShade ? 0 : 1;
     this.shade = THREE.MathUtils.lerp(this.shade, 0.15 + 0.85 * sun, 1 - Math.exp(-dt * 4));
     this.sun.position.copy(sunDirView);
-    this.sun.intensity = 2.6 * this.shade;
+    // looking toward a low sun the rifle stands against the light: only its edges catch it (at
+    // full strength its top glowed like polished brass from end to end)
+    const backlit = THREE.MathUtils.smoothstep(-sunDirView.z, 0.1, 0.75);
+    this.sun.intensity = 2.6 * this.shade * (1 - 0.6 * backlit);
   }
 }
