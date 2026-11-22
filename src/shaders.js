@@ -215,8 +215,10 @@ varying float vFoliageAO;`)
 {
   vec3 vdir = normalize(-vViewPosition);
   float tr = pow(max(dot(-vdir, uSunDirView), 0.0), 3.0);
-  vec3 through = diffuseColor.rgb * min(diffuseColor.rgb * 3.2 + 0.25, vec3(1.6));
-  outgoingLight += through * foliageSun * tr * FOLIAGE_TRANSLUCENCY * (0.35 + 0.65 * vFoliageAO) * 1.6;
+  vec3 through = diffuseColor.rgb * min(diffuseColor.rgb * 2.4 + 0.3, vec3(1.2));
+  vec3 tl = through * foliageSun * tr * FOLIAGE_TRANSLUCENCY * (0.35 + 0.65 * vFoliageAO) * 1.4;
+  // softly limited: a light, yellow-green fern frond against the sun glowed like a lamp
+  outgoingLight += tl / (1.0 + max(tl.r, max(tl.g, tl.b)) * 0.6);
 }
 #include <opaque_fragment>`);
   };

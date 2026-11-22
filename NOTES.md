@@ -1414,8 +1414,9 @@ themselves, weakest points first.
 - **Light through leaves** (`patchFoliage`): the sun's colour after its shadow and the clouds
   (kept from the light loop as `foliageSun`) instead of the bare sun colour, so only the leaves
   the sun reaches glow: a crown's rim when back-lit, its inside stays dark. The colour is the
-  leaf's albedo × (3.2 × albedo + 0.25), capped at 1.6: deeper than the leaf, as light filtered
-  twice. Strength × 1.6.
+  leaf's albedo × (2.4 × albedo + 0.3), capped at 1.2: deeper than the leaf, as light filtered
+  twice. Strength × 1.4, then softly limited (÷ (1 + 0.6 × its brightest channel)): a light,
+  yellow-green fern frond against the sun first glowed like a lamp and bloomed.
 - **The rifle against the sun** (`viewmodel.js`): the viewmodel's sun drops to 40% when you look
   toward it (−sunDirView.z from 0.1 to 0.75). Cerakote roughness 0.62 → 0.72 (metalness 0.15 →
   0.1), anodised 0.38 → 0.46.
